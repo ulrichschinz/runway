@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_context-mode_context-mode__ctx_batch_execute",
+      "mcp__plugin_context-mode_context-mode__ctx_search",
+      "WebSearch",
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(uv pip *)",
+      "Bash(docker compose build *)",
+      "Bash(docker compose *)",
+      "mcp__plugin_context-mode_context-mode__ctx_execute",
+      "Read(//home/uli/projects/sit/taskwarrior/**)",
+      "Read(//home/uli/projects/**)",
+      "Read(//home/uli/**)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

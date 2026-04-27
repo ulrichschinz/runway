@@ -1,0 +1,9 @@
+data/
+users.db
+.env
+.claude/
+backend/.venv/
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
