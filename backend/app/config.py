@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     data_root: Path = Path("/app/data")
     db_path: str = "/app/users.db"
     allow_registration: bool = True
+    webhook_secret: str = ""
+    webhook_user: str = ""
 
     class Config:
         env_file = ".env"
