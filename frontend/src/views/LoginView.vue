@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-indigo-50 dark:bg-gray-900 flex items-center justify-center px-4">
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-sm p-8">
-      <h1 class="text-2xl font-bold text-indigo-600 mb-1">TaskGTD</h1>
+      <h1 class="text-2xl font-bold text-indigo-600 mb-1">Runway</h1>
       <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Sign in to your tasks</p>
 
       <div class="space-y-4">

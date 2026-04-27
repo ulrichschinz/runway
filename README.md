@@ -1,6 +1,10 @@
-# TaskGTD
+# Runway
 
-Self-hosted GTD web app wrapping [Taskwarrior](https://taskwarrior.org/) (v3). Multi-user, mobile-friendly, dark mode.
+> *In GTD, the "Runway" is where you are right now — the ground level of next actions,*
+> *the things you can actually do today. Before you can reach altitude, you need a clear runway.*
+
+Self-hosted GTD web app wrapping [Taskwarrior](https://taskwarrior.org/) (v3).  
+Built by [Agentic Reach](https://agenticreach.com). Multi-user, mobile-friendly, dark mode.
 
 ## Stack
 
