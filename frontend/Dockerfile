@@ -1,7 +1,7 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN --network=host npm ci
+RUN npm ci
 COPY . .
 RUN npm run build
 
