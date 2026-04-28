@@ -6,6 +6,7 @@ import WaitingView from '../views/WaitingView.vue'
 import SomedayView from '../views/SomedayView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
 import AllTasksView from '../views/AllTasksView.vue'
+import SettingsView from '../views/SettingsView.vue'
 
 const routes = [
   { path: '/login', component: LoginView, meta: { public: true } },
@@ -17,6 +18,7 @@ const routes = [
   { path: '/projects', component: ProjectsView },
   { path: '/projects/:name', component: ProjectsView },
   { path: '/all', component: AllTasksView },
+  { path: '/settings', component: SettingsView },
 ]
 
 const router = createRouter({
