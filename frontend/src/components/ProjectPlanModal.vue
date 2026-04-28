@@ -107,9 +107,18 @@
           <div class="bg-indigo-50 dark:bg-indigo-900/20 rounded-lg px-3 py-2 text-xs text-indigo-700 dark:text-indigo-300">
             Jetzt bewerten und ordnen: Was ist wichtig? Was kommt zuerst? Unwichtiges streichen.
           </div>
-          <div v-if="!form.organized.length" class="text-center py-6 space-y-3">
+          <div class="flex gap-2">
+            <input
+              v-model="newOrganized"
+              @keydown.enter.prevent="addOrganized"
+              class="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Punkt hinzufügen + Enter"
+            />
+            <button @click="addOrganized" class="px-3 py-2 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-medium">Hinzu</button>
+          </div>
+          <div v-if="!form.organized.length" class="text-center py-4 space-y-3">
             <p class="text-xs text-gray-400 dark:text-gray-500">
-              {{ form.brainstorm.length ? 'Ideen aus dem Brainstorming übernehmen und dann sortieren.' : 'Erst im Brainstorming Ideen sammeln.' }}
+              {{ form.brainstorm.length ? 'Ideen aus dem Brainstorming übernehmen oder oben direkt eingeben.' : 'Oben direkt eingeben oder erst im Brainstorming Ideen sammeln.' }}
             </p>
             <button
               v-if="form.brainstorm.length"
@@ -238,6 +247,7 @@ const savedAt = ref(false)
 const errorMsg = ref('')
 const activeTab = ref(0)
 const newIdea = ref('')
+const newOrganized = ref('')
 const creating = ref(null)
 const createdIds = ref(new Set())
 
@@ -281,6 +291,13 @@ function addIdea() {
   if (!text) return
   form.value.brainstorm.push({ id: uid(), text })
   newIdea.value = ''
+}
+
+function addOrganized() {
+  const text = newOrganized.value.trim()
+  if (!text) return
+  form.value.organized.push({ id: uid(), text })
+  newOrganized.value = ''
 }
 
 function removeIdea(id) {
