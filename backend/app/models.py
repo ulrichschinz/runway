@@ -75,6 +75,23 @@ class Token(BaseModel):
 
 class UserInfo(BaseModel):
     username: str
+    role: str = 'user'
+    full_name: str = ''
+    email: str = ''
+
+
+class UserProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class SiteSettings(BaseModel):
+    allow_registration: bool
 
 
 class BrainstormItem(BaseModel):

@@ -42,6 +42,13 @@ CREATE TABLE IF NOT EXISTS projects (
 )
 """
 
+CREATE_SITE_SETTINGS = """
+CREATE TABLE IF NOT EXISTS site_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+)
+"""
+
 
 async def get_db():
     async with aiosqlite.connect(settings.db_path) as db:
@@ -54,16 +61,30 @@ def _generate_api_key() -> str:
     return secrets.token_urlsafe(32)
 
 
+async def get_allow_registration(db) -> bool:
+    async with db.execute("SELECT value FROM site_settings WHERE key='allow_registration'") as cur:
+        row = await cur.fetchone()
+    if row:
+        return row["value"] == "true"
+    return settings.allow_registration
+
+
 async def init_db():
     async with aiosqlite.connect(settings.db_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute(CREATE_USERS)
-        # add api_key column to existing databases
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN api_key TEXT")
-            await db.commit()
-        except Exception:
-            pass
+        # migrations: add new columns to existing databases
+        for col_sql in [
+            "ALTER TABLE users ADD COLUMN api_key TEXT",
+            "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
+            "ALTER TABLE users ADD COLUMN full_name TEXT DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''",
+        ]:
+            try:
+                await db.execute(col_sql)
+                await db.commit()
+            except Exception:
+                pass
         # generate api_key for users that don't have one
         async with db.execute("SELECT username FROM users WHERE api_key IS NULL") as cur:
             rows = await cur.fetchall()
@@ -72,8 +93,16 @@ async def init_db():
                 "UPDATE users SET api_key=? WHERE username=?",
                 (_generate_api_key(), row["username"]),
             )
+        # set uli as admin
+        await db.execute("UPDATE users SET role='admin' WHERE username='uli' AND role='user'")
         await db.execute(CREATE_PROJECT_PLANS)
         await db.execute(CREATE_PROJECTS)
+        await db.execute(CREATE_SITE_SETTINGS)
+        # seed allow_registration from env if not set
+        await db.execute(
+            "INSERT OR IGNORE INTO site_settings (key, value) VALUES ('allow_registration', ?)",
+            ("true" if settings.allow_registration else "false",),
+        )
         await db.execute("""
             INSERT OR IGNORE INTO projects (username, name, purpose, principles, vision, brainstorm, organized, updated_at)
             SELECT username, project_name, purpose, principles, vision, brainstorm, organized, updated_at

@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP
 from app.database import init_db
-from app.routers import auth, tasks, gtd, projects, inbox
+from app.routers import auth, tasks, gtd, projects, inbox, admin
 
 
 @asynccontextmanager
@@ -31,6 +31,7 @@ app.include_router(tasks.router)
 app.include_router(gtd.router)
 app.include_router(projects.router)
 app.include_router(inbox.router)
+app.include_router(admin.router)
 
 
 @app.get("/health", summary="Health check", description="Returns ok if the service is running.")

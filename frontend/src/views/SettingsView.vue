@@ -7,13 +7,65 @@
       <!-- Profile -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
         <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">Profile</h3>
-        <div class="flex items-center gap-4">
-          <div class="w-12 h-12 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-indigo-600 dark:text-indigo-300 font-bold text-lg">
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-indigo-600 dark:text-indigo-300 font-bold text-lg shrink-0">
             {{ auth.username?.[0]?.toUpperCase() }}
           </div>
+          <div class="flex-1 space-y-3">
+            <div>
+              <p class="font-medium text-gray-800 dark:text-gray-100">{{ auth.username }}</p>
+              <p class="text-xs text-gray-400 capitalize">{{ auth.role }} account</p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Full name</label>
+                <input v-model="profileForm.full_name" type="text" placeholder="Your name"
+                  class="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Email address</label>
+                <input v-model="profileForm.email" type="email" placeholder="you@example.com"
+                  class="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <button @click="saveProfile"
+                class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors">
+                Save
+              </button>
+              <span v-if="profileSaved" class="text-xs text-green-500">Saved!</span>
+              <span v-if="profileError" class="text-xs text-red-500">{{ profileError }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Change Password -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
+        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">Change Password</h3>
+        <div class="space-y-3 max-w-sm">
           <div>
-            <p class="font-medium text-gray-800 dark:text-gray-100">{{ auth.username }}</p>
-            <p class="text-sm text-gray-400">Runway account</p>
+            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Current password</label>
+            <input v-model="pwForm.current" type="password"
+              class="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">New password</label>
+            <input v-model="pwForm.next" type="password"
+              class="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Confirm new password</label>
+            <input v-model="pwForm.confirm" type="password"
+              class="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div class="flex items-center gap-3 pt-1">
+            <button @click="changePassword"
+              class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors">
+              Update password
+            </button>
+            <span v-if="pwSaved" class="text-xs text-green-500">Password updated!</span>
+            <span v-if="pwError" class="text-xs text-red-500">{{ pwError }}</span>
           </div>
         </div>
       </div>
@@ -63,7 +115,6 @@
           Connect any MCP-compatible client to Runway. The server is available at <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded text-xs">/mcp</code>.
         </p>
 
-        <!-- Tabs -->
         <div class="flex gap-1 mb-3 border-b border-gray-100 dark:border-gray-700">
           <button v-for="t in tabs" :key="t"
             @click="activeTab = t"
@@ -85,28 +136,92 @@
         <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">Replace <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">https://your-host</code> with your Runway URL.</p>
       </div>
 
+      <!-- Admin -->
+      <div v-if="auth.role === 'admin'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
+        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">Administration</h3>
+
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-gray-800 dark:text-gray-100">Allow registration</p>
+              <p class="text-xs text-gray-400 mt-0.5">When disabled, new users cannot create accounts.</p>
+            </div>
+            <button @click="toggleRegistration"
+              :class="adminSettings.allow_registration
+                ? 'bg-indigo-600'
+                : 'bg-gray-200 dark:bg-gray-700'"
+              class="relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+              <span :class="adminSettings.allow_registration ? 'translate-x-5' : 'translate-x-0'"
+                class="inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform" />
+            </button>
+          </div>
+          <p v-if="adminSaved" class="text-xs text-green-500">Settings saved.</p>
+        </div>
+      </div>
+
     </div>
   </AppShell>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, reactive } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import { useAuthStore } from '../stores/auth.js'
 import client from '../api/client.js'
 
 const auth = useAuthStore()
+
+// --- Profile ---
+const profileForm = reactive({ full_name: auth.fullName, email: auth.email })
+const profileSaved = ref(false)
+const profileError = ref('')
+
+async function saveProfile() {
+  profileError.value = ''
+  try {
+    const { data } = await client.put('/auth/me', { full_name: profileForm.full_name, email: profileForm.email })
+    auth.fullName = data.full_name
+    auth.email = data.email
+    localStorage.setItem('fullName', data.full_name)
+    localStorage.setItem('email', data.email)
+    profileSaved.value = true
+    setTimeout(() => (profileSaved.value = false), 2000)
+  } catch (e) {
+    profileError.value = e.response?.data?.detail || 'Failed to save'
+  }
+}
+
+// --- Password ---
+const pwForm = reactive({ current: '', next: '', confirm: '' })
+const pwSaved = ref(false)
+const pwError = ref('')
+
+async function changePassword() {
+  pwError.value = ''
+  if (!pwForm.next) { pwError.value = 'New password cannot be empty'; return }
+  if (pwForm.next !== pwForm.confirm) { pwError.value = 'Passwords do not match'; return }
+  try {
+    await client.put('/auth/password', { current_password: pwForm.current, new_password: pwForm.next })
+    pwForm.current = ''
+    pwForm.next = ''
+    pwForm.confirm = ''
+    pwSaved.value = true
+    setTimeout(() => (pwSaved.value = false), 2000)
+  } catch (e) {
+    pwError.value = e.response?.data?.detail || 'Failed to update password'
+  }
+}
+
+// --- API Key ---
 const apiKey = ref(null)
 const revealed = ref(false)
 const copied = ref(false)
 const confirmRegen = ref(false)
-const snippetCopied = ref(false)
-const activeTab = ref('Claude Desktop')
-const tabs = ['Claude Desktop', 'Claude Code', 'curl']
 
 onMounted(async () => {
   const { data } = await client.get('/auth/apikey')
   apiKey.value = data.api_key
+  if (auth.role === 'admin') loadAdminSettings()
 })
 
 async function doRegenerate() {
@@ -121,6 +236,11 @@ function copyKey() {
   copied.value = true
   setTimeout(() => (copied.value = false), 2000)
 }
+
+// --- MCP snippets ---
+const snippetCopied = ref(false)
+const activeTab = ref('Claude Desktop')
+const tabs = ['Claude Desktop', 'Claude Code', 'curl']
 
 function copySnippet() {
   navigator.clipboard.writeText(snippets.value[activeTab.value])
@@ -164,4 +284,20 @@ curl https://your-host/api/tasks \\
   -H "X-Api-Key: ${key}"`,
   }
 })
+
+// --- Admin ---
+const adminSettings = reactive({ allow_registration: true })
+const adminSaved = ref(false)
+
+async function loadAdminSettings() {
+  const { data } = await client.get('/admin/settings')
+  adminSettings.allow_registration = data.allow_registration
+}
+
+async function toggleRegistration() {
+  adminSettings.allow_registration = !adminSettings.allow_registration
+  await client.put('/admin/settings', { allow_registration: adminSettings.allow_registration })
+  adminSaved.value = true
+  setTimeout(() => (adminSaved.value = false), 2000)
+}
 </script>

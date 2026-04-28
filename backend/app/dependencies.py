@@ -26,3 +26,14 @@ async def get_current_user(
             return username
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+
+async def get_current_admin(
+    username: str = Depends(get_current_user),
+    db: Connection = Depends(get_db),
+) -> str:
+    async with db.execute("SELECT role FROM users WHERE username=?", (username,)) as cur:
+        row = await cur.fetchone()
+    if not row or row["role"] != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return username
