@@ -56,10 +56,12 @@ def _generate_api_key() -> str:
 
 async def init_db():
     async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
         await db.execute(CREATE_USERS)
         # add api_key column to existing databases
         try:
-            await db.execute("ALTER TABLE users ADD COLUMN api_key TEXT UNIQUE")
+            await db.execute("ALTER TABLE users ADD COLUMN api_key TEXT")
+            await db.commit()
         except Exception:
             pass
         # generate api_key for users that don't have one
