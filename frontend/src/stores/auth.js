@@ -50,5 +50,8 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('email')
   }
 
+  // refresh profile on every page load if already authenticated
+  if (token.value) fetchMe()
+
   return { username, token, role, fullName, email, login, register, logout, fetchMe }
 })

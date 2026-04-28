@@ -137,27 +137,54 @@
       </div>
 
       <!-- Admin -->
-      <div v-if="auth.role === 'admin'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
-        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">Administration</h3>
+      <template v-if="auth.role === 'admin'">
 
-        <div class="space-y-4">
+        <!-- Site Settings -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
+          <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">Site Settings</h3>
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm font-medium text-gray-800 dark:text-gray-100">Allow registration</p>
               <p class="text-xs text-gray-400 mt-0.5">When disabled, new users cannot create accounts.</p>
             </div>
             <button @click="toggleRegistration"
-              :class="adminSettings.allow_registration
-                ? 'bg-indigo-600'
-                : 'bg-gray-200 dark:bg-gray-700'"
+              :class="adminSettings.allow_registration ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'"
               class="relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
               <span :class="adminSettings.allow_registration ? 'translate-x-5' : 'translate-x-0'"
                 class="inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform" />
             </button>
           </div>
-          <p v-if="adminSaved" class="text-xs text-green-500">Settings saved.</p>
+          <p v-if="adminSaved" class="text-xs text-green-500 mt-3">Settings saved.</p>
         </div>
-      </div>
+
+        <!-- User Management -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
+          <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">Users</h3>
+          <div class="divide-y divide-gray-100 dark:divide-gray-700">
+            <div v-for="u in adminUsers" :key="u.username"
+              class="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+              <div>
+                <p class="text-sm font-medium text-gray-800 dark:text-gray-100">{{ u.username }}</p>
+                <p v-if="u.full_name || u.email" class="text-xs text-gray-400">{{ [u.full_name, u.email].filter(Boolean).join(' · ') }}</p>
+              </div>
+              <div class="flex items-center gap-3">
+                <span :class="u.role === 'admin' ? 'bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'"
+                  class="text-xs px-2 py-0.5 rounded-full font-medium">
+                  {{ u.role }}
+                </span>
+                <button v-if="u.username !== auth.username"
+                  @click="toggleUserRole(u)"
+                  class="text-xs text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                  {{ u.role === 'admin' ? 'Demote' : 'Promote' }}
+                </button>
+                <span v-else class="text-xs text-gray-300 dark:text-gray-600">you</span>
+              </div>
+            </div>
+            <p v-if="!adminUsers.length" class="text-sm text-gray-400 py-2">Loading…</p>
+          </div>
+        </div>
+
+      </template>
 
     </div>
   </AppShell>
@@ -219,8 +246,11 @@ const copied = ref(false)
 const confirmRegen = ref(false)
 
 onMounted(async () => {
-  const { data } = await client.get('/auth/apikey')
-  apiKey.value = data.api_key
+  const [{ data: keyData }] = await Promise.all([
+    client.get('/auth/apikey'),
+    auth.fetchMe(),
+  ])
+  apiKey.value = keyData.api_key
   if (auth.role === 'admin') loadAdminSettings()
 })
 
@@ -288,10 +318,15 @@ curl https://your-host/api/tasks \\
 // --- Admin ---
 const adminSettings = reactive({ allow_registration: true })
 const adminSaved = ref(false)
+const adminUsers = ref([])
 
 async function loadAdminSettings() {
-  const { data } = await client.get('/admin/settings')
-  adminSettings.allow_registration = data.allow_registration
+  const [{ data: s }, { data: u }] = await Promise.all([
+    client.get('/admin/settings'),
+    client.get('/admin/users'),
+  ])
+  adminSettings.allow_registration = s.allow_registration
+  adminUsers.value = u
 }
 
 async function toggleRegistration() {
@@ -299,5 +334,12 @@ async function toggleRegistration() {
   await client.put('/admin/settings', { allow_registration: adminSettings.allow_registration })
   adminSaved.value = true
   setTimeout(() => (adminSaved.value = false), 2000)
+}
+
+async function toggleUserRole(u) {
+  const newRole = u.role === 'admin' ? 'user' : 'admin'
+  const { data } = await client.put(`/admin/users/${u.username}/role`, { role: newRole })
+  const idx = adminUsers.value.findIndex(x => x.username === u.username)
+  if (idx !== -1) adminUsers.value[idx] = data
 }
 </script>

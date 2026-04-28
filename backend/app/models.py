@@ -94,6 +94,10 @@ class SiteSettings(BaseModel):
     allow_registration: bool
 
 
+class RoleUpdate(BaseModel):
+    role: str  # "admin" or "user"
+
+
 class BrainstormItem(BaseModel):
     id: str
     text: str
