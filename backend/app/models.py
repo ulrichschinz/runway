@@ -102,3 +102,7 @@ class ProjectPlanUpdate(BaseModel):
     vision: Optional[str] = None
     brainstorm: Optional[List[BrainstormItem]] = None
     organized: Optional[List[BrainstormItem]] = None
+
+
+class ApiKeyInfo(BaseModel):
+    api_key: str

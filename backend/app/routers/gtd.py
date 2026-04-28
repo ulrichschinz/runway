@@ -15,27 +15,32 @@ def _tasks(username: str, filter_args: list[str]) -> list[Task]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/inbox", response_model=list[Task])
+@router.get("/inbox", response_model=list[Task], summary="GTD inbox",
+    description="List tasks that have not been processed yet: no project and no tags assigned.")
 def inbox(username: str = Depends(get_current_user)):
     return _tasks(username, ["status:pending", "-TAGGED", "-project"])
 
 
-@router.get("/next", response_model=list[Task])
+@router.get("/next", response_model=list[Task], summary="Next actions",
+    description="List tasks tagged +next — concrete actions you can do right now.")
 def next_actions(username: str = Depends(get_current_user)):
     return _tasks(username, ["status:pending", "+next"])
 
 
-@router.get("/waiting", response_model=list[Task])
+@router.get("/waiting", response_model=list[Task], summary="Waiting for",
+    description="List tasks tagged +waiting — things delegated or blocked on someone/something else.")
 def waiting(username: str = Depends(get_current_user)):
     return _tasks(username, ["status:pending", "+waiting"])
 
 
-@router.get("/someday", response_model=list[Task])
+@router.get("/someday", response_model=list[Task], summary="Someday / maybe",
+    description="List tasks tagged +someday — ideas and intentions not yet committed to.")
 def someday(username: str = Depends(get_current_user)):
     return _tasks(username, ["status:pending", "+someday"])
 
 
-@router.get("/projects", response_model=list[str])
+@router.get("/projects", response_model=list[str], summary="List projects",
+    description="Return all project names — both those inferred from tasks and those created explicitly.")
 async def projects(username: str = Depends(get_current_user), db=Depends(get_db)):
     try:
         raw = export_tasks(username, ["status:pending"])
@@ -56,6 +61,7 @@ async def projects(username: str = Depends(get_current_user), db=Depends(get_db)
     return list(seen.keys())
 
 
-@router.get("/projects/{name}", response_model=list[Task])
+@router.get("/projects/{name}", response_model=list[Task], summary="Project tasks",
+    description="List all pending tasks belonging to a specific project.")
 def project_tasks(name: str, username: str = Depends(get_current_user)):
     return _tasks(username, ["status:pending", f"project:{name}"])
