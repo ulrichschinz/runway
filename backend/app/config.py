@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     jwt_expire_hours: int = 24
     data_root: Path = Path("/app/data")
     db_path: str = "/app/users.db"
-    allow_registration: bool = True
+    allow_registration: bool = False
 
     class Config:
         env_file = ".env"
