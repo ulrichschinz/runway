@@ -123,8 +123,20 @@
             <li
               v-for="(item, idx) in form.organized"
               :key="item.id"
-              class="flex items-center gap-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2"
+              draggable="true"
+              @dragstart="onDragStart(idx)"
+              @dragover.prevent="onDragOver(idx)"
+              @drop.prevent="onDrop(idx)"
+              @dragend="onDragEnd"
+              :class="[
+                'flex items-center gap-2 rounded-lg px-3 py-2 transition-colors',
+                dragOverIndex === idx && dragIndex !== idx
+                  ? 'bg-indigo-100 dark:bg-indigo-900/40 ring-1 ring-indigo-400'
+                  : 'bg-gray-50 dark:bg-gray-700/50',
+                dragIndex === idx ? 'opacity-40' : ''
+              ]"
             >
+              <span class="text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing shrink-0 select-none text-base">⠿</span>
               <span class="text-xs text-gray-400 dark:text-gray-500 w-5 text-right shrink-0">{{ idx + 1 }}.</span>
               <span class="flex-1 text-sm text-gray-800 dark:text-gray-200">{{ item.text }}</span>
               <div class="flex flex-col gap-0.5 shrink-0">
@@ -189,6 +201,30 @@
 
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+
+const dragIndex = ref(null)
+const dragOverIndex = ref(null)
+
+function onDragStart(idx) {
+  dragIndex.value = idx
+}
+
+function onDragOver(idx) {
+  dragOverIndex.value = idx
+}
+
+function onDrop(idx) {
+  if (dragIndex.value === null || dragIndex.value === idx) return
+  const arr = [...form.value.organized]
+  const [moved] = arr.splice(dragIndex.value, 1)
+  arr.splice(idx, 0, moved)
+  form.value.organized = arr
+}
+
+function onDragEnd() {
+  dragIndex.value = null
+  dragOverIndex.value = null
+}
 import client from '../api/client.js'
 import { useTaskStore } from '../stores/tasks.js'
 
