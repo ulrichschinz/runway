@@ -3,8 +3,24 @@
     <!-- Sidebar (desktop) -->
     <aside class="hidden sm:flex flex-col w-56 bg-white dark:bg-gray-800 border-r border-gray-100 dark:border-gray-700 fixed inset-y-0">
       <div class="px-4 py-5 border-b dark:border-gray-700">
-        <h1 class="text-lg font-bold text-indigo-600">Runway</h1>
-        <router-link to="/settings" class="text-xs text-gray-400 dark:text-gray-500 mt-0.5 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors">
+        <div class="flex items-center gap-2 mb-1">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="28" height="28" class="shrink-0">
+            <g stroke="#3D2B5C" stroke-width="1.4" fill="none" opacity="0.55">
+              <line x1="32" y1="14" x2="47.588" y2="23"/><line x1="47.588" y1="23" x2="47.588" y2="41"/>
+              <line x1="47.588" y1="41" x2="32" y2="50"/><line x1="32" y1="50" x2="16.412" y2="41"/>
+              <line x1="16.412" y1="41" x2="16.412" y2="23"/><line x1="16.412" y1="23" x2="32" y2="14"/>
+              <line x1="32" y1="32" x2="32" y2="14"/><line x1="32" y1="32" x2="47.588" y2="23"/>
+              <line x1="32" y1="32" x2="47.588" y2="41"/><line x1="32" y1="32" x2="32" y2="50"/>
+              <line x1="32" y1="32" x2="16.412" y2="41"/><line x1="32" y1="32" x2="16.412" y2="23"/>
+            </g>
+            <circle cx="32" cy="32" r="3.6" fill="#3D2B5C"/><circle cx="47.588" cy="23" r="2.8" fill="#3D2B5C"/>
+            <circle cx="47.588" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="32" cy="50" r="2.8" fill="#3D2B5C"/>
+            <circle cx="16.412" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="16.412" cy="23" r="2.8" fill="#3D2B5C"/>
+            <circle cx="32" cy="14" r="4.4" fill="#FF7A6B"/><circle cx="51.588" cy="19" r="2" fill="#F4C84A"/>
+          </svg>
+          <h1 class="sidebar-wordmark">Runway</h1>
+        </div>
+        <router-link to="/settings" class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
           {{ auth.username }}
         </router-link>
       </div>
@@ -24,13 +40,11 @@
             v-for="ctx in taskStore.contextTags"
             :key="ctx"
             @click="taskStore.setContext(ctx)"
-            :class="taskStore.activeContext === ctx
-              ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 font-semibold'
-              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'"
+            :class="taskStore.activeContext === ctx ? 'ctx-active' : 'ctx-inactive'"
             class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors text-left"
           >
             <span class="text-xs">@</span>{{ ctx.slice(1) }}
-            <span v-if="taskStore.activeContext === ctx" class="ml-auto text-xs text-violet-400">×</span>
+            <span v-if="taskStore.activeContext === ctx" class="ml-auto text-xs ctx-close">×</span>
           </button>
         </template>
       </nav>
@@ -52,7 +66,23 @@
       <button @click="mobileOpen = !mobileOpen" class="p-1 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 mr-3">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <h1 class="font-bold text-indigo-600 flex-1">Runway</h1>
+      <div class="flex items-center gap-2 flex-1">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="24" height="24" class="shrink-0">
+          <g stroke="#3D2B5C" stroke-width="1.4" fill="none" opacity="0.55">
+            <line x1="32" y1="14" x2="47.588" y2="23"/><line x1="47.588" y1="23" x2="47.588" y2="41"/>
+            <line x1="47.588" y1="41" x2="32" y2="50"/><line x1="32" y1="50" x2="16.412" y2="41"/>
+            <line x1="16.412" y1="41" x2="16.412" y2="23"/><line x1="16.412" y1="23" x2="32" y2="14"/>
+            <line x1="32" y1="32" x2="32" y2="14"/><line x1="32" y1="32" x2="47.588" y2="23"/>
+            <line x1="32" y1="32" x2="47.588" y2="41"/><line x1="32" y1="32" x2="32" y2="50"/>
+            <line x1="32" y1="32" x2="16.412" y2="41"/><line x1="32" y1="32" x2="16.412" y2="23"/>
+          </g>
+          <circle cx="32" cy="32" r="3.6" fill="#3D2B5C"/><circle cx="47.588" cy="23" r="2.8" fill="#3D2B5C"/>
+          <circle cx="47.588" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="32" cy="50" r="2.8" fill="#3D2B5C"/>
+          <circle cx="16.412" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="16.412" cy="23" r="2.8" fill="#3D2B5C"/>
+          <circle cx="32" cy="14" r="4.4" fill="#FF7A6B"/><circle cx="51.588" cy="19" r="2" fill="#F4C84A"/>
+        </svg>
+        <h1 class="sidebar-wordmark">Runway</h1>
+      </div>
       <button @click="toggleDark()" :title="isDark ? 'Light mode' : 'Dark mode'" class="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-base">
         {{ isDark ? '☀️' : '🌙' }}
       </button>
@@ -63,7 +93,23 @@
       <div class="absolute inset-0 bg-black/40" @click="mobileOpen = false" />
       <aside class="relative z-10 w-64 bg-white dark:bg-gray-800 flex flex-col h-full">
         <div class="px-4 py-5 border-b dark:border-gray-700 flex items-center justify-between">
-          <h1 class="text-lg font-bold text-indigo-600">Runway</h1>
+          <div class="flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="24" height="24" class="shrink-0">
+              <g stroke="#3D2B5C" stroke-width="1.4" fill="none" opacity="0.55">
+                <line x1="32" y1="14" x2="47.588" y2="23"/><line x1="47.588" y1="23" x2="47.588" y2="41"/>
+                <line x1="47.588" y1="41" x2="32" y2="50"/><line x1="32" y1="50" x2="16.412" y2="41"/>
+                <line x1="16.412" y1="41" x2="16.412" y2="23"/><line x1="16.412" y1="23" x2="32" y2="14"/>
+                <line x1="32" y1="32" x2="32" y2="14"/><line x1="32" y1="32" x2="47.588" y2="23"/>
+                <line x1="32" y1="32" x2="47.588" y2="41"/><line x1="32" y1="32" x2="32" y2="50"/>
+                <line x1="32" y1="32" x2="16.412" y2="41"/><line x1="32" y1="32" x2="16.412" y2="23"/>
+              </g>
+              <circle cx="32" cy="32" r="3.6" fill="#3D2B5C"/><circle cx="47.588" cy="23" r="2.8" fill="#3D2B5C"/>
+              <circle cx="47.588" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="32" cy="50" r="2.8" fill="#3D2B5C"/>
+              <circle cx="16.412" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="16.412" cy="23" r="2.8" fill="#3D2B5C"/>
+              <circle cx="32" cy="14" r="4.4" fill="#FF7A6B"/><circle cx="51.588" cy="19" r="2" fill="#F4C84A"/>
+            </svg>
+            <h1 class="sidebar-wordmark">Runway</h1>
+          </div>
           <button @click="mobileOpen = false" class="text-gray-400 text-2xl leading-none">&times;</button>
         </div>
         <nav class="flex-1 px-2 py-4 space-y-1">
@@ -82,13 +128,11 @@
               v-for="ctx in taskStore.contextTags"
               :key="ctx"
               @click="taskStore.setContext(ctx); mobileOpen = false"
-              :class="taskStore.activeContext === ctx
-                ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 font-semibold'
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'"
+              :class="taskStore.activeContext === ctx ? 'ctx-active' : 'ctx-inactive'"
               class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors text-left"
             >
               <span class="text-xs">@</span>{{ ctx.slice(1) }}
-              <span v-if="taskStore.activeContext === ctx" class="ml-auto text-xs text-violet-400">×</span>
+              <span v-if="taskStore.activeContext === ctx" class="ml-auto text-xs ctx-close">×</span>
             </button>
           </template>
         </nav>
@@ -122,3 +166,43 @@ const { isDark, toggleDark } = useDarkMode()
 
 onMounted(() => taskStore.fetchContextTags())
 </script>
+
+<style scoped>
+.sidebar-wordmark {
+  font-family: var(--ar-font-sans);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ar-plum);
+  letter-spacing: -0.01em;
+}
+
+.ctx-active {
+  background: color-mix(in srgb, var(--ar-coral) 12%, transparent);
+  color: var(--ar-plum);
+  font-weight: 500;
+}
+
+.ctx-inactive {
+  color: #4b5563;
+}
+
+.ctx-inactive:hover {
+  background: #f3f4f6;
+}
+
+.ctx-close {
+  color: var(--ar-coral);
+}
+
+:global(.dark) .ctx-inactive {
+  color: #9ca3af;
+}
+
+:global(.dark) .ctx-inactive:hover {
+  background: #374151;
+}
+
+:global(.dark) .sidebar-wordmark {
+  color: #e2d9f3;
+}
+</style>

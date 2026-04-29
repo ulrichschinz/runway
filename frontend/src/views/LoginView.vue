@@ -1,18 +1,36 @@
 <template>
-  <div class="min-h-screen bg-indigo-50 dark:bg-gray-900 flex items-center justify-center px-4">
-    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-sm p-8">
-      <h1 class="text-2xl font-bold text-indigo-600 mb-1">Runway</h1>
-      <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Sign in to your tasks</p>
+  <div class="login-bg min-h-screen flex items-center justify-center px-4">
+    <div class="login-card w-full max-w-sm p-8">
+      <div class="flex items-center gap-3 mb-6">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40" class="shrink-0">
+          <g stroke="#3D2B5C" stroke-width="1.4" fill="none" opacity="0.55">
+            <line x1="32" y1="14" x2="47.588" y2="23"/><line x1="47.588" y1="23" x2="47.588" y2="41"/>
+            <line x1="47.588" y1="41" x2="32" y2="50"/><line x1="32" y1="50" x2="16.412" y2="41"/>
+            <line x1="16.412" y1="41" x2="16.412" y2="23"/><line x1="16.412" y1="23" x2="32" y2="14"/>
+            <line x1="32" y1="32" x2="32" y2="14"/><line x1="32" y1="32" x2="47.588" y2="23"/>
+            <line x1="32" y1="32" x2="47.588" y2="41"/><line x1="32" y1="32" x2="32" y2="50"/>
+            <line x1="32" y1="32" x2="16.412" y2="41"/><line x1="32" y1="32" x2="16.412" y2="23"/>
+          </g>
+          <circle cx="32" cy="32" r="3.6" fill="#3D2B5C"/><circle cx="47.588" cy="23" r="2.8" fill="#3D2B5C"/>
+          <circle cx="47.588" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="32" cy="50" r="2.8" fill="#3D2B5C"/>
+          <circle cx="16.412" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="16.412" cy="23" r="2.8" fill="#3D2B5C"/>
+          <circle cx="32" cy="14" r="4.4" fill="#FF7A6B"/><circle cx="51.588" cy="19" r="2" fill="#F4C84A"/>
+        </svg>
+        <div>
+          <h1 class="login-title">Runway</h1>
+          <p class="login-sub">by Agentic Reach</p>
+        </div>
+      </div>
 
       <div class="space-y-4">
-        <input v-model="username" type="text" placeholder="Username" class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2.5 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-        <input v-model="password" type="password" placeholder="Password" @keydown.enter="submit" class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2.5 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        <input v-model="username" type="text" placeholder="Benutzername" class="login-input w-full" />
+        <input v-model="password" type="password" placeholder="Passwort" @keydown.enter="submit" class="login-input w-full" />
         <p v-if="error" class="text-red-600 text-sm">{{ error }}</p>
-        <button @click="submit" :disabled="loading" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50">
-          {{ loading ? 'Signing in…' : mode === 'login' ? 'Sign in' : 'Create account' }}
+        <button @click="submit" :disabled="loading" class="login-btn w-full">
+          {{ loading ? 'Anmelden…' : mode === 'login' ? 'Anmelden' : 'Konto erstellen' }}
         </button>
         <button @click="mode = mode === 'login' ? 'register' : 'login'" class="w-full text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-          {{ mode === 'login' ? 'No account? Register' : 'Already have an account? Sign in' }}
+          {{ mode === 'login' ? 'Noch kein Konto? Registrieren' : 'Schon ein Konto? Anmelden' }}
         </button>
       </div>
     </div>
@@ -50,3 +68,104 @@ async function submit() {
   }
 }
 </script>
+
+<style scoped>
+.login-bg {
+  background: var(--ar-bg);
+}
+
+.login-card {
+  background: var(--ar-paper);
+  border-radius: 18px;
+  box-shadow: var(--ar-shadow-lg);
+  border: 1px solid var(--ar-hairline);
+}
+
+.login-title {
+  font-family: var(--ar-font-sans);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--ar-plum);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.login-sub {
+  font-family: var(--ar-font-mono);
+  font-size: 11px;
+  color: var(--ar-mute);
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+.login-input {
+  border: 1px solid var(--ar-hairline);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: var(--ar-font-sans);
+  color: var(--ar-ink);
+  background: var(--ar-paper);
+  outline: none;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+
+.login-input:focus {
+  border-color: var(--ar-plum);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ar-plum) 12%, transparent);
+}
+
+.login-input::placeholder {
+  color: var(--ar-mute-soft);
+}
+
+.login-btn {
+  background: var(--ar-coral);
+  color: white;
+  border: none;
+  border-radius: 999px;
+  padding: 11px 0;
+  font-size: 14px;
+  font-family: var(--ar-font-sans);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 120ms;
+}
+
+.login-btn:hover {
+  opacity: 0.88;
+}
+
+.login-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+:global(.dark) .login-bg {
+  background: #1a1228;
+}
+
+:global(.dark) .login-card {
+  background: #231a38;
+  border-color: rgba(255,255,255,0.08);
+}
+
+:global(.dark) .login-input {
+  background: #2d2045;
+  border-color: rgba(255,255,255,0.10);
+  color: #f0eaf8;
+}
+
+:global(.dark) .login-input:focus {
+  border-color: var(--ar-coral);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ar-coral) 18%, transparent);
+}
+
+:global(.dark) .login-title {
+  color: #e2d9f3;
+}
+
+:global(.dark) .login-sub {
+  color: rgba(255,255,255,0.45);
+}
+</style>

@@ -2,6 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Agentic Reach brand tokens */
+:root {
+  --ar-coral:   #FF7A6B;
+  --ar-plum:    #3D2B5C;
+  --ar-yellow:  #F4C84A;
+  --ar-ink:     #1B1428;
+  --ar-bg:       #FBF6EE;
+  --ar-bg-alt:   #F4ECE0;
+  --ar-bg-cool:  #F1EEF4;
+  --ar-paper:    #FFFFFF;
+  --ar-mute:      rgba(27, 20, 40, 0.62);
+  --ar-mute-soft: rgba(27, 20, 40, 0.40);
+  --ar-hairline:  rgba(27, 20, 40, 0.10);
+  --ar-shadow-sm:  0 1px 0 rgba(27,20,40,.06), 0 4px 14px rgba(27,20,40,.06);
+  --ar-shadow-md:  0 8px 20px rgba(27,20,40,.10);
+  --ar-shadow-lg:  0 18px 40px rgba(27,20,40,.12);
+  --ar-font-sans: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  --ar-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --ar-radius-pill: 999px;
+}
+
+body {
+  font-family: var(--ar-font-sans);
+}
+
 * {
   -webkit-tap-highlight-color: transparent;
 }
