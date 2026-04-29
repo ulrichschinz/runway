@@ -277,7 +277,7 @@ watch(() => props.task, (t) => {
     form.value = {
       description: t.description || '',
       project: t.project || '',
-      tags: [...(t.tags || [])],
+      tags: (t.tags || []).flatMap(tag => tag.split(',').map(p => p.trim())).filter(Boolean),
       priority: t.priority || null,
       due: formatForInput(t.due),
       scheduled: formatForInput(t.scheduled),
@@ -306,9 +306,13 @@ function toggleTag(tag) {
 }
 
 function addCustomTag() {
-  const t = customTag.value.trim().replace(/^\+/, '')
-  if (!t || t === '@') return
-  if (!form.value.tags.includes(t)) form.value.tags.push(t)
+  const raw = customTag.value.trim()
+  if (!raw) return
+  raw.split(',').forEach(part => {
+    const t = part.trim().replace(/^\+/, '')
+    if (!t || t === '@') return
+    if (!form.value.tags.includes(t)) form.value.tags.push(t)
+  })
   customTag.value = ''
 }
 

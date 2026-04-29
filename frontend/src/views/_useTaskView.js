@@ -10,7 +10,7 @@ export function useTaskView(loader) {
   const filteredTasks = computed(() => {
     let result = store.tasks
     if (store.activeContext) {
-      result = result.filter(t => (t.tags || []).includes(store.activeContext))
+      result = result.filter(t => (t.tags || []).some(tag => tag.split(',').map(p => p.trim()).includes(store.activeContext)))
     }
     const q = searchQuery.value.trim().toLowerCase()
     if (!q) return result
