@@ -1,0 +1,42 @@
+<template>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" :width="size" :height="size" class="shrink-0 dark:hidden">
+    <g stroke="#3D2B5C" stroke-width="1.4" fill="none" opacity="0.55">
+      <line x1="32" y1="14" x2="47.588" y2="23"/><line x1="47.588" y1="23" x2="47.588" y2="41"/>
+      <line x1="47.588" y1="41" x2="32" y2="50"/><line x1="32" y1="50" x2="16.412" y2="41"/>
+      <line x1="16.412" y1="41" x2="16.412" y2="23"/><line x1="16.412" y1="23" x2="32" y2="14"/>
+      <line x1="32" y1="32" x2="32" y2="14"/><line x1="32" y1="32" x2="47.588" y2="23"/>
+      <line x1="32" y1="32" x2="47.588" y2="41"/><line x1="32" y1="32" x2="32" y2="50"/>
+      <line x1="32" y1="32" x2="16.412" y2="41"/><line x1="32" y1="32" x2="16.412" y2="23"/>
+    </g>
+    <circle cx="32" cy="32" r="3.6" fill="#3D2B5C"/>
+    <circle cx="47.588" cy="23" r="2.8" fill="#3D2B5C"/>
+    <circle cx="47.588" cy="41" r="2.8" fill="#3D2B5C"/>
+    <circle cx="32" cy="50" r="2.8" fill="#3D2B5C"/>
+    <circle cx="16.412" cy="41" r="2.8" fill="#3D2B5C"/>
+    <circle cx="16.412" cy="23" r="2.8" fill="#3D2B5C"/>
+    <circle cx="32" cy="14" r="4.4" fill="#FF7A6B"/>
+    <circle cx="51.588" cy="19" r="2" fill="#F4C84A"/>
+  </svg>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" :width="size" :height="size" class="shrink-0 hidden dark:inline">
+    <g stroke="#FFFFFF" stroke-width="1.4" fill="none" opacity="0.7">
+      <line x1="32" y1="14" x2="47.588" y2="23"/><line x1="47.588" y1="23" x2="47.588" y2="41"/>
+      <line x1="47.588" y1="41" x2="32" y2="50"/><line x1="32" y1="50" x2="16.412" y2="41"/>
+      <line x1="16.412" y1="41" x2="16.412" y2="23"/><line x1="16.412" y1="23" x2="32" y2="14"/>
+      <line x1="32" y1="32" x2="32" y2="14"/><line x1="32" y1="32" x2="47.588" y2="23"/>
+      <line x1="32" y1="32" x2="47.588" y2="41"/><line x1="32" y1="32" x2="32" y2="50"/>
+      <line x1="32" y1="32" x2="16.412" y2="41"/><line x1="32" y1="32" x2="16.412" y2="23"/>
+    </g>
+    <circle cx="32" cy="32" r="3.6" fill="#FFFFFF"/>
+    <circle cx="47.588" cy="23" r="2.8" fill="#FFFFFF"/>
+    <circle cx="47.588" cy="41" r="2.8" fill="#FFFFFF"/>
+    <circle cx="32" cy="50" r="2.8" fill="#FFFFFF"/>
+    <circle cx="16.412" cy="41" r="2.8" fill="#FFFFFF"/>
+    <circle cx="16.412" cy="23" r="2.8" fill="#FFFFFF"/>
+    <circle cx="32" cy="14" r="4.4" fill="#FFFFFF"/>
+    <circle cx="51.588" cy="19" r="2" fill="#FFFFFF"/>
+  </svg>
+</template>
+
+<script setup>
+defineProps({ size: { default: 28 } })
+</script>
