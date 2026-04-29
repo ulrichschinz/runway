@@ -15,6 +15,24 @@
         <NavItem to="/someday" icon="💭">Someday / Maybe</NavItem>
         <NavItem to="/projects" icon="📁">Projects</NavItem>
         <NavItem to="/all" icon="📋">All Tasks</NavItem>
+
+        <template v-if="taskStore.contextTags.length">
+          <div class="pt-3 pb-1 px-2">
+            <span class="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Context</span>
+          </div>
+          <button
+            v-for="ctx in taskStore.contextTags"
+            :key="ctx"
+            @click="taskStore.setContext(ctx)"
+            :class="taskStore.activeContext === ctx
+              ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 font-semibold'
+              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'"
+            class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors text-left"
+          >
+            <span class="text-xs">@</span>{{ ctx.slice(1) }}
+            <span v-if="taskStore.activeContext === ctx" class="ml-auto text-xs text-violet-400">×</span>
+          </button>
+        </template>
       </nav>
       <div class="px-4 py-3 border-t dark:border-gray-700 flex items-center justify-between">
         <button @click="auth.logout(); $router.push('/login')" class="text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">Sign out</button>
@@ -55,6 +73,24 @@
           <NavItem to="/someday" icon="💭" @click="mobileOpen = false">Someday / Maybe</NavItem>
           <NavItem to="/projects" icon="📁" @click="mobileOpen = false">Projects</NavItem>
           <NavItem to="/all" icon="📋" @click="mobileOpen = false">All Tasks</NavItem>
+
+          <template v-if="taskStore.contextTags.length">
+            <div class="pt-3 pb-1 px-2">
+              <span class="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Context</span>
+            </div>
+            <button
+              v-for="ctx in taskStore.contextTags"
+              :key="ctx"
+              @click="taskStore.setContext(ctx); mobileOpen = false"
+              :class="taskStore.activeContext === ctx
+                ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 font-semibold'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'"
+              class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors text-left"
+            >
+              <span class="text-xs">@</span>{{ ctx.slice(1) }}
+              <span v-if="taskStore.activeContext === ctx" class="ml-auto text-xs text-violet-400">×</span>
+            </button>
+          </template>
         </nav>
         <div class="px-4 py-3 border-t dark:border-gray-700 flex items-center justify-between">
           <button @click="auth.logout(); $router.push('/login')" class="text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">Sign out</button>
@@ -73,12 +109,16 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth.js'
+import { useTaskStore } from '../stores/tasks.js'
 import { useDarkMode } from '../composables/useDarkMode.js'
 import NavItem from './NavItem.vue'
 
 const auth = useAuthStore()
+const taskStore = useTaskStore()
 const mobileOpen = ref(false)
 const { isDark, toggleDark } = useDarkMode()
+
+onMounted(() => taskStore.fetchContextTags())
 </script>

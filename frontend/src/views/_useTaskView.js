@@ -8,9 +8,13 @@ export function useTaskView(loader) {
   const searchInputRef = ref(null)
 
   const filteredTasks = computed(() => {
+    let result = store.tasks
+    if (store.activeContext) {
+      result = result.filter(t => (t.tags || []).includes(store.activeContext))
+    }
     const q = searchQuery.value.trim().toLowerCase()
-    if (!q) return store.tasks
-    return store.tasks.filter(t =>
+    if (!q) return result
+    return result.filter(t =>
       t.description.toLowerCase().includes(q) ||
       (t.project && t.project.toLowerCase().includes(q)) ||
       t.tags.some(tag => tag.toLowerCase().includes(q))

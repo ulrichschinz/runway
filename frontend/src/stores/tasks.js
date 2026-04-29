@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import client from '../api/client.js'
 
 export const useTaskStore = defineStore('tasks', () => {
@@ -7,6 +7,23 @@ export const useTaskStore = defineStore('tasks', () => {
   const projects = ref([])
   const loading = ref(false)
   const error = ref(null)
+  const activeContext = ref(null)
+  const _allContextTags = ref([])
+
+  const contextTags = computed(() => _allContextTags.value)
+
+  async function fetchContextTags() {
+    try {
+      const { data } = await client.get('/tasks')
+      const seen = new Set()
+      data.forEach(t => (t.tags || []).forEach(tag => { if (tag.startsWith('@')) seen.add(tag) }))
+      _allContextTags.value = [...seen].sort()
+    } catch { /* non-critical */ }
+  }
+
+  function setContext(tag) {
+    activeContext.value = activeContext.value === tag ? null : tag
+  }
 
   async function fetchView(view) {
     loading.value = true
@@ -100,8 +117,10 @@ export const useTaskStore = defineStore('tasks', () => {
 
   return {
     tasks, projects, loading, error,
+    activeContext, contextTags,
     fetchView, fetchAll, fetchProjects, fetchProject, createProject,
     createTask, updateTask, completeTask, deleteTask,
     startTask, stopTask, annotateTask,
+    fetchContextTags, setContext,
   }
 })
