@@ -14,7 +14,7 @@ export const useTaskStore = defineStore('tasks', () => {
 
   async function fetchContextTags() {
     try {
-      const { data } = await client.get('/tasks')
+      const { data } = await client.get('/tasks', { params: { include_done: false } })
       const seen = new Set()
       data.forEach(t => (t.tags || []).forEach(tag => { if (tag.startsWith('@')) seen.add(tag) }))
       _allContextTags.value = [...seen].sort()
