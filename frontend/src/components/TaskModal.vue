@@ -82,6 +82,16 @@
 
         <!-- Tags -->
         <div>
+          <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Contexts <span class="font-normal text-gray-400">(@wo / womit)</span></label>
+          <div class="flex flex-wrap gap-1 mb-3">
+            <button
+              v-for="tag in suggestedContexts"
+              :key="tag"
+              @click="toggleTag(tag)"
+              :class="form.tags.includes(tag) ? 'bg-violet-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
+              class="text-xs px-2 py-1 rounded-full border border-transparent transition-colors"
+            >{{ tag }}</button>
+          </div>
           <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Tags</label>
           <div class="flex flex-wrap gap-1 mb-2">
             <button
@@ -90,14 +100,14 @@
               @click="toggleTag(tag)"
               :class="form.tags.includes(tag) ? 'bg-indigo-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
               class="text-xs px-2 py-1 rounded-full border border-transparent transition-colors"
-            >{{ tag }}</button>
+            >+{{ tag }}</button>
           </div>
           <div class="flex gap-2">
             <input
               v-model="customTag"
               @keydown.enter.prevent="addCustomTag"
               class="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              placeholder="custom tag + Enter"
+              placeholder="@kontext oder tag + Enter"
             />
             <button @click="addCustomTag" class="px-3 py-2 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-medium">Add</button>
           </div>
@@ -105,10 +115,11 @@
             <span
               v-for="tag in form.tags"
               :key="tag"
-              class="inline-flex items-center gap-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs px-2 py-0.5 rounded-full"
+              :class="tag.startsWith('@') ? 'bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300' : 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300'"
+              class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
             >
-              +{{ tag }}
-              <button @click="removeTag(tag)" class="text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 leading-none">&times;</button>
+              {{ tag.startsWith('@') ? tag : '+' + tag }}
+              <button @click="removeTag(tag)" class="opacity-60 hover:opacity-100 leading-none">&times;</button>
             </span>
           </div>
         </div>
@@ -233,7 +244,8 @@ const isEdit = computed(() => !!props.task?.uuid)
 const taskStart = ref(props.task?.start ?? null)
 const isActive = computed(() => !!taskStart.value)
 
-const suggestedTags = ['next', 'waiting', 'someday', '@home', '@work', '@computer', '@phone', '@errands']
+const suggestedContexts = ['@home', '@work', '@computer', '@phone', '@errands']
+const suggestedTags = ['next', 'waiting', 'someday']
 const recurPresets = ['daily', 'weekly', 'monthly', 'yearly']
 
 const blankForm = () => ({
@@ -295,7 +307,8 @@ function toggleTag(tag) {
 
 function addCustomTag() {
   const t = customTag.value.trim().replace(/^\+/, '')
-  if (t && !form.value.tags.includes(t)) form.value.tags.push(t)
+  if (!t || t === '@') return
+  if (!form.value.tags.includes(t)) form.value.tags.push(t)
   customTag.value = ''
 }
 
