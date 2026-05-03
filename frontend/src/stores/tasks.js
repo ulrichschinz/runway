@@ -9,6 +9,8 @@ export const useTaskStore = defineStore('tasks', () => {
   const error = ref(null)
   const activeContext = ref(null)
   const _allContextTags = ref([])
+  const newTaskTrigger = ref(0)
+  function triggerNewTask() { newTaskTrigger.value++ }
 
   const contextTags = computed(() => _allContextTags.value)
 
@@ -131,6 +133,7 @@ export const useTaskStore = defineStore('tasks', () => {
   return {
     tasks, projects, loading, error,
     activeContext, contextTags,
+    newTaskTrigger, triggerNewTask,
     fetchView, fetchAll, fetchProjects, fetchProject, createProject,
     createTask, updateTask, completeTask, deleteTask,
     startTask, stopTask, annotateTask,

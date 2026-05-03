@@ -110,11 +110,20 @@
     <div class="flex-1 sm:ml-56 pt-14 sm:pt-0 flex flex-col min-h-screen">
       <slot />
     </div>
+
+    <!-- Mobile FAB -->
+    <button
+      v-if="showFab"
+      @click="taskStore.triggerNewTask()"
+      class="sm:hidden fixed bottom-6 right-5 z-20 w-14 h-14 rounded-full bg-indigo-600 active:bg-indigo-700 text-white text-3xl shadow-xl flex items-center justify-center"
+      aria-label="Neuen Task anlegen"
+    >+</button>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import { useTaskStore } from '../stores/tasks.js'
 import { useDarkMode } from '../composables/useDarkMode.js'
@@ -125,6 +134,10 @@ const auth = useAuthStore()
 const taskStore = useTaskStore()
 const mobileOpen = ref(false)
 const { isDark, toggleDark } = useDarkMode()
+const route = useRoute()
+
+const FAB_ROUTES = ['/inbox', '/next', '/waiting', '/someday', '/all']
+const showFab = computed(() => FAB_ROUTES.includes(route.path) || route.path.startsWith('/projects/'))
 
 onMounted(() => taskStore.fetchContextTags())
 </script>

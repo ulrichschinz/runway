@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useTaskStore } from '../stores/tasks.js'
 
 export function useTaskView(loader) {
@@ -40,6 +40,8 @@ export function useTaskView(loader) {
     store.fetchProjects()
     window.addEventListener('keydown', onKeyDown)
   })
+
+  watch(() => store.newTaskTrigger, (v) => { if (v > 0) newTask() })
 
   onBeforeUnmount(() => {
     window.removeEventListener('keydown', onKeyDown)

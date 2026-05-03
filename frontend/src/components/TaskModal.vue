@@ -45,6 +45,7 @@
         <div>
           <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Description *</label>
           <textarea
+            ref="descriptionRef"
             v-model="form.description"
             rows="2"
             class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
@@ -234,7 +235,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useTaskStore } from '../stores/tasks.js'
 import client from '../api/client.js'
 
@@ -244,6 +245,7 @@ const props = defineProps({ task: Object })
 const emit = defineEmits(['close', 'saved', 'completed'])
 
 const visible = ref(false)
+const descriptionRef = ref(null)
 const saving = ref(false)
 const toggling = ref(false)
 const errorMsg = ref('')
@@ -308,6 +310,7 @@ watch(() => props.task, (t) => {
     form.value = blankForm()
   }
   visible.value = true
+  nextTick(() => descriptionRef.value?.focus())
 }, { immediate: true })
 
 function formatForInput(raw) {
