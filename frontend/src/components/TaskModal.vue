@@ -124,83 +124,94 @@
           </div>
         </div>
 
-        <!-- Dates row -->
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Due</label>
-            <input type="date" v-model="form.due" class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Scheduled</label>
-            <input type="date" v-model="form.scheduled" class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Wait until</label>
-            <input type="date" v-model="form.wait" class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Expires</label>
-            <input type="date" v-model="form.until" class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-        </div>
+        <!-- Advanced toggle -->
+        <button
+          @click="showAdvanced = !showAdvanced"
+          class="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 border border-dashed border-gray-200 dark:border-gray-600 rounded-lg transition-colors"
+        >
+          <svg class="w-3.5 h-3.5 transition-transform" :class="showAdvanced ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          {{ showAdvanced ? 'Weniger Optionen' : 'Mehr Optionen (Datum, Wiederholung, …)' }}
+        </button>
 
-        <!-- Recur -->
-        <div>
-          <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Repeat</label>
-          <div class="flex gap-2 mb-2 flex-wrap">
-            <button
-              v-for="r in recurPresets"
-              :key="r"
-              @click="form.recur = form.recur === r ? '' : r"
-              :class="form.recur === r ? 'bg-violet-600 text-white border-violet-600' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'"
-              class="text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors"
-            >{{ r }}</button>
+        <template v-if="showAdvanced">
+          <!-- Dates row -->
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Due</label>
+              <input type="date" v-model="form.due" class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Scheduled</label>
+              <input type="date" v-model="form.scheduled" class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Wait until</label>
+              <input type="date" v-model="form.wait" class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Expires</label>
+              <input type="date" v-model="form.until" class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
           </div>
-          <input
-            v-model="form.recur"
-            class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            placeholder="or type: daily, weekly, 2weeks…"
-          />
-        </div>
 
-        <!-- Dependencies -->
-        <div>
-          <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-            Blocked by
-            <span class="text-gray-400 dark:text-gray-500 font-normal">(task must wait for these)</span>
-          </label>
-          <div v-if="!allTasks.length" class="text-xs text-gray-400 dark:text-gray-500">No other tasks available.</div>
-          <div v-else class="max-h-32 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg divide-y divide-gray-100 dark:divide-gray-700">
-            <label
-              v-for="t in allTasks"
-              :key="t.uuid"
-              class="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
-            >
-              <input type="checkbox" :value="t.uuid" v-model="form.depends" class="rounded text-indigo-600" />
-              <span class="text-xs text-gray-800 dark:text-gray-200 truncate">{{ t.description }}</span>
-              <span v-if="t.project" class="text-xs text-gray-400 dark:text-gray-500 ml-auto shrink-0">{{ t.project }}</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Annotations (edit mode only) -->
-        <div v-if="isEdit">
-          <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Notes / Annotations</label>
-          <ul class="text-sm text-gray-700 dark:text-gray-300 space-y-1 mb-2">
-            <li v-for="a in form.annotations" :key="a.entry" class="bg-gray-50 dark:bg-gray-700 rounded px-2 py-1">
-              <span class="text-gray-400 dark:text-gray-500 text-xs mr-2">{{ a.entry?.slice(0,10) }}</span>{{ a.description }}
-            </li>
-          </ul>
-          <div class="flex gap-2">
+          <!-- Recur -->
+          <div>
+            <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Repeat</label>
+            <div class="flex gap-2 mb-2 flex-wrap">
+              <button
+                v-for="r in recurPresets"
+                :key="r"
+                @click="form.recur = form.recur === r ? '' : r"
+                :class="form.recur === r ? 'bg-violet-600 text-white border-violet-600' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'"
+                class="text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors"
+              >{{ r }}</button>
+            </div>
             <input
-              v-model="newAnnotation"
-              @keydown.enter.prevent="addAnnotation"
-              class="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              placeholder="Add note + Enter"
+              v-model="form.recur"
+              class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="or type: daily, weekly, 2weeks…"
             />
-            <button @click="addAnnotation" class="px-3 py-2 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-medium">Add</button>
           </div>
-        </div>
+
+          <!-- Dependencies -->
+          <div>
+            <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+              Blocked by
+              <span class="text-gray-400 dark:text-gray-500 font-normal">(task must wait for these)</span>
+            </label>
+            <div v-if="!allTasks.length" class="text-xs text-gray-400 dark:text-gray-500">No other tasks available.</div>
+            <div v-else class="max-h-32 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg divide-y divide-gray-100 dark:divide-gray-700">
+              <label
+                v-for="t in allTasks"
+                :key="t.uuid"
+                class="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                <input type="checkbox" :value="t.uuid" v-model="form.depends" class="rounded text-indigo-600" />
+                <span class="text-xs text-gray-800 dark:text-gray-200 truncate">{{ t.description }}</span>
+                <span v-if="t.project" class="text-xs text-gray-400 dark:text-gray-500 ml-auto shrink-0">{{ t.project }}</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Annotations (edit mode only) -->
+          <div v-if="isEdit">
+            <label class="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Notes / Annotations</label>
+            <ul class="text-sm text-gray-700 dark:text-gray-300 space-y-1 mb-2">
+              <li v-for="a in form.annotations" :key="a.entry" class="bg-gray-50 dark:bg-gray-700 rounded px-2 py-1">
+                <span class="text-gray-400 dark:text-gray-500 text-xs mr-2">{{ a.entry?.slice(0,10) }}</span>{{ a.description }}
+              </li>
+            </ul>
+            <div class="flex gap-2">
+              <input
+                v-model="newAnnotation"
+                @keydown.enter.prevent="addAnnotation"
+                class="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Add note + Enter"
+              />
+              <button @click="addAnnotation" class="px-3 py-2 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-medium">Add</button>
+            </div>
+          </div>
+        </template>
 
         <p v-if="errorMsg" class="text-red-600 text-sm">{{ errorMsg }}</p>
       </div>
@@ -244,9 +255,14 @@ const isEdit = computed(() => !!props.task?.uuid)
 const taskStart = ref(props.task?.start ?? null)
 const isActive = computed(() => !!taskStart.value)
 
-const suggestedContexts = ['@home', '@work', '@computer', '@phone', '@errands']
+const suggestedContexts = computed(() => {
+  const base = ['@home', '@work', '@computer', '@phone', '@errands']
+  const stored = store.contextTags
+  return [...new Set([...stored, ...base])]
+})
 const suggestedTags = ['next', 'waiting', 'someday']
 const recurPresets = ['daily', 'weekly', 'monthly', 'yearly']
+const showAdvanced = ref(false)
 
 const blankForm = () => ({
   description: '',
@@ -273,6 +289,7 @@ onMounted(async () => {
 
 watch(() => props.task, (t) => {
   taskStart.value = t?.start ?? null
+  showAdvanced.value = !!t?.uuid
   if (t) {
     form.value = {
       description: t.description || '',

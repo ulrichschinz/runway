@@ -76,9 +76,19 @@ export const useTaskStore = defineStore('tasks', () => {
     }
   }
 
+  function _mergeContextTags(task) {
+    const incoming = (task.tags || []).flatMap(tag => tag.split(',').map(p => p.trim()).filter(p => p.startsWith('@')))
+    let changed = false
+    incoming.forEach(ctx => {
+      if (!_allContextTags.value.includes(ctx)) { _allContextTags.value.push(ctx); changed = true }
+    })
+    if (changed) _allContextTags.value = [..._allContextTags.value].sort()
+  }
+
   async function createTask(payload) {
     const { data } = await client.post('/tasks', payload)
     tasks.value = [data, ...tasks.value].sort((a, b) => b.urgency - a.urgency)
+    _mergeContextTags(data)
     return data
   }
 
@@ -86,6 +96,7 @@ export const useTaskStore = defineStore('tasks', () => {
     const { data } = await client.put(`/tasks/${uuid}`, payload)
     const idx = tasks.value.findIndex((t) => t.uuid === uuid)
     if (idx !== -1) tasks.value.splice(idx, 1, data)
+    _mergeContextTags(data)
     return data
   }
 
