@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-gray-50 dark:bg-gray-900 flex">
+  <div class="min-h-dvh bg-gray-50 dark:bg-gray-900 flex">
     <!-- Sidebar (desktop) -->
     <aside class="hidden sm:flex flex-col w-56 bg-white dark:bg-gray-800 border-r border-gray-100 dark:border-gray-700 fixed inset-y-0">
       <div class="px-4 py-5 border-b dark:border-gray-700">
@@ -63,9 +63,12 @@
     </div>
 
     <!-- Mobile drawer -->
-    <div v-if="mobileOpen" class="sm:hidden fixed inset-0 z-40 flex">
-      <div class="absolute inset-0 bg-black/40" @click="mobileOpen = false" />
-      <aside class="relative z-10 w-64 bg-white dark:bg-gray-800 flex flex-col h-full">
+    <div v-show="mobileOpen" class="sm:hidden fixed inset-0 z-40 flex">
+      <Transition name="drawer-fade">
+        <div v-if="mobileOpen" class="absolute inset-0 bg-black/40" @click="mobileOpen = false" />
+      </Transition>
+      <Transition name="drawer-slide">
+      <aside v-if="mobileOpen" class="relative z-10 w-64 bg-white dark:bg-gray-800 flex flex-col h-full">
         <div class="px-4 py-5 border-b dark:border-gray-700 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <BrandMark :size="24" />
@@ -104,10 +107,11 @@
           </router-link>
         </div>
       </aside>
+      </Transition>
     </div>
 
     <!-- Main content -->
-    <div class="flex-1 sm:ml-56 pt-14 sm:pt-0 flex flex-col min-h-screen">
+    <div class="flex-1 sm:ml-56 pt-14 sm:pt-0 flex flex-col min-h-dvh">
       <slot />
     </div>
 
@@ -115,7 +119,8 @@
     <button
       v-if="showFab"
       @click="taskStore.triggerNewTask()"
-      class="sm:hidden fixed bottom-6 right-5 z-20 w-14 h-14 rounded-full bg-indigo-600 active:bg-indigo-700 text-white text-3xl shadow-xl flex items-center justify-center"
+      class="sm:hidden fixed right-5 z-20 w-14 h-14 rounded-full bg-indigo-600 active:bg-indigo-700 text-white text-3xl shadow-xl flex items-center justify-center"
+      :style="{ bottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }"
       aria-label="Neuen Task anlegen"
     >+</button>
   </div>
@@ -127,6 +132,7 @@ import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import { useTaskStore } from '../stores/tasks.js'
 import { useDarkMode } from '../composables/useDarkMode.js'
+import { useScrollLock } from '../composables/useScrollLock.js'
 import NavItem from './NavItem.vue'
 import BrandMark from './BrandMark.vue'
 
@@ -138,6 +144,8 @@ const route = useRoute()
 
 const FAB_ROUTES = ['/inbox', '/next', '/waiting', '/someday', '/all']
 const showFab = computed(() => FAB_ROUTES.includes(route.path) || route.path.startsWith('/projects/'))
+
+useScrollLock(mobileOpen)
 
 onMounted(() => taskStore.fetchContextTags())
 </script>
@@ -179,5 +187,23 @@ onMounted(() => taskStore.fetchContextTags())
 
 :global(.dark) .sidebar-wordmark {
   color: #e2d9f3;
+}
+
+.drawer-fade-enter-active,
+.drawer-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.drawer-fade-enter-from,
+.drawer-fade-leave-to {
+  opacity: 0;
+}
+
+.drawer-slide-enter-active,
+.drawer-slide-leave-active {
+  transition: transform 0.25s ease;
+}
+.drawer-slide-enter-from,
+.drawer-slide-leave-to {
+  transform: translateX(-100%);
 }
 </style>

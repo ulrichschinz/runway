@@ -30,3 +30,18 @@ body {
 * {
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Prevent iOS Safari from auto-zooming when focusing a form field
+   (any control with font-size < 16px triggers it). */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* Respect the home indicator / gesture bar on iOS and Android. */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}

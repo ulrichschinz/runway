@@ -2,7 +2,7 @@
   <div v-if="visible" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
     <div class="absolute inset-0 bg-black/50" @click="close" />
 
-    <div class="relative z-10 bg-white dark:bg-gray-800 w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[90vh] flex flex-col shadow-2xl">
+    <div class="relative z-10 bg-white dark:bg-gray-800 w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[90dvh] flex flex-col shadow-2xl pb-safe sm:pb-0">
       <!-- Header -->
       <div class="flex items-center gap-3 px-4 py-3 border-b dark:border-gray-700">
         <div class="flex-1 min-w-0">
@@ -237,6 +237,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useTaskStore } from '../stores/tasks.js'
+import { useScrollLock } from '../composables/useScrollLock.js'
 import client from '../api/client.js'
 
 const store = useTaskStore()
@@ -375,6 +376,8 @@ function onEscape(e) {
 
 onMounted(() => window.addEventListener('keydown', onEscape))
 onBeforeUnmount(() => window.removeEventListener('keydown', onEscape))
+
+useScrollLock(visible)
 
 function priorityLabel(p) {
   return { H: 'High', M: 'Medium', L: 'Low' }[p]

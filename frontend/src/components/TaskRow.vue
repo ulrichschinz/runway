@@ -1,30 +1,67 @@
 <template>
-  <div
-    class="relative overflow-hidden"
-    @touchstart="onTouchStart"
-    @touchmove="onTouchMove"
-    @touchend="onTouchEnd"
-  >
-    <!-- Swipe action backdrop -->
-    <div
-      v-if="swipeX < 0"
-      class="absolute right-0 top-0 h-full flex items-stretch"
-      :style="{ width: Math.min(-swipeX, 160) + 'px' }"
-    >
-      <button @click="$emit('complete', task.uuid)" class="flex-1 bg-green-500 text-white text-xs font-semibold flex items-center justify-center">Done</button>
-      <button @click="$emit('delete', task.uuid)" class="flex-1 bg-red-500 text-white text-xs font-semibold flex items-center justify-center">Delete</button>
-    </div>
-
-    <!-- Task card -->
+  <div>
+    <!-- ===================== Mobile layout (< sm) ===================== -->
     <div
       :class="[
         isDone ? 'opacity-50' : 'active:bg-gray-50 dark:active:bg-gray-700',
         isActive
+          ? 'border-l-4 border-l-green-500 bg-green-50 dark:bg-green-900/30 dark:border-l-green-400'
+          : 'border-l-4 border-l-transparent bg-white dark:bg-gray-800'
+      ]"
+      class="sm:hidden border-b border-gray-100 dark:border-gray-700 flex items-stretch"
+    >
+      <!-- Complete circle: 44px tap target -->
+      <button
+        @click="$emit('complete', task.uuid)"
+        :disabled="isDone"
+        class="shrink-0 w-12 self-stretch flex items-center justify-center"
+        :aria-label="isDone ? 'Erledigt' : 'Als erledigt markieren'"
+      >
+        <span
+          :class="isDone
+            ? 'bg-green-500 border-green-500 text-white'
+            : 'border-gray-300 dark:border-gray-500 text-transparent'"
+          class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors"
+        >
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        </span>
+      </button>
+
+      <!-- Body: tap = open detail -->
+      <div class="flex-1 min-w-0 py-3 pr-1 cursor-pointer" @click="$emit('open', task)">
+        <p
+          :class="isDone ? 'line-through' : ''"
+          class="text-[15px] font-medium text-gray-900 dark:text-white leading-snug line-clamp-2"
+        >{{ task.description }}</p>
+        <div class="flex items-center flex-wrap gap-x-2 gap-y-0.5 mt-1 text-xs">
+          <span v-if="isActive" class="inline-flex items-center gap-1 text-green-600 dark:text-green-400 font-medium">
+            <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />läuft
+          </span>
+          <UrgencyBadge :score="task.urgency" />
+          <span v-if="task.due" :class="dueClass">Fällig {{ formatDate(task.due) }}</span>
+          <span v-if="task.project" class="text-gray-400 dark:text-gray-500 truncate max-w-[40%]">{{ task.project }}</span>
+        </div>
+      </div>
+
+      <!-- Overflow menu: 44px tap target -->
+      <button
+        @click="sheetOpen = true"
+        class="shrink-0 w-11 self-stretch flex items-center justify-center text-gray-400 dark:text-gray-500 active:text-gray-700 dark:active:text-gray-200"
+        aria-label="Aktionen"
+      >
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+      </button>
+    </div>
+
+    <!-- ===================== Desktop layout (>= sm) ===================== -->
+    <div
+      :class="[
+        isDone ? 'opacity-50' : 'hover:bg-gray-50 dark:hover:bg-gray-700',
+        isActive
           ? 'border-l-4 border-l-green-500 bg-green-100 dark:bg-green-900/30 dark:border-l-green-400'
           : 'border-l-4 border-l-transparent bg-white dark:bg-gray-800'
       ]"
-      class="border-b border-gray-100 dark:border-gray-700 px-4 py-3 flex items-start gap-3 transition-transform touch-pan-y cursor-pointer"
-      :style="{ transform: `translateX(${Math.max(swipeX, -160)}px)` }"
+      class="hidden sm:flex border-b border-gray-100 dark:border-gray-700 px-4 py-3 items-start gap-3 cursor-pointer"
       @click="$emit('open', task)"
     >
       <UrgencyBadge :score="task.urgency" class="mt-0.5 shrink-0" />
@@ -44,7 +81,6 @@
         <p v-if="task.due" :class="dueClass" class="text-xs mt-1">Due {{ formatDate(task.due) }}</p>
       </div>
 
-      <!-- Start/pause button -->
       <button
         v-if="!isDone"
         @click.stop="$emit('toggle-active', task)"
@@ -54,12 +90,9 @@
         class="shrink-0 transition-colors active:scale-90"
         :title="isActive ? 'Pause' : 'Start'"
       >
-        <!-- Pause icon -->
         <svg v-if="isActive" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-        <!-- Play icon -->
         <svg v-else class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
       </button>
-      <!-- Done button (only when in progress) -->
       <button
         v-if="isActive"
         @click.stop="$emit('complete', task.uuid)"
@@ -69,15 +102,27 @@
         <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
       </button>
 
-      <!-- Priority dot -->
       <span v-if="task.priority" :class="priorityClass" class="w-2 h-2 rounded-full shrink-0 mt-1.5" :title="'Priority ' + task.priority" />
     </div>
+
+    <!-- Mobile action sheet -->
+    <TaskActionSheet
+      :visible="sheetOpen"
+      :task="task"
+      :is-active="isActive"
+      :is-done="isDone"
+      @close="sheetOpen = false"
+      @toggle-active="$emit('toggle-active', task)"
+      @open="$emit('open', task)"
+      @delete="$emit('delete', task.uuid)"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
 import UrgencyBadge from './UrgencyBadge.vue'
+import TaskActionSheet from './TaskActionSheet.vue'
 
 const props = defineProps({ task: Object })
 defineEmits(['open', 'complete', 'delete', 'toggle-active'])
@@ -85,18 +130,7 @@ defineEmits(['open', 'complete', 'delete', 'toggle-active'])
 const isDone = computed(() => props.task.status === 'completed' || props.task.status === 'deleted')
 const isActive = computed(() => !!props.task.start)
 
-const swipeX = ref(0)
-let startX = 0
-
-function onTouchStart(e) { startX = e.touches[0].clientX }
-function onTouchMove(e) {
-  const dx = e.touches[0].clientX - startX
-  if (dx < 0) swipeX.value = dx
-}
-function onTouchEnd() {
-  if (swipeX.value < -80) swipeX.value = -160
-  else swipeX.value = 0
-}
+const sheetOpen = ref(false)
 
 const dueClass = computed(() => {
   if (!props.task.due) return ''
