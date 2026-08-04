@@ -1,0 +1,57 @@
+#!/bin/sh
+# Runway task interface — the exit-code-faithful entry point.
+#
+#   ./run <command> [args...]
+#
+# `make <command>` is the discoverable front door and delegates here. Use `./run` when
+# the exit code matters: GNU make reports 2 for any failed recipe, so it cannot pass
+# through the documented codes (0 ok, 1 rule violation, 2 needs input, 3 tooling,
+# 4 stale index). See docs/task-interface.md and ADR 0001.
+#
+# This dispatcher is the single place that maps a command name to an implementation.
+# RULE-TI-001 checks that it, the Makefile and docs/task-interface.md all agree.
+set -eu
+
+cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
+# Accept the same modifiers as the Makefile, in either position, so that a command
+# copied from the docs behaves identically through `make` and through `./run`.
+_rest=""
+for arg in "$@"; do
+	case "$arg" in
+		JSON=*) RUNWAY_JSON=${arg#JSON=}; export RUNWAY_JSON ;;
+		PLAN=*) RUNWAY_PLAN=${arg#PLAN=}; export RUNWAY_PLAN ;;
+		*)      _rest="${_rest}${_rest:+ }${arg}" ;;
+	esac
+done
+# shellcheck disable=SC2086  # deliberate word splitting: rebuild the argument list
+set -- $_rest
+
+cmd=${1:-help}
+if [ $# -gt 0 ]; then shift; fi
+
+case "$cmd" in
+	help)           exec tools/help.sh "$@" ;;
+	doctor)         exec tools/doctor.sh "$@" ;;
+	bootstrap)      exec tools/bootstrap.sh "$@" ;;
+	check)          exec tools/run-profile.sh check "$@" ;;
+	verify)         exec tools/run-profile.sh verify "$@" ;;
+
+	# Declared now, implemented by the step named in each line. An unimplemented
+	# command says so and exits 3 — it never pretends to succeed.
+	rebuild-verify) exec tools/stub.sh rebuild-verify 5  "clean index rebuild and equivalence validation" ;;
+	test)           exec tools/stub.sh test           3  "backend pytest tiers and frontend vitest" ;;
+	map)            exec tools/stub.sh map            7  "index query: where is X and who owns it" ;;
+	impact)         exec tools/stub.sh impact         7  "index query: change-impact radius and connected surfaces" ;;
+	index)          exec tools/stub.sh index          5  "knowledge-graph extraction and canonical export" ;;
+	brief)          exec tools/stub.sh brief          10 "Change Impact Brief generation and validation" ;;
+	scaffold)       exec tools/stub.sh scaffold       16 "unit scaffold generator" ;;
+	fix)            exec tools/stub.sh fix            2  "formatter and lint autofix" ;;
+	decay-review)   exec tools/stub.sh decay-review   16 "recurring decay review with verifiable evidence" ;;
+
+	*)
+		printf 'unknown command: %s\n\n' "$cmd" >&2
+		tools/help.sh >&2
+		exit 3
+		;;
+esac

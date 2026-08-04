@@ -1,0 +1,52 @@
+name: Verify
+
+# The authoritative mergeability gate. A green run means "mergeable".
+#
+# This job deliberately starts from a bare checkout and runs `make bootstrap`, so the
+# clean-clone reproducibility claim in docs/task-interface.md is tested rather than
+# asserted. Step 16a makes this a required status check and puts deploy.yml behind it.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read declared runtime versions
+        id: versions
+        # $GITHUB_OUTPUT accepts only KEY=value lines; versions.env carries comments
+        # because it is also sourced by tools/lib.sh.
+        run: grep -E '^[A-Z_]+=' tools/versions.env >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.versions.outputs.NODE_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Bootstrap from a clean clone
+        run: make bootstrap
+
+      - name: Doctor
+        run: make doctor
+
+      - name: Verify
+        run: make verify
+
+      - name: Verify (machine-readable, for the run log)
+        if: always()
+        run: make verify JSON=1
