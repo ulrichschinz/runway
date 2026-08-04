@@ -1,0 +1,105 @@
+# Runway Rule Ledger — every normative rule in this repository, with its evidence.
+#
+# Only MUST / MUST NOT / REQUIRED / FORBIDDEN statements get an id. Advice does not.
+# Each rule declares how it is enforced:
+#
+#   executable         a check that fails the gate  (documentation alone is not enforcement)
+#   observable         measured and reported, but not blocking
+#   human_judgment     cannot be mechanically checked; a named review criterion
+#   waiver             a temporary, expiring exception — see rules/waivers.yaml
+#
+# Every executable rule keeps a negative fixture proving that a genuine violation makes
+# the gate fail. A rule whose fixture is missing is not yet proven to work — correct
+# execution is not evidence that a gate works.
+#
+# THE META-RULE: changing any rule means changing the contract, the executable check or
+# this ledger entry, and a dated decision record — atomically, in the same commit.
+#
+# Every rule below has been adversarially verified by tools/fixtures/negative.sh: the
+# violation was constructed and the gate observed going red. Step 2 wires that script
+# into the verify profile so the proof runs on every gate execution rather than by hand.
+# Step 9 adds the validator that enforces this file's own shape.
+
+version: 1
+
+rules:
+  - id: RULE-HYG-001
+    statement: "Secret-bearing and generated paths MUST NOT be tracked in git."
+    class: executable
+    check: tools/checks/repo-hygiene.sh
+    fixture: tools/fixtures/negative.sh (verified 2026-08-04; wired into verify in Step 2)
+    contract: docs/task-interface.md#repository-hygiene
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      .env, users.db and data/ are bind-mounted from the production host. This is a
+      public repository, so tracking any of them publishes live credentials and user
+      data irreversibly.
+
+  - id: RULE-HYG-002
+    statement: ".gitignore MUST cover every secret-bearing and generated path."
+    class: executable
+    check: tools/checks/repo-hygiene.sh
+    fixture: tools/fixtures/negative.sh (verified 2026-08-04; wired into verify in Step 2)
+    contract: docs/task-interface.md#repository-hygiene
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      RULE-HYG-001 catches a leak that already happened. This one keeps it from being
+      possible in the first place.
+
+  - id: RULE-TI-001
+    statement: >
+      Every task-interface command MUST be documented in docs/task-interface.md, and
+      every documented command MUST exist and delegate to an executable script.
+    class: executable
+    check: tools/checks/task-interface.sh
+    fixture: tools/fixtures/negative.sh (verified 2026-08-04; wired into verify in Step 2)
+    contract: docs/task-interface.md#commands
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      The task interface is the first thing a cold agent reads. An undocumented command
+      is invisible to it; a documented but missing command sends it down a dead end.
+
+  - id: RULE-TI-002
+    statement: >
+      The runtime versions declared in tools/versions.env MUST match the versions the
+      Dockerfiles build on.
+    class: executable
+    check: tools/checks/toolchain-pinning.sh
+    fixture: tools/fixtures/negative.sh (verified 2026-08-04; wired into verify in Step 2)
+    contract: docs/task-interface.md#toolchain
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      versions.env is what bootstrap provisions against. Disagreement means every local
+      environment is quietly wrong about what production runs.
+
+  - id: RULE-GATE-001
+    statement: "A verification profile MUST complete inside its declared runtime budget."
+    class: executable
+    check: tools/run-profile.sh
+    fixture: tools/fixtures/negative.sh (verified 2026-08-04; wired into verify in Step 2)
+    contract: docs/task-interface.md#runtime-budgets
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A slow gate gets bypassed, which is worse than no gate: it teaches contributors
+      that green is optional. Budgets live in tools/checks/budgets.conf.
+
+# Residual risks — properties that matter but cannot currently be made executable.
+# Each carries the trigger that should re-open it.
+residual_risks:
+  - id: RISK-BOOTSTRAP-001
+    statement: >
+      The non-uv bootstrap path (python3 -m venv against a system interpreter) is not
+      exercised by CI; only `make doctor`'s warning covers it.
+    owner: maintainer
+    re_open_trigger: "a contributor reports a bootstrap failure, or a second CI runner image is added"
+    decision_record: docs/adr/0002-python-interpreter-provisioning.md

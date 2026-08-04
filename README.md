@@ -145,6 +145,18 @@ Available MCP tools mirror the REST API: `list_tasks`, `create_task`, `start_tas
 
 ## Development
 
+This repository has one command surface for every ecosystem. Start here:
+
+```bash
+make help        # every available command
+make bootstrap   # prepare a clean clone (idempotent)
+make check       # fast local gate — run before every commit
+make verify      # the authoritative gate; green means mergeable
+```
+
+Full reference, exit codes and JSON output: [`docs/task-interface.md`](docs/task-interface.md).
+Use `./run <command>` instead of `make` when the exit code matters — `make` reports `2` for any failure.
+
 ```bash
 # Rebuild and restart a single service after code changes
 docker compose build backend && docker compose up -d backend
