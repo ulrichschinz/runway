@@ -44,9 +44,8 @@ jobs:
       - name: Doctor
         run: make doctor
 
+      - name: Resolved execution plan
+        run: ./run verify PLAN=1 JSON=1
+
       - name: Verify
         run: make verify
-
-      - name: Verify (machine-readable, for the run log)
-        if: always()
-        run: make verify JSON=1

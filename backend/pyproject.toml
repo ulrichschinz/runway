@@ -1,0 +1,42 @@
+# Tooling configuration for the backend unit. This file configures ruff and mypy only —
+# the backend is a deployed application, not a distributed package, so it declares no
+# [project] metadata and its dependencies stay in requirements.txt.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["."]
+
+[tool.ruff.lint]
+# Deliberately modest to start. The point of the first lint pass is a gate that is green
+# and enforced, not the largest rule set that can be switched on. Widening the selection
+# is a later, separately reviewable change.
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes — undefined names, unused imports, shadowing
+    "I",    # isort — import ordering
+    "UP",   # pyupgrade — outdated idioms for the target version
+    "B",    # flake8-bugbear — likely bugs
+    "S",    # flake8-bandit — security
+    "T20",  # flake8-print — no stray print() in a service
+]
+ignore = [
+    "E501",  # line length is enforced by the formatter, not the linter
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Router modules use FastAPI's Depends(...) in argument defaults. B008 forbids function
+# calls in defaults; for FastAPI that idiom is the framework's dependency injection, not
+# a mutable-default bug.
+"app/routers/*.py" = ["B008"]
+"app/dependencies.py" = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app"]
+# Third-party stubs are not installed; this repository does not gain from vendoring them.
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true

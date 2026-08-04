@@ -10,7 +10,6 @@ set -eu
 load_versions
 
 cd "$REPO_ROOT"
-before=$(wc -l <"$RUNWAY_FINDINGS" 2>/dev/null || echo 0)
 
 grep -qE "^FROM python:${PYTHON_VERSION}(\.|-)" backend/Dockerfile ||
 	fail_rule RULE-TI-002 "backend/Dockerfile does not build on python:${PYTHON_VERSION} (tools/versions.env)"
@@ -18,8 +17,7 @@ grep -qE "^FROM python:${PYTHON_VERSION}(\.|-)" backend/Dockerfile ||
 grep -qE "^FROM node:${NODE_VERSION}(\.|-)" frontend/Dockerfile ||
 	fail_rule RULE-TI-002 "frontend/Dockerfile does not build on node:${NODE_VERSION} (tools/versions.env)"
 
-after=$(wc -l <"$RUNWAY_FINDINGS" 2>/dev/null || echo 0)
-if [ "$after" -gt "$before" ]; then
+if ! check_result; then
 	exit "$EX_RULE"
 fi
 ok "Dockerfiles build on python ${PYTHON_VERSION} and node ${NODE_VERSION}, as declared"

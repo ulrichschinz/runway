@@ -1,0 +1,5 @@
+# Backend development and verification tooling. Pinned exactly, like requirements.txt:
+# a gate whose tools float is a gate whose verdict changes without anyone changing code.
+
+ruff==0.16.1
+mypy==2.3.0

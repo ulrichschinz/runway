@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP
+
 from app.database import init_db
-from app.routers import auth, tasks, gtd, projects, inbox, admin
+from app.routers import admin, auth, gtd, inbox, projects, tasks
 
 
 @asynccontextmanager

@@ -1,7 +1,7 @@
-import subprocess
-import os
 import json
-from pathlib import Path
+import os
+import subprocess
+
 from app.config import settings
 
 
@@ -18,7 +18,7 @@ def _run(username: str, args: list[str]) -> str:
 
     cmd = ["task", "rc.json.array=on", "rc.confirmation=off", "rc.verbose=nothing", *args]
 
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603  # WAIVER-SEC-002 — Step 12 hardens the argv
         cmd,
         env=env,
         capture_output=True,

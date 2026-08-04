@@ -28,7 +28,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import TaskList from '../components/TaskList.vue'
 import TaskModal from '../components/TaskModal.vue'

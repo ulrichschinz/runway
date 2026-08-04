@@ -1,4 +1,5 @@
 import aiosqlite
+
 from app.config import settings
 
 CREATE_USERS = """
@@ -58,6 +59,7 @@ async def get_db():
 
 def _generate_api_key() -> str:
     import secrets
+
     return secrets.token_urlsafe(32)
 
 
@@ -83,7 +85,7 @@ async def init_db():
             try:
                 await db.execute(col_sql)
                 await db.commit()
-            except Exception:
+            except Exception:  # noqa: S110  # WAIVER-OPS-001 — Step 15 adds logging
                 pass
         # generate api_key for users that don't have one
         async with db.execute("SELECT username FROM users WHERE api_key IS NULL") as cur:

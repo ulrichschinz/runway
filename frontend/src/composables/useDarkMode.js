@@ -1,7 +1,9 @@
 import { ref } from 'vue'
 
 const stored = localStorage.getItem('theme')
-const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+// The system preference is deliberately NOT consulted: the app defaults to light
+// mode regardless (commit cb707b4). The matchMedia probe that used to live here was
+// dead from that commit onward.
 const isDark = ref(stored ? stored === 'dark' : false)
 
 // Keep the browser UI (status bar / address bar) in sync with the theme.

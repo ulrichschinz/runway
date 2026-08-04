@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
 from aiosqlite import Connection
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+
 from app.database import get_db
 from app.services import task_service
 
@@ -10,14 +10,18 @@ router = APIRouter(prefix="/inbox", tags=["inbox"])
 
 class InboxItem(BaseModel):
     description: str
-    note: Optional[str] = None
-    priority: Optional[str] = None  # H, M, L
+    note: str | None = None
+    priority: str | None = None  # H, M, L
 
 
-@router.post("", status_code=201, summary="Add to inbox via API key",
+@router.post(
+    "",
+    status_code=201,
+    summary="Add to inbox via API key",
     description="Add a task to the inbox of the user identified by their API key. "
-                "Pass the key as 'Authorization: Bearer <api_key>'. "
-                "Intended for agents and automations — no login required.")
+    "Pass the key as 'Authorization: Bearer <api_key>'. "
+    "Intended for agents and automations — no login required.",
+)
 async def webhook_inbox(
     item: InboxItem,
     authorization: str = Header(...),
@@ -33,6 +37,7 @@ async def webhook_inbox(
     username = row["username"]
 
     from app.models import TaskCreate
+
     task = task_service.create_task(
         username,
         TaskCreate(

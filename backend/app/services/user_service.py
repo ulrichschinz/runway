@@ -1,5 +1,6 @@
 import shutil
 from pathlib import Path
+
 from app.config import settings
 
 TASKRC_TEMPLATE = Path(__file__).parent.parent.parent / "taskrc_template.txt"
