@@ -165,6 +165,18 @@ They must stay untracked, and `.gitignore` must cover them so it cannot happen b
 Dockerfiles must agree with it. It is what `make bootstrap` provisions against, so disagreement means every
 local environment is quietly wrong about what production runs.
 
+## The service must be able to start
+
+`RULE-DEP-001`. `python -c 'import app.main'` — no server, no database, no Docker.
+
+This rule exists because the situation it forbids actually happened. `fastapi-mcp 0.3.3` requires
+`mcp>=1.6.0` with no upper bound; `mcp 2.0.0` changed `Server.__init__`, so every image built after that
+release contained a backend that raised before uvicorn bound a port. The image built, the registry push
+succeeded, the deploy job went green, and the service was down. See ADR 0004.
+
+Transitive dependencies are still not pinned as a whole — Step 14 owns that. This rule is what makes the
+gap survivable meanwhile.
+
 ## Formatting, linting and types
 
 `RULE-FMT-001`, `RULE-LINT-001`, `RULE-LINT-002`, `RULE-TYPE-001`.

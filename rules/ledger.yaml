@@ -109,6 +109,25 @@ rules:
       JSON mode corrupts it for every consumer while the human output still looks
       perfect — which is exactly how two such bugs reached CI before this rule existed.
 
+  - id: RULE-DEP-001
+    statement: >
+      The backend application MUST import cleanly from its pinned dependency set — the
+      service must be able to start.
+    class: executable
+    check: tools/checks/py-import.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#the-service-must-be-able-to-start
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      This rule exists because the situation it forbids actually happened. fastapi-mcp
+      0.3.3 requires mcp>=1.6.0 with no upper bound; mcp 2.0.0 changed Server.__init__,
+      so every image built after that release held a backend that raised TypeError
+      before uvicorn bound a port. The image built, the push succeeded, the deploy job
+      went green, and the service was down. It is the cheapest possible check that the
+      thing being shipped can run at all.
+
   - id: RULE-FMT-001
     statement: "Backend Python MUST be formatted by `ruff format`."
     class: executable
