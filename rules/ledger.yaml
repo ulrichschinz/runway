@@ -93,6 +93,22 @@ rules:
       A slow gate gets bypassed, which is worse than no gate: it teaches contributors
       that green is optional. Budgets live in tools/checks/budgets.conf.
 
+  - id: RULE-TI-003
+    statement: >
+      Every command's JSON=1 output MUST be a single valid JSON object on stdout, with
+      nothing else mixed in.
+    class: executable
+    check: tools/checks/json-output.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#machine-readable-output
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Agents parse this stream. A check that prints a friendly summary without honouring
+      JSON mode corrupts it for every consumer while the human output still looks
+      perfect — which is exactly how two such bugs reached CI before this rule existed.
+
   - id: RULE-FMT-001
     statement: "Backend Python MUST be formatted by `ruff format`."
     class: executable

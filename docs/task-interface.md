@@ -116,6 +116,10 @@ make check JSON=1       # identical output, exit code collapsed to 2 on failure
 A `check` or `verify` run reports its profile, scope, elapsed time, budget, counts, and every finding with
 its rule id, message, contract reference and fix command.
 
+`RULE-TI-003` enforces that this stream is *only* the JSON object. A check that prints a friendly summary
+without honouring JSON mode corrupts it for every machine consumer while the human output still looks
+perfect — two such bugs reached CI before the rule existed.
+
 ## The resolved execution plan
 
 Pass `PLAN=1` to `check` or `verify` to see exactly what would run, and why, without running it:

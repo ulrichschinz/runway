@@ -16,6 +16,14 @@ cd "$REPO_ROOT"
 
 command -v tar >/dev/null 2>&1 || { printf '  tar is required\n' >&2; exit "$EX_TOOLING"; }
 
+# These fixtures assert on human-readable gate output. If the caller is running the gate
+# in JSON mode, that setting must NOT reach the sandboxed runs, or every assertion below
+# would match against a JSON object that omits the human text and silently report that
+# nothing can fail — the worst possible false negative for a conformance suite.
+RUNWAY_JSON=
+RUNWAY_PLAN=
+export RUNWAY_JSON RUNWAY_PLAN
+
 SANDBOX=$(mktemp -d)
 trap 'rm -rf "$SANDBOX"' EXIT INT TERM
 
@@ -123,6 +131,23 @@ expect_red "TYPE-001" "tools/checks/py-types.sh" "RULE-TYPE-001"
 # --- RULE-LINT-002 — a frontend lint violation ------------------------------
 printf '\nconst neverUsed = 42\n' >>"$SANDBOX/frontend/src/composables/useScrollLock.js"
 expect_red "LINT-002" "tools/checks/js-lint.sh" "RULE-LINT-002"
+
+# --- RULE-TI-003 — a check pollutes stdout in JSON mode ---------------------
+#
+# This is the real bug this rule was written for: a check that prints a friendly summary
+# without honouring JSON mode corrupts the stream for every machine consumer, while the
+# human output still looks perfect.
+cat >"$SANDBOX/tools/checks/chatty-fixture.sh" <<'CHATTY'
+#!/bin/sh
+set -eu
+. "$(dirname -- "$0")/../lib.sh"
+printf 'this line ignores JSON mode and breaks the stream\n'
+exit 0
+CHATTY
+chmod +x "$SANDBOX/tools/checks/chatty-fixture.sh"
+printf 'chatty-fixture       check           Prints to stdout regardless of JSON mode\n' \
+	>>"$SANDBOX/tools/checks/profiles.conf"
+expect_red "TI-003" "tools/checks/json-output.sh" "RULE-TI-003"
 
 # --- RULE-GATE-001 — the profile blows its runtime budget -------------------
 #
