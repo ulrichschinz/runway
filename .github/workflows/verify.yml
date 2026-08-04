@@ -4,12 +4,15 @@ name: Verify
 #
 # This job deliberately starts from a bare checkout and runs `make bootstrap`, so the
 # clean-clone reproducibility claim in docs/task-interface.md is tested rather than
-# asserted. Step 16a makes this a required status check and puts deploy.yml behind it.
+# asserted.
+#
+# It is also callable: deploy.yml runs it as its first job and refuses to build or ship
+# anything unless it passes. That is why `push: main` is NOT a trigger here — main is
+# verified exactly once, inside the deploy pipeline, rather than twice in parallel.
 
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_call:
 
 concurrency:
   group: verify-${{ github.ref }}

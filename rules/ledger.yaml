@@ -109,6 +109,25 @@ rules:
       JSON mode corrupts it for every consumer while the human output still looks
       perfect — which is exactly how two such bugs reached CI before this rule existed.
 
+  - id: RULE-GOV-001
+    statement: >
+      The live branch protection MUST match the checked-in desired state in
+      ops/github/ruleset.json.
+    class: executable
+    check: tools/checks/branch-protection.sh
+    fixture: >
+      manual, against the live GitHub API — see docs/operations.md#governance-drift-evidence.
+      Verified 2026-08-04 against three real drift scenarios: enforcement disabled, a rule
+      removed, and a bypass actor added. It cannot run in the offline fixture sandbox,
+      which is recorded as RISK-GOV-003.
+    contract: docs/operations.md#branch-protection
+    fix: tools/apply-ruleset.sh
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A protection that can be switched off in a web UI without leaving a trace is not a
+      control. The checked-in file is canonical and drift away from it is detectable.
+
   - id: RULE-DEP-001
     statement: >
       The backend application MUST import cleanly from its pinned dependency set — the
@@ -201,6 +220,33 @@ rules:
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.
 residual_risks:
+  - id: RISK-GOV-001
+    statement: >
+      Required-reviewer enforcement is impossible with a single maintainer: the only
+      person who can approve a change is the person who wrote it. No control in this
+      repository provides independent review of a change to the rules themselves.
+    owner: maintainer
+    re_open_trigger: "a second contributor gains write access to the repository"
+    decision_record: docs/plan/phase-0-2.md F4
+
+  - id: RISK-GOV-002
+    statement: >
+      tools/checks/branch-protection.sh needs network and an authenticated gh. Where it
+      cannot reach GitHub it reports that and does not fail, so a run on an offline
+      machine proves nothing about the live governance state.
+    owner: maintainer
+    re_open_trigger: "the scheduled decay review (Step 16c) begins carrying this evidence"
+    decision_record: docs/adr/0005-gate-the-deploy.md
+
+  - id: RISK-GOV-003
+    statement: >
+      RULE-GOV-001 has no automated negative fixture. Its violations were constructed and
+      observed by hand against the live API because the offline fixture sandbox has no
+      GitHub to drift from.
+    owner: maintainer
+    re_open_trigger: "Step 9's ledger validator requires an automated fixture for every executable rule"
+    decision_record: docs/operations.md
+
   - id: RISK-BOOTSTRAP-001
     statement: >
       The non-uv bootstrap path (python3 -m venv against a system interpreter) is not

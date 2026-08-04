@@ -13,6 +13,20 @@ services:
       - DB_PATH=/app/users.db
     network_mode: host
     restart: unless-stopped
+    # A container that crash-loops on startup used to be indistinguishable from a healthy
+    # one: `docker compose up -d` returns success either way. On 2026-08-04 that gap kept a
+    # dead backend in production through two green deploys (ADR 0004). Python is used
+    # rather than curl because the runtime image has no HTTP client installed.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   frontend:
     build:
@@ -20,5 +34,12 @@ services:
       network: host
     network_mode: host
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:4000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
