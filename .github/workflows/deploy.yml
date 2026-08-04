@@ -1,5 +1,15 @@
 name: Build and Deploy
 
+# Nothing is built and nothing is shipped unless VERIFY passes first.
+#
+# Before 2026-08-04 this workflow went straight from push to build to deploy with no
+# verification of any kind. On that date two runs reported success while shipping a
+# backend that could not start: mcp 2.0.0 broke an unpinned transitive dependency, the
+# image built fine because the failure was at import time, the registry push succeeded,
+# and the service was down. See docs/adr/0004-pin-transitive-mcp.md.
+#
+# The `verify` job below is the same reusable workflow that guards every pull request.
+
 on:
   push:
     branches: [main]
@@ -9,7 +19,11 @@ env:
   SERVICE_NAME: runway
 
 jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   build-and-push:
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -26,19 +40,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Every image carries an immutable commit-SHA tag alongside :latest. Without one
+      # there is no rollback target — :latest cannot name a previous build.
       - name: Build and push backend
         uses: docker/build-push-action@v5
         with:
           context: ./backend
           push: true
-          tags: ${{ env.REGISTRY }}/${{ github.repository }}-backend:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}-backend:latest
+            ${{ env.REGISTRY }}/${{ github.repository }}-backend:${{ github.sha }}
 
       - name: Build and push frontend
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
           push: true
-          tags: ${{ env.REGISTRY }}/${{ github.repository }}-frontend:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}-frontend:latest
+            ${{ env.REGISTRY }}/${{ github.repository }}-frontend:${{ github.sha }}
+
+      - name: Record the rollback target
+        run: |
+          printf 'Rollback target for this deploy: %s\n' "${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          printf 'See docs/operations.md#rolling-back.\n' >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     needs: build-and-push

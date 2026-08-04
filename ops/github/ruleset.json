@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "Desired state for branch protection on the default branch. This file is CANONICAL:",
+    "the live GitHub configuration is compared against it by tools/checks/branch-protection.sh",
+    "(RULE-GOV-001), so a protection silently disabled in the web UI is detectable.",
+    "",
+    "Apply or re-apply with:  tools/apply-ruleset.sh",
+    "",
+    "Scope note (decision F4 in docs/plan/phase-0-2.md): a pull request is NOT required, so",
+    "direct pushes to main stay allowed. required_status_checks was verified empirically on a",
+    "throwaway branch on 2026-08-04 to gate pull-request merges WITHOUT rejecting direct",
+    "pushes, so both halves of that decision hold at once.",
+    "",
+    "Defence in depth, not a single control:",
+    "  - required_status_checks stops a red pull request being merged;",
+    "  - deploy.yml runs the same verify job before build-and-push and deploy, so a direct",
+    "    push that fails verification builds and ships nothing;",
+    "  - non_fast_forward and deletion protect the branch history itself.",
+    "",
+    "Required-reviewer enforcement is impossible with a single maintainer and is recorded as",
+    "RISK-GOV-001 in rules/ledger.yaml, with a re-open trigger."
+  ],
+  "name": "main-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [{ "context": "verify" }]
+      }
+    }
+  ],
+  "bypass_actors": []
+}
