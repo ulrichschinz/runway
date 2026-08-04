@@ -26,7 +26,9 @@ jobs:
 
       - name: Read declared runtime versions
         id: versions
-        run: cat tools/versions.env >> "$GITHUB_OUTPUT"
+        # $GITHUB_OUTPUT accepts only KEY=value lines; versions.env carries comments
+        # because it is also sourced by tools/lib.sh.
+        run: grep -E '^[A-Z_]+=' tools/versions.env >> "$GITHUB_OUTPUT"
 
       - name: Set up Node
         uses: actions/setup-node@v4
