@@ -132,6 +132,14 @@ expect_red "TYPE-001" "tools/checks/py-types.sh" "RULE-TYPE-001"
 printf '\nconst neverUsed = 42\n' >>"$SANDBOX/frontend/src/composables/useScrollLock.js"
 expect_red "LINT-002" "tools/checks/js-lint.sh" "RULE-LINT-002"
 
+# --- RULE-DEP-001 — the application cannot be imported ----------------------
+#
+# The real incident this rule exists for: an unpinned transitive dependency shipped a
+# breaking change, every fresh image contained a backend that raised on import, and the
+# deploy pipeline reported success. Here the break is injected directly.
+printf '\nraise ImportError("injected by the negative fixture")\n' >>"$SANDBOX/backend/app/main.py"
+expect_red "DEP-001" "tools/checks/py-import.sh" "RULE-DEP-001"
+
 # --- RULE-TI-003 — a check pollutes stdout in JSON mode ---------------------
 #
 # This is the real bug this rule was written for: a check that prints a friendly summary
