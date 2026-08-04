@@ -27,7 +27,7 @@ rules:
     statement: "Secret-bearing and generated paths MUST NOT be tracked in git."
     class: executable
     check: tools/checks/repo-hygiene.sh
-    fixture: tools/fixtures/negative.sh (verified 2026-08-04; wired into verify in Step 2)
+    fixture: tools/fixtures/negative.sh
     contract: docs/task-interface.md#repository-hygiene
     fix: none
     owner: maintainer
@@ -41,7 +41,7 @@ rules:
     statement: ".gitignore MUST cover every secret-bearing and generated path."
     class: executable
     check: tools/checks/repo-hygiene.sh
-    fixture: tools/fixtures/negative.sh (verified 2026-08-04; wired into verify in Step 2)
+    fixture: tools/fixtures/negative.sh
     contract: docs/task-interface.md#repository-hygiene
     fix: none
     owner: maintainer
@@ -56,7 +56,7 @@ rules:
       every documented command MUST exist and delegate to an executable script.
     class: executable
     check: tools/checks/task-interface.sh
-    fixture: tools/fixtures/negative.sh (verified 2026-08-04; wired into verify in Step 2)
+    fixture: tools/fixtures/negative.sh
     contract: docs/task-interface.md#commands
     fix: none
     owner: maintainer
@@ -71,7 +71,7 @@ rules:
       Dockerfiles build on.
     class: executable
     check: tools/checks/toolchain-pinning.sh
-    fixture: tools/fixtures/negative.sh (verified 2026-08-04; wired into verify in Step 2)
+    fixture: tools/fixtures/negative.sh
     contract: docs/task-interface.md#toolchain
     fix: none
     owner: maintainer
@@ -84,7 +84,7 @@ rules:
     statement: "A verification profile MUST complete inside its declared runtime budget."
     class: executable
     check: tools/run-profile.sh
-    fixture: tools/fixtures/negative.sh (verified 2026-08-04; wired into verify in Step 2)
+    fixture: tools/fixtures/negative.sh
     contract: docs/task-interface.md#runtime-budgets
     fix: none
     owner: maintainer
@@ -92,6 +92,76 @@ rules:
     rationale: >
       A slow gate gets bypassed, which is worse than no gate: it teaches contributors
       that green is optional. Budgets live in tools/checks/budgets.conf.
+
+  - id: RULE-FMT-001
+    statement: "Backend Python MUST be formatted by `ruff format`."
+    class: executable
+    check: tools/checks/py-format.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#formatting-linting-and-types
+    fix: make fix
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Formatting arguments are a tax on every review. One tool decides, nobody argues,
+      and the fix is a single command — so a formatting failure never costs thinking.
+
+  - id: RULE-LINT-001
+    statement: "Backend Python MUST pass `ruff check` with the repository's rule selection."
+    class: executable
+    check: tools/checks/py-lint.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#formatting-linting-and-types
+    fix: make fix
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      The selection includes flake8-bandit (S), which is how SEC-1, SEC-3 and the silent
+      migration except-clause became visible as gate findings rather than prose in a
+      report. Suppressions require an entry in rules/waivers.yaml.
+
+  - id: RULE-LINT-002
+    statement: "Frontend JavaScript and Vue MUST pass `eslint`."
+    class: executable
+    check: tools/checks/js-lint.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#formatting-linting-and-types
+    fix: make fix
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Scoped to vue/essential — correctness rules only, no template formatting opinions.
+      See ADR 0003 for why, and for the trigger to widen it.
+
+  - id: RULE-TYPE-001
+    statement: "Backend Python MUST pass `mypy` with the repository's configuration."
+    class: executable
+    check: tools/checks/py-types.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#formatting-linting-and-types
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      `check_untyped_defs` is enabled deliberately: it is what surfaced the unchecked
+      `Row | None` indexing in two request handlers (WAIVER-TYPE-001), a class of latent
+      500 that no test in this repository would have caught.
+
+  - id: RULE-GATE-002
+    statement: >
+      Every executable rule MUST have a negative fixture proving that a genuine
+      violation makes the gate fail.
+    class: executable
+    check: tools/checks/gate-conformance.sh
+    fixture: tools/fixtures/negative.sh (self-proving — it is the fixture suite)
+    contract: docs/task-interface.md#gate-conformance
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      A gate component that has never been observed failing is not a rule; it is a shell
+      call nobody has tested, and it is worse than nothing because it is believed. This
+      rule is why every other rule in this ledger can be trusted.
 
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.

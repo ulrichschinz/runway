@@ -8,7 +8,6 @@ set -eu
 . "$(dirname -- "$0")/../lib.sh"
 
 cd "$REPO_ROOT"
-before=$(wc -l <"$RUNWAY_FINDINGS" 2>/dev/null || echo 0)
 
 reference="docs/task-interface.md"
 if [ ! -f "$reference" ]; then
@@ -52,8 +51,7 @@ for script in $(awk '/exec tools\//{for (i = 1; i <= NF; i++) if ($i ~ /^tools\/
 	[ -x "$script" ] || fail_rule RULE-TI-001 "./run calls '$script', which is missing or not executable"
 done
 
-after=$(wc -l <"$RUNWAY_FINDINGS" 2>/dev/null || echo 0)
-if [ "$after" -gt "$before" ]; then
+if ! check_result; then
 	exit "$EX_RULE"
 fi
 ok "$(printf '%s\n' "$in_makefile" | wc -l | tr -d ' ') commands, all documented and all delegating to an executable script"

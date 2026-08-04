@@ -1,7 +1,7 @@
-from typing import Optional
-from fastapi import Depends, HTTPException, Header, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from aiosqlite import Connection
+from fastapi import Depends, Header, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 from app.auth import decode_token
 from app.database import get_db
 
@@ -9,8 +9,8 @@ bearer = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
-    x_api_key: Optional[str] = Header(None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    x_api_key: str | None = Header(None),
     db: Connection = Depends(get_db),
 ) -> str:
     if x_api_key:

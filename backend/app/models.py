@@ -1,5 +1,4 @@
 from pydantic import BaseModel
-from typing import Optional, List
 
 
 class TaskAnnotation(BaseModel):
@@ -13,45 +12,45 @@ class Task(BaseModel):
     description: str
     status: str
     urgency: float = 0.0
-    project: Optional[str] = None
+    project: str | None = None
     tags: list[str] = []
-    priority: Optional[str] = None
-    due: Optional[str] = None
-    scheduled: Optional[str] = None
-    wait: Optional[str] = None
-    until: Optional[str] = None
-    recur: Optional[str] = None
+    priority: str | None = None
+    due: str | None = None
+    scheduled: str | None = None
+    wait: str | None = None
+    until: str | None = None
+    recur: str | None = None
     depends: list[str] = []
     annotations: list[TaskAnnotation] = []
-    start: Optional[str] = None
-    entry: Optional[str] = None
-    modified: Optional[str] = None
+    start: str | None = None
+    entry: str | None = None
+    modified: str | None = None
 
 
 class TaskCreate(BaseModel):
     description: str
-    project: Optional[str] = None
+    project: str | None = None
     tags: list[str] = []
-    priority: Optional[str] = None  # H, M, L
-    due: Optional[str] = None
-    scheduled: Optional[str] = None
-    wait: Optional[str] = None
-    until: Optional[str] = None
-    recur: Optional[str] = None
+    priority: str | None = None  # H, M, L
+    due: str | None = None
+    scheduled: str | None = None
+    wait: str | None = None
+    until: str | None = None
+    recur: str | None = None
     depends: list[str] = []
 
 
 class TaskModify(BaseModel):
-    description: Optional[str] = None
-    project: Optional[str] = None
-    tags: Optional[list[str]] = None
-    priority: Optional[str] = None
-    due: Optional[str] = None
-    scheduled: Optional[str] = None
-    wait: Optional[str] = None
-    until: Optional[str] = None
-    recur: Optional[str] = None
-    depends: Optional[list[str]] = None
+    description: str | None = None
+    project: str | None = None
+    tags: list[str] | None = None
+    priority: str | None = None
+    due: str | None = None
+    scheduled: str | None = None
+    wait: str | None = None
+    until: str | None = None
+    recur: str | None = None
+    depends: list[str] | None = None
 
 
 class AnnotationCreate(BaseModel):
@@ -70,19 +69,19 @@ class UserLogin(BaseModel):
 
 class Token(BaseModel):
     access_token: str
-    token_type: str = "bearer"
+    token_type: str = "bearer"  # noqa: S105  # OAuth token type name, not a credential
 
 
 class UserInfo(BaseModel):
     username: str
-    role: str = 'user'
-    full_name: str = ''
-    email: str = ''
+    role: str = "user"
+    full_name: str = ""
+    email: str = ""
 
 
 class UserProfileUpdate(BaseModel):
-    full_name: Optional[str] = None
-    email: Optional[str] = None
+    full_name: str | None = None
+    email: str | None = None
 
 
 class PasswordChange(BaseModel):
@@ -109,20 +108,20 @@ class ProjectCreate(BaseModel):
 
 class ProjectPlan(BaseModel):
     project_name: str
-    purpose: str = ''
-    principles: str = ''
-    vision: str = ''
-    brainstorm: List[BrainstormItem] = []
-    organized: List[BrainstormItem] = []
-    updated_at: Optional[str] = None
+    purpose: str = ""
+    principles: str = ""
+    vision: str = ""
+    brainstorm: list[BrainstormItem] = []
+    organized: list[BrainstormItem] = []
+    updated_at: str | None = None
 
 
 class ProjectPlanUpdate(BaseModel):
-    purpose: Optional[str] = None
-    principles: Optional[str] = None
-    vision: Optional[str] = None
-    brainstorm: Optional[List[BrainstormItem]] = None
-    organized: Optional[List[BrainstormItem]] = None
+    purpose: str | None = None
+    principles: str | None = None
+    vision: str | None = None
+    brainstorm: list[BrainstormItem] | None = None
+    organized: list[BrainstormItem] | None = None
 
 
 class ApiKeyInfo(BaseModel):

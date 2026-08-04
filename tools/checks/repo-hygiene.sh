@@ -10,7 +10,6 @@ set -eu
 
 cd "$REPO_ROOT"
 
-before=$(wc -l <"$RUNWAY_FINDINGS" 2>/dev/null || echo 0)
 tracked=$(git ls-files)
 
 # <path>|<required .gitignore line>
@@ -39,8 +38,7 @@ for f in $(printf '%s\n' "$tracked" | grep -E '\.(pem|key|p12|pfx)$|(^|/)id_(rsa
 	fail_rule RULE-HYG-001 "credential-shaped file '$f' is tracked in git"
 done
 
-after=$(wc -l <"$RUNWAY_FINDINGS" 2>/dev/null || echo 0)
-if [ "$after" -gt "$before" ]; then
+if ! check_result; then
 	exit "$EX_RULE"
 fi
 ok "no secret-bearing path is tracked; .gitignore covers all of them"

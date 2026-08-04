@@ -78,8 +78,9 @@ Creates a new unit that is conformant to the structure and the boundary rules by
 passing smoke test and zero manual edits. *Implemented in Step 16.*
 
 ### `make fix`
-Applies every deterministic, semantics-preserving repository-owned fix. Tool-owned and generated files are
-repaired by running this, never by hand-editing. *Implemented in Step 2.*
+Applies every deterministic, semantics-preserving repository-owned fix: `ruff` import order, safe lint fixes
+and formatting for the backend, `eslint --fix` for the frontend. Tool-owned and generated files are repaired
+by running this, never by hand-editing — a hand-edit produces a diff the tool undoes on its next run.
 
 ### `make decay-review`
 Runs the recurring agent-readiness decay review and writes verifiable evidence of the run. *Implemented in
@@ -160,18 +161,53 @@ They must stay untracked, and `.gitignore` must cover them so it cannot happen b
 Dockerfiles must agree with it. It is what `make bootstrap` provisions against, so disagreement means every
 local environment is quietly wrong about what production runs.
 
+## Formatting, linting and types
+
+`RULE-FMT-001`, `RULE-LINT-001`, `RULE-LINT-002`, `RULE-TYPE-001`.
+
+| Ecosystem | Tools | Config |
+|---|---|---|
+| `backend` | `ruff` (format + lint), `mypy` | `backend/pyproject.toml` |
+| `frontend` | `eslint` + `eslint-plugin-vue` (`flat/essential`) | `frontend/eslint.config.js` |
+
+Run `make fix` first — it repairs everything deterministic. What remains needs a decision.
+
+Rule selections are deliberately modest, and ADR 0003 records why plus the trigger to widen them. Dev tools
+are pinned exactly (`backend/requirements-dev.txt`): a gate whose tools float is a gate whose verdict changes
+without anyone changing code.
+
+**Suppressions are not free.** Every `# noqa` and `# type: ignore` must correspond to an entry in
+`rules/waivers.yaml` — either a `scheduled_remediation` carrying an owner, a risk, a mitigation and an
+expiry, or a reviewed `justified_suppression` explaining why the finding is a false positive. Step 9 makes
+that correspondence a gate check. Suppressing a finding silently is the one thing that turns a lint gate into
+theatre.
+
+## Gate conformance
+
+`RULE-GATE-002`. `tools/fixtures/negative.sh` constructs a genuine violation of every executable rule and
+requires the gate to go red. It runs as part of `verify`.
+
+Each fixture executes inside a throwaway copy of the **current working tree**, with the toolchains symlinked
+rather than copied, so it never mutates the tree you are working in and is safe to run with uncommitted
+changes in flight.
+
+This is the rule that makes the others trustworthy: a gate component nobody has watched fail is not a rule,
+it is a shell call, and it is worse than nothing because it is believed.
+
 ## Known gaps at this step
 
 - The commands marked *implemented in Step N* exit `3` with a message naming that step. They do not pretend
   to succeed.
-- Every rule has been adversarially verified by `tools/fixtures/negative.sh` — the violation was constructed
-  and the gate observed going red. That script is **not yet wired into a profile**, so the proof is
-  reproducible on demand but does not run automatically. Step 2 wires it in.
 - Gate failure messages point at this document. Step 9 repoints them at the root `AGENTS.md` and adds the
   contract self-check that keeps the reference honest.
-- `make verify` does not yet run a formatter, linter, type checker, test suite, boundary check, or index
-  freshness check. **A green `verify` at this step means the repository is hygienic and its interface is
-  coherent — not that its code is correct.** Steps 2 through 8 close that gap.
+- **`make verify` runs no tests.** There is not a single test in this repository yet. A green `verify` means
+  the repository is hygienic, its interface is coherent, and its code is formatted, lint-clean and
+  type-clean — **not that it behaves correctly.** Steps 3 and 4 add the safety net; Steps 5–8 add the index
+  and boundary enforcement.
+- `rules/waivers.yaml` is not yet validated by a check, so an expired waiver does not currently fail the
+  gate. Four entries carry expiry dates of 2026-11-04. Step 9 adds the validator.
+- The frontend dependency tree carries 5 known vulnerabilities (1 moderate, 4 high) reported by `npm`.
+  Dependency auditing and the license policy are Step 14.
 
 
 

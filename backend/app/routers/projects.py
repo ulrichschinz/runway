@@ -1,7 +1,9 @@
 import json
+
 from fastapi import APIRouter, Depends, HTTPException
-from app.dependencies import get_current_user
+
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models import ProjectCreate, ProjectPlan, ProjectPlanUpdate
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -77,7 +79,9 @@ async def upsert_plan(
     current = dict(existing) if existing else {}
 
     purpose = payload.purpose if payload.purpose is not None else current.get("purpose", "")
-    principles = payload.principles if payload.principles is not None else current.get("principles", "")
+    principles = (
+        payload.principles if payload.principles is not None else current.get("principles", "")
+    )
     vision = payload.vision if payload.vision is not None else current.get("vision", "")
     brainstorm = (
         json.dumps([i.model_dump() for i in payload.brainstorm])

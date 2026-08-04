@@ -55,12 +55,14 @@ fi
 
 if have uv; then
 	[ -d backend/.venv ] || uv venv --python "$PYTHON_VERSION" backend/.venv >/dev/null
-	VIRTUAL_ENV="$REPO_ROOT/backend/.venv" uv pip install --quiet -r backend/requirements.txt
+	VIRTUAL_ENV="$REPO_ROOT/backend/.venv" uv pip install --quiet \
+		-r backend/requirements.txt -r backend/requirements-dev.txt
 	note "backend/.venv provisioned by uv (Python $PYTHON_VERSION)"
 else
 	[ -d backend/.venv ] || python3 -m venv backend/.venv
 	backend/.venv/bin/pip install --quiet --upgrade pip
-	backend/.venv/bin/pip install --quiet -r backend/requirements.txt
+	backend/.venv/bin/pip install --quiet \
+		-r backend/requirements.txt -r backend/requirements-dev.txt
 	note "backend/.venv provisioned by python3 -m venv (uv absent — ADR 0002 fallback)"
 fi
 

@@ -1,0 +1,166 @@
+# Waiver register — every deliberate, temporary exception to a rule, with its expiry.
+#
+# A waiver is not "we decided this is fine". It is "this is not fine, here is who owns
+# it, here is what protects us meanwhile, and here is the date it stops being allowed".
+# An invalid or expired waiver fails the gate (validator lands in Step 9).
+#
+# Each entry records five groups:
+#   1. rule and scope
+#   2. reason and evaluated alternatives
+#   3. risk and temporary mitigation
+#   4. owner and approver
+#   5. expiration, re-open trigger, and resolution path
+#
+# NOTE ON CLASS. `scheduled_remediation` entries below suppress a *linter finding* on
+# pre-existing code whose fix is already planned and approved — not a security rule.
+# No security gate rule exists yet for these findings; Steps 11 and 12 create both the
+# fix and the rule that keeps it fixed. Calling them waivers would overstate the
+# permission granted: nothing here authorises leaving the defect in place, only landing
+# the lint gate before the fix.
+
+version: 1
+
+waivers:
+  - id: WAIVER-SEC-001
+    class: scheduled_remediation
+    rule: "ruff S105 — hardcoded password assigned to jwt_secret"
+    scope: backend/app/config.py
+    finding: SEC-1
+    reason: >
+      config.py ships a working default JWT signing key in a public repository. Any
+      deployment that forgets .env boots with a publicly known key, so any attacker can
+      forge a token for any user. The fix is to refuse to start without JWT_SECRET.
+    alternatives_evaluated: >
+      Fixing it inside Step 2 was rejected: it is a runtime behaviour change that stops
+      a deployment missing .env from booting, and no characterization tests exist yet to
+      prove nothing else breaks. Step 3 supplies those tests; Step 11 applies the fix.
+      Widening the ruff ignore list was rejected because it would hide future occurrences.
+    risk: "Critical. Full authentication bypass on any deployment running the default."
+    mitigation: >
+      `make bootstrap` generates a random JWT_SECRET locally rather than copying the
+      placeholder, so no new environment is created on the default. Production must be
+      confirmed set before Step 11 lands — recorded as a hard blocker in that step.
+    owner: maintainer
+    approver: maintainer
+    approved_on: 2026-08-04
+    approval_reference: "docs/plan/phase-0-2.md F3"
+    expires: 2026-11-04
+    re_open_trigger: "Step 11 lands, or the expiry date passes, whichever is first"
+    resolution: "Step 11 — the app refuses to start on a default or unset JWT_SECRET"
+
+  - id: WAIVER-SEC-002
+    class: scheduled_remediation
+    rule: "ruff S603 — subprocess call with untrusted input"
+    scope: backend/app/services/task_runner.py
+    finding: SEC-3
+    reason: >
+      User-supplied task descriptions and annotation text reach the `task` argv
+      unvalidated. Taskwarrior consumes `rc.<key>=<value>` anywhere in its argument list
+      as a runtime config override, so a crafted description may be able to redirect the
+      data store — breaking the only cross-tenant isolation this system has.
+    alternatives_evaluated: >
+      Fixing it inside Step 2 was rejected: the finding is a hypothesis, not a
+      demonstrated exploit, and confirming it needs the real `task` binary in the
+      container test tier that Step 3 builds. Hardening blind would risk rejecting valid
+      task text with no test to catch the regression.
+    risk: >
+      Critical if confirmed — cross-tenant data access. Note the call itself is already
+      safe from *shell* injection: it passes an argv list with shell=False.
+    mitigation: >
+      None currently effective. UUIDs, tags, priorities and recurrence values are already
+      validated; description and annotation text are not.
+    owner: maintainer
+    approver: maintainer
+    approved_on: 2026-08-04
+    approval_reference: "docs/plan/phase-0-2.md F3"
+    expires: 2026-11-04
+    re_open_trigger: "Step 12 lands, or the expiry date passes, whichever is first"
+    resolution: >
+      Step 12 — validate every user-supplied argv token at the task_runner._run choke
+      point, with an adversarial fixture that confirms or refutes the finding either way.
+
+  - id: WAIVER-OPS-001
+    class: scheduled_remediation
+    rule: "ruff S110 — try/except/pass swallows the exception"
+    scope: backend/app/database.py
+    finding: SEC-10
+    reason: >
+      The schema migration loop catches every exception and passes, which is how
+      "column already exists" is tolerated on re-run. It also silently swallows genuine
+      migration failures, leaving the database in an unknown state with no signal.
+    alternatives_evaluated: >
+      Narrowing the except to the specific sqlite "duplicate column" error was
+      considered and is the eventual fix, but it needs logging to report the failures it
+      would then stop swallowing, and this repository has no logging at all yet.
+    risk: >
+      Medium. A failed migration is indistinguishable from a successful one; later code
+      then reads columns that may not exist.
+    mitigation: >
+      Migrations are additive ALTER TABLE statements only, and init_db runs on every
+      start, so a transient failure retries.
+    owner: maintainer
+    approver: maintainer
+    approved_on: 2026-08-04
+    approval_reference: "docs/plan/phase-0-2.md Step 15"
+    expires: 2026-11-04
+    re_open_trigger: "Step 15 lands, or a third table changes shape, or the expiry passes"
+    resolution: >
+      Step 15 — structured logging, then narrow the except clause and report what it
+      catches. A migrations/ directory becomes due when a third table changes shape.
+
+  - id: WAIVER-TYPE-001
+    class: scheduled_remediation
+    rule: "mypy index — Value of type 'Row | None' is not indexable"
+    scope: "backend/app/routers/auth.py (GET /auth/me), backend/app/routers/admin.py (PUT /admin/users/{target}/role)"
+    finding: "NEW — not present in the Phase 0 baseline; found by mypy in Step 2"
+    reason: >
+      Both handlers index the result of aiosqlite fetchone() without checking for None.
+      In GET /auth/me this is reachable: a user authenticated by a still-valid JWT whose
+      row has since been deleted produces a TypeError and a 500. In the admin handler the
+      row was checked and updated on the same connection, so None is not reachable in
+      practice, but the types do not prove it.
+    alternatives_evaluated: >
+      Fixing it here was rejected: the correct behaviour for "authenticated user no
+      longer exists" is a status-code decision on a hard-promise public surface (401 vs
+      404 vs 500), and F2 requires surface changes to go through the migration pattern.
+      Relaxing the mypy configuration was rejected because it would hide the whole class
+      of finding, which is the one thing the type checker was added to catch.
+    risk: >
+      Low. A 500 instead of a clean 401 on a rare race. No data loss, no authorisation
+      bypass — the request is already authenticated when it fails.
+    mitigation: >
+      None needed at this severity. `warn_unused_ignores` is enabled, so the suppressions
+      self-report as stale the moment the code is fixed.
+    owner: maintainer
+    approver: maintainer
+    approved_on: 2026-08-04
+    approval_reference: "discovered during Step 2; recorded rather than fixed silently"
+    expires: 2026-11-04
+    re_open_trigger: >
+      Step 3 characterization tests reach these handlers, or a 500 is observed in
+      production on /auth/me, or the expiry date passes
+    resolution: >
+      Decide the status code for the missing-user state, apply it under the
+      Public-Surface Migration pattern with a regression test, and delete the ignores.
+
+# Permanently justified suppressions. These are NOT waivers: the finding is a false
+# positive and there is nothing to remediate. They are recorded here so the reasoning is
+# reviewable rather than buried in a bare `# noqa`.
+justified_suppressions:
+  - rule: "ruff S105 — hardcoded password assigned to token_type"
+    scope: backend/app/models.py
+    reason: >
+      `token_type: str = "bearer"` is the OAuth 2.0 token type name required by the
+      response schema, not a credential. Renaming the field to satisfy the linter would
+      break the documented API surface.
+    reviewed_by: maintainer
+    reviewed_on: 2026-08-04
+
+  - rule: "ruff S608 — possible SQL injection through string-based query construction"
+    scope: backend/app/routers/auth.py
+    reason: >
+      The only interpolated fragments are literals chosen from a fixed set inside the
+      function ("full_name=?", "email=?"). No user input reaches the SQL string; every
+      value is passed as a bound parameter. Verified by reading the construction site.
+    reviewed_by: maintainer
+    reviewed_on: 2026-08-04

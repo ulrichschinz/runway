@@ -1,4 +1,5 @@
 import re
+
 from app.models import Task, TaskCreate, TaskModify
 from app.services import task_runner
 
@@ -60,7 +61,10 @@ def get_task(username: str, uuid: str) -> Task:
     return _raw_to_task(raw_list[0])
 
 
-VALID_RECUR_RE = re.compile(r"^[0-9]*\s*(daily|weekly|monthly|yearly|days?|weeks?|months?|years?|[0-9]+[dwmy])$", re.IGNORECASE)
+VALID_RECUR_RE = re.compile(
+    r"^[0-9]*\s*(daily|weekly|monthly|yearly|days?|weeks?|months?|years?|[0-9]+[dwmy])$",
+    re.IGNORECASE,
+)
 
 
 def _build_args(
@@ -107,8 +111,16 @@ def _build_args(
 
 def create_task(username: str, task: TaskCreate) -> Task:
     args = _build_args(
-        task.description, task.project, task.tags, task.priority,
-        task.due, task.scheduled, task.wait, task.until, task.recur, task.depends,
+        task.description,
+        task.project,
+        task.tags,
+        task.priority,
+        task.due,
+        task.scheduled,
+        task.wait,
+        task.until,
+        task.recur,
+        task.depends,
     )
     task_runner.add_task(username, args)
     tasks = list_tasks(username, ["description:" + task.description])
@@ -118,8 +130,16 @@ def create_task(username: str, task: TaskCreate) -> Task:
 def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
     _validate_uuid(uuid)
     args = _build_args(
-        task.description, task.project, task.tags, task.priority,
-        task.due, task.scheduled, task.wait, task.until, task.recur, task.depends,
+        task.description,
+        task.project,
+        task.tags,
+        task.priority,
+        task.due,
+        task.scheduled,
+        task.wait,
+        task.until,
+        task.recur,
+        task.depends,
     )
     # Clear fields when explicitly set to empty
     if task.recur == "":
