@@ -93,6 +93,53 @@ rules:
       A slow gate gets bypassed, which is worse than no gate: it teaches contributors
       that green is optional. Budgets live in tools/checks/budgets.conf.
 
+  - id: RULE-TEST-001
+    statement: "The backend unit test suite MUST pass."
+    class: executable
+    check: tools/checks/py-test-unit.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#tests
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Until 2026-08-04 this repository had no test of any kind. The unit tier fakes
+      Taskwarrior at the task_runner._run seam, so everything above it — argv
+      construction, validation, routing, error mapping — executes for real without
+      needing the binary, Docker or a network.
+
+  - id: RULE-TEST-002
+    statement: >
+      The backend suite MUST pass against the real Taskwarrior binary, including the
+      cross-tenant isolation tests.
+    class: executable
+    check: tools/checks/py-test-container.sh
+    fixture: >
+      no automated fixture — the tier needs Docker and an x86_64 host, neither of which
+      the offline sandbox has. Recorded as RISK-TEST-002.
+    contract: docs/task-interface.md#tests
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      The only boundary between two users' tasks is three environment variables handed to
+      a subprocess. There is no ownership column and no second gate. That property cannot
+      be tested against a fake, because the fake is the thing that would have to enforce it.
+
+  - id: RULE-TEST-003
+    statement: "Backend line coverage MUST NOT fall below the checked-in floor."
+    class: executable
+    check: tools/checks/py-test-unit.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#tests
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A ratchet, not a target. The floor sits below the current figure on purpose: one
+      that tracks the exact number turns every unrelated refactor into a coverage failure,
+      and a gate that fails for irrelevant reasons is a gate people learn to bypass.
+
   - id: RULE-TI-003
     statement: >
       Every command's JSON=1 output MUST be a single valid JSON object on stdout, with
@@ -220,6 +267,32 @@ rules:
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.
 residual_risks:
+  - id: RISK-TEST-001
+    statement: >
+      The container test tier cannot run on arm64: archlinux publishes no arm64 image and
+      pacman fails under amd64 emulation. An Apple Silicon developer never exercises the
+      real Taskwarrior binary locally and sees that tier only in CI.
+    owner: maintainer
+    re_open_trigger: "a second developer joins on arm64, or CI stops running x86_64"
+    decision_record: docs/adr/0006-two-tier-backend-tests.md
+
+  - id: RISK-TEST-002
+    statement: >
+      RULE-TEST-002 has no automated negative fixture. The offline fixture sandbox has
+      neither Docker nor an x86_64 host, so the container tier cannot be made to fail
+      there on demand.
+    owner: maintainer
+    re_open_trigger: "Step 9's ledger validator requires an automated fixture for every executable rule"
+    decision_record: docs/adr/0006-two-tier-backend-tests.md
+
+  - id: RISK-TEST-003
+    statement: >
+      The suite runs bcrypt at its minimum cost factor so the gate stays inside its
+      runtime budget. The production cost factor is therefore covered by no test.
+    owner: maintainer
+    re_open_trigger: "the password hashing scheme or its parameters change"
+    decision_record: backend/tests/conftest.py
+
   - id: RISK-GOV-001
     statement: >
       Required-reviewer enforcement is impossible with a single maintainer: the only

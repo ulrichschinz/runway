@@ -1,0 +1,35 @@
+# Test image: the runtime image plus the dev toolchain and the test suite.
+#
+# The container tier exists because the unit tier fakes the Taskwarrior binary at the
+# task_runner._run seam. Everything the repository owns is covered there; everything the
+# BINARY does — its urgency algorithm, its date parsing, its argument grammar, and the
+# per-user isolation that rests on TASKDATA — can only be pinned against the real thing.
+#
+# Kept as a separate file rather than a stage in backend/Dockerfile on purpose: adding a
+# final `test` stage there would make it the default build target, and docker-compose and
+# the deploy workflow would silently start shipping an image whose CMD is pytest.
+# RULE-TI-002 checks that the base images here stay in step with backend/Dockerfile.
+
+FROM archlinux:latest AS task-builder
+RUN pacman -Sy --noconfirm task
+
+FROM python:3.12-slim
+
+COPY --from=task-builder /usr/bin/task /usr/local/bin/task
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgnutls30 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
+
+COPY pyproject.toml taskrc_template.txt ./
+COPY app/ ./app/
+COPY tests/ ./tests/
+
+RUN mkdir -p /app/data
+
+CMD ["pytest", "tests/container", "--no-header", "--tb=short", "-p", "no:warnings"]

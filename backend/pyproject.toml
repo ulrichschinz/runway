@@ -30,6 +30,17 @@ ignore = [
 # a mutable-default bug.
 "app/routers/*.py" = ["B008"]
 "app/dependencies.py" = ["B008"]
+# Test code asserts (S101) and uses obviously-fake credentials (S105/S106) by design.
+# Fixtures shadow their own names as arguments, which is pytest's idiom (B008 is not
+# relevant here, but the import-order rule is, so the list stays narrow).
+"tests/**/*.py" = ["S101", "S105", "S106"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "container: needs the real Taskwarrior binary; runs inside the backend image only",
+]
 
 [tool.mypy]
 python_version = "3.12"
