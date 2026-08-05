@@ -3,9 +3,9 @@
 One command surface over every ecosystem in this repository. Any coding agent and any human with a shell
 uses the same commands; nothing on the required path depends on a particular vendor's tooling.
 
-> This document is the command reference. The repository *contract* — the organizing principle, the
-> dependency rules, and the decision procedure for "where does a change of kind X go" — arrives in Step 9 as
-> the root `AGENTS.md`, which will link here rather than repeat this.
+> This document is the command reference. The repository **contract** — the organizing principle, the
+> dependency rules, the public surfaces and the decision procedure for "where does a change of kind X go" —
+> is [`AGENTS.md`](../AGENTS.md). Read that first; this is the detail it points at.
 
 Start with `make help`.
 
@@ -379,8 +379,8 @@ it is a shell call, and it is worse than nothing because it is believed.
 
 - The commands marked *implemented in Step N* exit `3` with a message naming that step. They do not pretend
   to succeed.
-- Gate failure messages point at this document. Step 9 repoints them at the root `AGENTS.md` and adds the
-  contract self-check that keeps the reference honest.
+- The root contract is `AGENTS.md`, and `RULE-DOC-001` checks every factual claim in it against the actual
+  repository — paths, commands, identifiers and the counted public-surface claims.
 - **`make verify` runs no tests.** There is not a single test in this repository yet. A green `verify` means
   the repository is hygienic, its interface is coherent, and its code is formatted, lint-clean and
   type-clean — **not that it behaves correctly.** Steps 3 and 4 add the safety net; Steps 5–8 add the index

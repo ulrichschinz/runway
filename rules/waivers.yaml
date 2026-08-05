@@ -177,3 +177,16 @@ justified_suppressions:
       value is passed as a bound parameter. Verified by reading the construction site.
     reviewed_by: maintainer
     reviewed_on: 2026-08-04
+
+  - rule: "ruff E402 — module level import not at top of file"
+    scope: >
+      tools/index/build.py, tools/index/cli.py, tools/index/mcp_server.py,
+      tools/index/boundaries.py
+    reason: >
+      The index modules run as scripts and import their siblings by bare name, which
+      requires inserting their own directory on sys.path before those imports. The
+      alternative is turning tools/index into an installable package, which would add
+      packaging machinery to a component whose whole design point (ADR 0008) is having no
+      dependencies and no build step.
+    reviewed_by: maintainer
+    reviewed_on: 2026-08-06

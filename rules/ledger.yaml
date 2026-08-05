@@ -314,6 +314,94 @@ rules:
       went green, and the service was down. It is the cheapest possible check that the
       thing being shipped can run at all.
 
+  - id: RULE-DOC-001
+    statement: "Every factual claim in AGENTS.md MUST hold against the repository."
+    class: executable
+    check: tools/checks/contract.sh
+    fixture: tools/fixtures/negative.sh
+    contract: AGENTS.md
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      A document nobody verifies drifts, and a drifted contract is worse than no contract
+      because it is followed. Paths, commands, identifiers and the counted public-surface
+      claims are all checked against the actual repository and the index.
+
+  - id: RULE-DOC-002
+    statement: "AGENTS.md MUST stay within 250 lines and 12000 bytes."
+    class: executable
+    check: tools/checks/contract.sh
+    fixture: tools/fixtures/negative.sh
+    contract: AGENTS.md
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A contract nobody finishes reading is a contract nobody follows. The budget forces
+      detail into linked documents, where it can grow without costing the entry point.
+
+  - id: RULE-DOC-003
+    statement: >
+      A scoped contract MUST point at the root contract and MUST NOT define rules of its
+      own.
+    class: executable
+    check: tools/checks/contract.sh
+    fixture: tools/fixtures/negative.sh
+    contract: AGENTS.md
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Scoped contracts refine local structure; they never weaken a root rule. A rule
+      defined in two places is a rule with two meanings, so definition lives only in the
+      ledger.
+
+  - id: RULE-RULE-001
+    statement: >
+      Every rule in the ledger MUST declare a statement, class, check, contract, owner and
+      rationale, and every executable rule MUST name a fixture that exists.
+    class: executable
+    check: tools/checks/contract.sh
+    fixture: tools/fixtures/negative.sh
+    contract: AGENTS.md
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      The ledger is the register of what this repository enforces. An entry missing its
+      check or its fixture is a claim of enforcement with nothing behind it.
+
+  - id: RULE-RULE-002
+    statement: >
+      No waiver may be expired, and each MUST record rule, scope, reason, alternatives,
+      risk, mitigation, owner, approver, expiry, re-open trigger and resolution.
+    class: executable
+    check: tools/checks/contract.sh
+    fixture: tools/fixtures/negative.sh
+    contract: AGENTS.md
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      A waiver without an expiry is a permanent exception wearing a temporary label. Four
+      waivers expire 2026-11-04; when that date passes the gate stops, which is the point.
+
+  - id: RULE-RULE-003
+    statement: >
+      Every inline suppression MUST correspond to a waiver or a reviewed justified
+      suppression.
+    class: executable
+    check: tools/checks/contract.sh
+    fixture: tools/fixtures/negative.sh
+    contract: AGENTS.md
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      Suppressing a finding silently is the one thing that turns a gate into theatre. A
+      noqa with a waiver id is a decision; a bare noqa is a decision nobody made.
+
   - id: RULE-FMT-001
     statement: "Backend Python MUST be formatted by `ruff format`."
     class: executable
@@ -387,6 +475,16 @@ rules:
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.
 residual_risks:
+  - id: RISK-DOC-001
+    statement: >
+      "Query the index before searching or editing by hand" cannot be mechanically
+      enforced — nothing can detect that someone grepped instead. The mitigation is that
+      obeying it is faster than not: ./run map and ./run impact answer in under a second
+      with evidence classes and blind spots attached.
+    owner: maintainer
+    re_open_trigger: "a change lands that the index would have flagged, and nobody queried it"
+    decision_record: AGENTS.md
+
   - id: RISK-IDX-001
     statement: >
       The MCP adapter speaks JSON-RPC as specified and is tested at the protocol level,

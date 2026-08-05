@@ -303,6 +303,51 @@ PATCH
 (cd "$SANDBOX" && git add -A >/dev/null 2>&1 && python3 tools/index/build.py >/dev/null 2>&1)
 expect_red "ARCH-003" "tools/checks/boundaries.sh" "RULE-ARCH-003"
 
+# --- RULE-DOC-001 — the contract claims something untrue --------------------
+printf '\nThe entry point is `tools/checks/does-not-exist.sh`.\n' >>"$SANDBOX/AGENTS.md"
+expect_red "DOC-001" "tools/checks/contract.sh" "RULE-DOC-001"
+
+# --- RULE-DOC-002 — the contract outgrows its budget ------------------------
+i=0
+while [ "$i" -lt 260 ]; do printf 'padding line %s\n' "$i" >>"$SANDBOX/AGENTS.md"; i=$((i + 1)); done
+expect_red "DOC-002" "tools/checks/contract.sh" "RULE-DOC-002"
+
+# --- RULE-DOC-003 — a scoped contract defines a rule of its own -------------
+printf '\nRULE-BE-999: the backend may do whatever it likes.\n' >>"$SANDBOX/backend/AGENTS.md"
+expect_red "DOC-003" "tools/checks/contract.sh" "RULE-DOC-003"
+
+# --- RULE-RULE-001 — an executable rule with no fixture ---------------------
+python3 - "$SANDBOX/rules/ledger.yaml" <<'PATCH'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "    fixture: tools/fixtures/negative.sh\n"
+assert old in t, "fixture target not found in ledger.yaml"
+p.write_text(t.replace(old, "", 1))
+PATCH
+expect_red "RULE-001" "tools/checks/contract.sh" "RULE-RULE-001"
+
+# --- RULE-RULE-002 — an expired waiver --------------------------------------
+#
+# The whole point of an expiry: when the date passes, the gate stops. A waiver without a
+# working expiry is a permanent exception wearing a temporary label.
+python3 - "$SANDBOX/rules/waivers.yaml" <<'PATCH'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+assert "expires: 2026-11-04" in t, "expiry target not found in waivers.yaml"
+p.write_text(t.replace("expires: 2026-11-04", "expires: 2020-01-01", 1))
+PATCH
+expect_red "RULE-002" "tools/checks/contract.sh" "RULE-RULE-002"
+
+# --- RULE-RULE-003 — a suppression nobody approved --------------------------
+printf '\nUNREVIEWED = 1  # noqa: S105\n' >>"$SANDBOX/backend/app/auth.py"
+expect_red "RULE-003" "tools/checks/contract.sh" "RULE-RULE-003"
+
 # --- RULE-TI-003 — a check pollutes stdout in JSON mode ---------------------
 #
 # This is the real bug this rule was written for: a check that prints a friendly summary
