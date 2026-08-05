@@ -57,7 +57,13 @@ async def get_db():
         yield db
 
 
-def _generate_api_key() -> str:
+def generate_api_key() -> str:
+    """Public: routers issue keys at registration and on rotation.
+
+    Renamed from _generate_api_key. The leading underscore claimed it was module-private
+    while two routers imported it, which made the name actively misleading rather than
+    merely untidy.
+    """
     import secrets
 
     return secrets.token_urlsafe(32)
@@ -93,7 +99,7 @@ async def init_db():
         for row in rows:
             await db.execute(
                 "UPDATE users SET api_key=? WHERE username=?",
-                (_generate_api_key(), row["username"]),
+                (generate_api_key(), row["username"]),
             )
         # set uli as admin
         await db.execute("UPDATE users SET role='admin' WHERE username='uli' AND role='user'")
