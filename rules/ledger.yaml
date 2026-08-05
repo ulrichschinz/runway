@@ -161,7 +161,7 @@ rules:
     check: tools/checks/index-fresh.sh
     fixture: tools/fixtures/negative.sh
     contract: docs/task-interface.md#the-index
-    fix: make index
+    fix: make fix   (or make index)
     owner: maintainer
     non_waivable: false
     rationale: >
@@ -183,6 +183,20 @@ rules:
       are equivalent" holds by construction. This keeps that claim honest: unordered
       iteration or a timestamp would break it silently, and a graph that changes without
       its sources changing cannot be trusted to say anything.
+
+  - id: RULE-IDX-003
+    statement: "The index MUST pass its qualification suite."
+    class: executable
+    check: tools/checks/index-qualified.sh
+    fixture: tools/fixtures/negative.sh
+    contract: index/schema.md
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      Installation is not proof of compliance. A qualification failure means the index is
+      lying — asserting relationships that are wrong, or dressing a declaration up as a
+      parsed fact — which is worse than having no index, because the answers are believed.
 
   - id: RULE-TI-003
     statement: >

@@ -255,7 +255,12 @@ intentional change is the point — it makes the behaviour change visible in the
 
 ```sh
 make index          # rebuild (every build is a clean build)
+make fix            # also rebuilds it, along with every other deterministic repair
 ```
+
+Any change to a tracked file — including a document — makes the index stale, because ADRs, rules and
+contracts are nodes in it. `make fix` rebuilds it, which is why that is the documented first response to a
+gate failure.
 
 `index/graph.jsonl` is the canonical export — JSON Lines, versioned, documented in `index/schema.md`.
 It and `index/state.json` are **generated and git-ignored**; the extractors, schema, `index/manifest.toml`
@@ -272,6 +277,24 @@ dependency the contract forbids — and the first build found exactly that, repo
 
 Six blind spots are declared up front rather than discovered later, including Taskwarrior's internals, MCP
 tool-name derivation, and the deploy host's compose file. See `index/schema.md`.
+
+### Qualification
+
+`RULE-IDX-003`. `tools/index/tests/` decides whether the index may be trusted — installation is not proof of
+compliance. 27 assertions covering: required languages and mechanisms are indexed (including Vue SFCs, the
+gap that ruled out SCIP); direction is preserved; every fact carries a declared evidence class and static
+code edges carry a source location; impact and flow queries return known facts **and** the blind spots
+relevant to them; missing test protection is reported explicitly; and declared facts are never dressed up as
+parsed ones.
+
+Three negative fixtures run the extractors over synthetic inputs and prove that unsupported mechanisms
+surface as `UNKNOWN` rather than as invented edges — a dynamic `import()`, a template-only component, and an
+unparseable file.
+
+**Test protection is import-derived.** Every router in this repository is tested through the FastAPI
+`TestClient`, so no test imports it and no `TESTED_BY` edge exists. Absence of an edge therefore means *no
+import-derived protection*, **not** *untested* — declared as `BLIND-TEST-001` rather than papered over with
+a naming convention.
 
 `make map` and `make impact` — the query surface over this graph — arrive in Step 7.
 

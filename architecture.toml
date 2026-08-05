@@ -45,14 +45,35 @@ rationale = "Co-change clusters around the tasks feature (store + modal + view c
 id = "ops"
 scope = "repository"
 owner = "maintainer"
-paths = ["tools/**", "ops/**", ".github/**", "Makefile", "run", "docker-compose.yml", "rules/**", "architecture.toml", "index/**"]
+paths = [
+  "tools/**", "ops/**", ".github/**", "Makefile", "run", "docker-compose.yml",
+  "rules/**", "architecture.toml", "index/**", ".gitignore", ".env.example",
+  "backend/Dockerfile", "backend/Dockerfile.test", "backend/requirements.txt",
+  "backend/requirements-dev.txt", "backend/pyproject.toml", "backend/taskrc_template.txt",
+  "frontend/Dockerfile", "frontend/nginx.conf", "frontend/package.json",
+  "frontend/package-lock.json", "frontend/vite.config.js", "frontend/eslint.config.js",
+  "frontend/postcss.config.js", "frontend/tailwind.config.js", "frontend/index.html",
+  "frontend/public/**", "frontend/src/style.css",
+]
+
+[[units]]
+id = "docs"
+scope = "repository"
+owner = "maintainer"
+paths = ["docs/**", "README.md", "LICENSE", "agent-ready.md"]
+
+[[units]]
+id = "tests"
+scope = "repository"
+owner = "maintainer"
+paths = ["backend/tests/**", "frontend/tests/**"]
 
 [[units]]
 id = "be/entry"
 scope = "backend"
 layer = 0
 owner = "maintainer"
-paths = ["backend/app/main.py", "backend/app/dependencies.py"]
+paths = ["backend/app/main.py", "backend/app/dependencies.py", "backend/app/__init__.py"]
 note = "Composition root. Permitted to reach any layer."
 
 [[units]]
@@ -67,7 +88,7 @@ id = "be/services"
 scope = "backend"
 layer = 2
 owner = "maintainer"
-paths = ["backend/app/services/task_service.py", "backend/app/services/user_service.py"]
+paths = ["backend/app/services/task_service.py", "backend/app/services/user_service.py", "backend/app/services/__init__.py"]
 
 [[units]]
 id = "be/adapters"
@@ -184,6 +205,15 @@ to = []
 [[allowed_edges]]
 from = "ops"
 to = []
+
+[[allowed_edges]]
+from = "docs"
+to = []
+
+[[allowed_edges]]
+from = "tests"
+to = ["be/entry", "be/routers", "be/services", "be/adapters", "be/leaves", "fe/shared", "fe/tasks"]
+note = "Tests may reach anything they protect; that is what makes them tests."
 
 # --- cycles that exist today -------------------------------------------------
 # With an owner and a teardown path. This inventory may only shrink (Step 8 adds the ratchet).
