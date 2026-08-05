@@ -198,6 +198,21 @@ rules:
       lying — asserting relationships that are wrong, or dressing a declaration up as a
       parsed fact — which is worse than having no index, because the answers are believed.
 
+  - id: RULE-IDX-004
+    statement: "The CLI and MCP adapters MUST return the same facts."
+    class: executable
+    check: tools/checks/index-parity.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#the-index
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      Two access paths over one query layer is only worth having if they cannot disagree.
+      If an agent on MCP and a human on the CLI can reach different conclusions about the
+      same code, the index has two truths and neither is trustworthy. Both adapters call
+      query.py and add no logic of their own, so parity is provable rather than hoped for.
+
   - id: RULE-TI-003
     statement: >
       Every command's JSON=1 output MUST be a single valid JSON object on stdout, with
@@ -325,6 +340,15 @@ rules:
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.
 residual_risks:
+  - id: RISK-IDX-001
+    statement: >
+      The MCP adapter speaks JSON-RPC as specified and is tested at the protocol level,
+      but has not been exercised against a real MCP client from this environment. The CLI
+      is the path with no such caveat.
+    owner: maintainer
+    re_open_trigger: "someone connects a real MCP client, or a client reports a protocol error"
+    decision_record: docs/adr/0008-index-implementation-mode.md
+
   - id: RISK-TEST-004
     statement: >
       Frontend rendering, routing, keyboard handling, swipe gestures and dark mode are

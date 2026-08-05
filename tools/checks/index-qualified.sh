@@ -14,7 +14,7 @@ set -eu
 cd "$REPO_ROOT"
 [ -x backend/.venv/bin/pytest ] || { printf '  pytest is not installed — run make bootstrap\n' >&2; exit "$EX_TOOLING"; }
 
-if out=$(backend/.venv/bin/pytest tools/index/tests --no-header --tb=short -p no:warnings 2>&1); then
+if out=$(backend/.venv/bin/pytest tools/index/tests/test_qualification.py --no-header --tb=short -p no:warnings 2>&1); then
 	summary=$(printf '%s\n' "$out" | grep -oE '[0-9]+ passed[^=]*' | tail -1 | sed 's/ *$//')
 	ok "${summary:-qualification passed}"
 	exit "$EX_OK"

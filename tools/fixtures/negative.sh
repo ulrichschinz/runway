@@ -248,6 +248,26 @@ p.write_text(t.replace(old, new))
 PATCH
 expect_red "IDX-003" "tools/checks/index-qualified.sh" "RULE-IDX-003"
 
+# --- RULE-IDX-004 — the two adapters diverge --------------------------------
+#
+# Drops the blind spots from the MCP answer only. The facts still look right, the CLI is
+# unaffected, and an agent querying over MCP silently loses the uncertainty attached to
+# every answer — which is the divergence that would matter most and be noticed least.
+python3 - "$SANDBOX/tools/index/mcp_server.py" <<'PATCH'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "    return fn(graph, target)"
+new = """    answer = fn(graph, target)
+    answer["blind_spots"] = []
+    return answer"""
+assert old in t, "fixture target not found in mcp_server.py"
+p.write_text(t.replace(old, new))
+PATCH
+expect_red "IDX-004" "tools/checks/index-parity.sh" "RULE-IDX-004"
+
 # --- RULE-TI-003 — a check pollutes stdout in JSON mode ---------------------
 #
 # This is the real bug this rule was written for: a check that prints a friendly summary
