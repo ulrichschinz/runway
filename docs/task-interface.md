@@ -177,6 +177,22 @@ succeeded, the deploy job went green, and the service was down. See ADR 0004.
 Transitive dependencies are still not pinned as a whole — Step 14 owns that. This rule is what makes the
 gap survivable meanwhile.
 
+### Changing frontend dependencies
+
+After any change to `frontend/package.json`, regenerate the lockfile with:
+
+```sh
+tools/npm-lock.sh
+```
+
+Development happens on whatever Node you have; CI and the frontend image build on the version in
+`tools/versions.env`. **npm majors do not agree on lockfile contents** — npm 11 omits the optional
+`@esbuild/*` platform packages that npm 10 then reports as *"Missing from lock file"*, so `npm ci` fails in
+CI while every local command succeeds. This script writes the lockfile using the same npm that will later
+read it.
+
+CI catches the mismatch (that is how it was found), but only after a push.
+
 ## Formatting, linting and types
 
 `RULE-FMT-001`, `RULE-LINT-001`, `RULE-LINT-002`, `RULE-TYPE-001`.
@@ -204,8 +220,9 @@ theatre.
 
 | Tier | Where | Needs | Profile |
 |---|---|---|---|
-| unit | `backend/tests/unit` | nothing — Taskwarrior is faked at `task_runner._run` | `check`, `verify` |
-| container | `backend/tests/container` | Docker, x86_64, the real `task` binary | `verify` |
+| backend unit | `backend/tests/unit` | nothing — Taskwarrior is faked at `task_runner._run` | `check`, `verify` |
+| backend container | `backend/tests/container` | Docker, x86_64, the real `task` binary | `verify` |
+| frontend logic | `frontend/tests` | nothing — pure modules, no jsdom, no mounting | `check`, `verify` |
 
 ```sh
 ./run test              # both, where they can run here
@@ -224,7 +241,11 @@ emulation. The check says so and passes; CI is x86_64 and runs it for real (`RIS
 Coverage is a **ratchet**, currently a 90% floor against 96% actual. Raise it when coverage rises; never
 lower it to make a change fit.
 
-These are **characterization** tests: they pin current behaviour *including its defects*. Six defects are
+The frontend tier covers `src/shared/` — the context-tag and filtering rules that produced every frontend
+defect this repository has shipped. Rendering, routing and gestures are deliberately untested
+(`RISK-TEST-004`, ADR 0007).
+
+The backend tiers are **characterization** tests: they pin current behaviour *including its defects*. Six defects are
 asserted as-is and labelled in place with the step that will change them. A test failing after an
 intentional change is the point — it makes the behaviour change visible in the diff.
 

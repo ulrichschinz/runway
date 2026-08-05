@@ -1,5 +1,6 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useTaskStore } from '../stores/tasks.js'
+import { filterTasks } from '../shared/taskFilters.js'
 
 export function useTaskView(loader) {
   const store = useTaskStore()
@@ -7,19 +8,9 @@ export function useTaskView(loader) {
   const searchQuery = ref('')
   const searchInputRef = ref(null)
 
-  const filteredTasks = computed(() => {
-    let result = store.tasks
-    if (store.activeContext) {
-      result = result.filter(t => (t.tags || []).some(tag => tag.split(',').map(p => p.trim()).includes(store.activeContext)))
-    }
-    const q = searchQuery.value.trim().toLowerCase()
-    if (!q) return result
-    return result.filter(t =>
-      t.description.toLowerCase().includes(q) ||
-      (t.project && t.project.toLowerCase().includes(q)) ||
-      t.tags.some(tag => tag.toLowerCase().includes(q))
-    )
-  })
+  const filteredTasks = computed(() =>
+    filterTasks(store.tasks, { context: store.activeContext, query: searchQuery.value })
+  )
 
   function onKeyDown(e) {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return

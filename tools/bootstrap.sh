@@ -53,15 +53,37 @@ fi
 
 # --- backend ----------------------------------------------------------------
 
+# run <description> <command...> — run a step, and on failure SAY WHY.
+#
+# These steps used to run with --quiet/--silent and no error handling. When one failed in
+# CI the log showed the step starting and then `make: *** Error 1`, with no message at
+# all: a bootstrap that cannot explain its own failure sends whoever hits it straight to
+# guessing. Output is captured and replayed only when something goes wrong.
+run() {
+	_what=$1
+	shift
+	if _out=$("$@" 2>&1); then
+		return 0
+	fi
+	printf 'bootstrap failed: %s\n' "$_what" >&2
+	printf '  command: %s\n' "$*" >&2
+	printf '%s\n' "$_out" | sed 's/^/  | /' >&2
+	exit "$EX_TOOLING"
+}
+
 if have uv; then
-	[ -d backend/.venv ] || uv venv --python "$PYTHON_VERSION" backend/.venv >/dev/null
-	VIRTUAL_ENV="$REPO_ROOT/backend/.venv" uv pip install --quiet \
-		-r backend/requirements.txt -r backend/requirements-dev.txt
+	[ -d backend/.venv ] || run "creating backend/.venv" \
+		uv venv --python "$PYTHON_VERSION" backend/.venv
+	VIRTUAL_ENV="$REPO_ROOT/backend/.venv"
+	export VIRTUAL_ENV
+	run "installing backend dependencies with uv" \
+		uv pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 	note "backend/.venv provisioned by uv (Python $PYTHON_VERSION)"
 else
-	[ -d backend/.venv ] || python3 -m venv backend/.venv
-	backend/.venv/bin/pip install --quiet --upgrade pip
-	backend/.venv/bin/pip install --quiet \
+	[ -d backend/.venv ] || run "creating backend/.venv" python3 -m venv backend/.venv
+	run "upgrading pip" backend/.venv/bin/pip install --quiet --upgrade pip
+	run "installing backend dependencies with pip" \
+		backend/.venv/bin/pip install --quiet \
 		-r backend/requirements.txt -r backend/requirements-dev.txt
 	note "backend/.venv provisioned by python3 -m venv (uv absent — ADR 0002 fallback)"
 fi
@@ -71,7 +93,8 @@ fi
 if [ -d frontend/node_modules ] && [ frontend/node_modules -nt frontend/package-lock.json ]; then
 	note "frontend/node_modules already current"
 else
-	(cd frontend && npm ci --silent)
+	run "installing frontend dependencies from package-lock.json" \
+		sh -c 'cd frontend && npm ci --silent'
 	note "frontend/node_modules installed from package-lock.json"
 fi
 

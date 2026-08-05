@@ -140,6 +140,21 @@ rules:
       that tracks the exact number turns every unrelated refactor into a coverage failure,
       and a gate that fails for irrelevant reasons is a gate people learn to bypass.
 
+  - id: RULE-TEST-004
+    statement: "The frontend logic test suite MUST pass."
+    class: executable
+    check: tools/checks/js-test.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#tests
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Scoped to pure logic modules. The frontend defects this repository has actually
+      shipped — c6ce0f2 and 472b673, both context-tag comma-splitting — were in pure
+      functions, not in component rendering. Testing where the bugs were beats testing
+      where tests are conventional.
+
   - id: RULE-TI-003
     statement: >
       Every command's JSON=1 output MUST be a single valid JSON object on stdout, with
@@ -267,6 +282,14 @@ rules:
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.
 residual_risks:
+  - id: RISK-TEST-004
+    statement: >
+      Frontend rendering, routing, keyboard handling, swipe gestures and dark mode are
+      covered by no test. The suite deliberately covers pure logic only.
+    owner: maintainer
+    re_open_trigger: "a defect that only manifests in a mounted component or across the SPA/API boundary"
+    decision_record: docs/adr/0007-frontend-test-scope.md
+
   - id: RISK-TEST-001
     statement: >
       The container test tier cannot run on arm64: archlinux publishes no arm64 image and
