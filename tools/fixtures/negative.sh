@@ -55,6 +55,10 @@ ln -s "$REPO_ROOT/frontend/node_modules" "$SANDBOX/frontend/node_modules"
 	git -c user.email=fixture@localhost -c user.name=fixture commit -q -m baseline
 )
 
+# The sandbox is a fresh git repository with its own tracked-file set, so it needs its
+# own index — the parent's state.json hashes a different list of files.
+(cd "$SANDBOX" && python3 tools/index/build.py >/dev/null 2>&1) || true
+
 pass=0
 fail=0
 
@@ -83,6 +87,31 @@ expect_red() {
 		fail=$((fail + 1))
 	fi
 	reset
+}
+
+# expect_code <label> <check-script> <expected-exit> <needle> — for rules whose documented
+# exit code is not 1. A stale index exits 4 (EX_STALE_INDEX) by design: the answer would
+# have been unreliable, which is a different failure from a rule violation.
+expect_code() {
+	label=$1
+	script=$2
+	want_code=$3
+	want=$4
+	set +e
+	out=$(cd "$SANDBOX" && RUNWAY_FINDINGS="" "./$script" 2>&1)
+	rc=$?
+	set -e
+	if [ "$rc" -eq "$want_code" ] && printf '%s' "$out" | grep -q "$want"; then
+		printf '  PASS  %-18s exit %s, %s\n' "$label" "$want_code" "$want"
+		pass=$((pass + 1))
+	else
+		printf '  FAIL  %-18s expected exit %s matching %s, got exit %s\n' \
+			"$label" "$want_code" "$want" "$rc" >&2
+		printf '%s\n' "$out" | sed 's/^/          /' >&2
+		fail=$((fail + 1))
+	fi
+	reset
+	(cd "$SANDBOX" && python3 tools/index/build.py >/dev/null 2>&1) || true
 }
 
 # Sanity: the pristine sandbox must be green, or every result below is meaningless.
@@ -173,6 +202,29 @@ describe('injected by the negative fixture', () => {
 })
 BROKEN
 expect_red "TEST-004" "tools/checks/js-test.sh" "RULE-TEST-004"
+
+# --- RULE-IDX-001 — the index goes stale when a source changes --------------
+printf '\n# staleness probe\n' >>"$SANDBOX/backend/app/config.py"
+expect_code "IDX-001" "tools/checks/index-fresh.sh" 4 "index is stale"
+
+# --- RULE-IDX-002 — a non-deterministic build -------------------------------
+#
+# Injects an unsorted iteration into the export, which is the realistic way this breaks:
+# nothing looks wrong, the graph is simply different every run and therefore untrustworthy.
+python3 - "$SANDBOX/tools/index/model.py" <<'PATCH'
+import pathlib
+import sys
+
+# Iterating a set of strings, NOT a reversed list: reversal is still deterministic and
+# would pass. CPython randomises string hashing per process, so set order differs between
+# two separate builds — which is exactly how this bug appears in the wild.
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "for n in sorted(self.nodes.values(), key=lambda n: n.id)"
+assert old in t, "fixture target not found in model.py"
+p.write_text(t.replace(old, "for n in (self.nodes[i] for i in set(self.nodes))"))
+PATCH
+expect_red "IDX-002" "tools/checks/index-deterministic.sh" "RULE-IDX-002"
 
 # --- RULE-TI-003 — a check pollutes stdout in JSON mode ---------------------
 #
