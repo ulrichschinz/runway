@@ -145,6 +145,10 @@ Available MCP tools mirror the REST API: `list_tasks`, `create_task`, `start_tas
 
 ## Development
 
+> **Working on this repository?** Read **[`AGENTS.md`](AGENTS.md)** first — it is the contract:
+> the decision procedure, the structure rules, the public surfaces, and the meta-rule that
+> binds changes to them. It takes five minutes and saves considerably more.
+
 This repository has one command surface for every ecosystem. Start here:
 
 ```bash
