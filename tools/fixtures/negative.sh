@@ -162,6 +162,18 @@ expect_red "TEST-001" "tools/checks/py-test-unit.sh" "RULE-TEST-001"
 } >>"$SANDBOX/backend/app/config.py"
 expect_red "TEST-003" "tools/checks/py-test-unit.sh" "RULE-TEST-003"
 
+# --- RULE-TEST-004 — a frontend logic test fails ----------------------------
+cat >"$SANDBOX/frontend/tests/injected_failure.test.js" <<'BROKEN'
+import { describe, expect, it } from 'vitest'
+
+describe('injected by the negative fixture', () => {
+  it('fails on purpose', () => {
+    expect(true).toBe(false)
+  })
+})
+BROKEN
+expect_red "TEST-004" "tools/checks/js-test.sh" "RULE-TEST-004"
+
 # --- RULE-TI-003 — a check pollutes stdout in JSON mode ---------------------
 #
 # This is the real bug this rule was written for: a check that prints a friendly summary

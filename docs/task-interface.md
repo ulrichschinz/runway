@@ -204,8 +204,9 @@ theatre.
 
 | Tier | Where | Needs | Profile |
 |---|---|---|---|
-| unit | `backend/tests/unit` | nothing — Taskwarrior is faked at `task_runner._run` | `check`, `verify` |
-| container | `backend/tests/container` | Docker, x86_64, the real `task` binary | `verify` |
+| backend unit | `backend/tests/unit` | nothing — Taskwarrior is faked at `task_runner._run` | `check`, `verify` |
+| backend container | `backend/tests/container` | Docker, x86_64, the real `task` binary | `verify` |
+| frontend logic | `frontend/tests` | nothing — pure modules, no jsdom, no mounting | `check`, `verify` |
 
 ```sh
 ./run test              # both, where they can run here
@@ -224,7 +225,11 @@ emulation. The check says so and passes; CI is x86_64 and runs it for real (`RIS
 Coverage is a **ratchet**, currently a 90% floor against 96% actual. Raise it when coverage rises; never
 lower it to make a change fit.
 
-These are **characterization** tests: they pin current behaviour *including its defects*. Six defects are
+The frontend tier covers `src/shared/` — the context-tag and filtering rules that produced every frontend
+defect this repository has shipped. Rendering, routing and gestures are deliberately untested
+(`RISK-TEST-004`, ADR 0007).
+
+The backend tiers are **characterization** tests: they pin current behaviour *including its defects*. Six defects are
 asserted as-is and labelled in place with the step that will change them. A test failing after an
 intentional change is the point — it makes the behaviour change visible in the diff.
 

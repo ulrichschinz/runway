@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import client from '../api/client.js'
+import { collectContextTags, contextTagsOf } from '../shared/contextTags.js'
+import { byUrgencyDescending } from '../shared/taskFilters.js'
 
 export const useTaskStore = defineStore('tasks', () => {
   const tasks = ref([])
@@ -17,11 +19,7 @@ export const useTaskStore = defineStore('tasks', () => {
   async function fetchContextTags() {
     try {
       const { data } = await client.get('/tasks', { params: { include_done: false } })
-      const seen = new Set()
-      data.forEach(t => (t.tags || []).forEach(tag => {
-        tag.split(',').forEach(part => { const p = part.trim(); if (p.startsWith('@')) seen.add(p) })
-      }))
-      _allContextTags.value = [...seen].sort()
+      _allContextTags.value = collectContextTags(data)
     } catch { /* non-critical */ }
   }
 
@@ -79,7 +77,7 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   function _mergeContextTags(task) {
-    const incoming = (task.tags || []).flatMap(tag => tag.split(',').map(p => p.trim()).filter(p => p.startsWith('@')))
+    const incoming = contextTagsOf(task)
     let changed = false
     incoming.forEach(ctx => {
       if (!_allContextTags.value.includes(ctx)) { _allContextTags.value.push(ctx); changed = true }
@@ -89,7 +87,7 @@ export const useTaskStore = defineStore('tasks', () => {
 
   async function createTask(payload) {
     const { data } = await client.post('/tasks', payload)
-    tasks.value = [data, ...tasks.value].sort((a, b) => b.urgency - a.urgency)
+    tasks.value = byUrgencyDescending([data, ...tasks.value])
     _mergeContextTags(data)
     return data
   }
