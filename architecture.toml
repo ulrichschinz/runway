@@ -60,7 +60,7 @@ paths = [
 id = "docs"
 scope = "repository"
 owner = "maintainer"
-paths = ["docs/**", "README.md", "LICENSE", "agent-ready.md"]
+paths = ["docs/**", "README.md", "LICENSE", "agent-ready.md", "AGENTS.md", "CLAUDE.md", "backend/AGENTS.md", "frontend/AGENTS.md"]
 
 [[units]]
 id = "tests"

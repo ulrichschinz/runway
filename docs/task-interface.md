@@ -286,6 +286,10 @@ Any change to a tracked file — including a document — makes the index stale,
 contracts are nodes in it. `make fix` rebuilds it, which is why that is the documented first response to a
 gate failure.
 
+**A new file is invisible to the index until `git add`.** The index reads `git ls-files`, which is the right
+definition of "the repository" but means a local `verify` can pass while CI fails on the same commit — CI
+sees the file, your working tree does not. `git add` early.
+
 `index/graph.jsonl` is the canonical export — JSON Lines, versioned, documented in `index/schema.md`.
 It and `index/state.json` are **generated and git-ignored**; the extractors, schema, `index/manifest.toml`
 and `architecture.toml` are checked in. `make bootstrap` builds it, so a clean clone has one.
