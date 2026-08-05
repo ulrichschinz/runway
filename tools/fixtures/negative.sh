@@ -226,6 +226,28 @@ p.write_text(t.replace(old, "for n in (self.nodes[i] for i in set(self.nodes))")
 PATCH
 expect_red "IDX-002" "tools/checks/index-deterministic.sh" "RULE-IDX-002"
 
+# --- RULE-IDX-003 — a broken extractor ---------------------------------------
+#
+# Inverts the direction of every import edge. Nothing errors, the graph is the same size,
+# and every "who depends on this?" answer is now backwards — which is exactly why
+# direction is asserted rather than assumed.
+python3 - "$SANDBOX/tools/index/extract_python.py" <<'PATCH'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = """                            "IMPORTS",
+                            f"file:{rel}",
+                            f"file:{target.relative_to(root)}","""
+new = """                            "IMPORTS",
+                            f"file:{target.relative_to(root)}",
+                            f"file:{rel}","""
+assert old in t, "fixture target not found in extract_python.py"
+p.write_text(t.replace(old, new))
+PATCH
+expect_red "IDX-003" "tools/checks/index-qualified.sh" "RULE-IDX-003"
+
 # --- RULE-TI-003 — a check pollutes stdout in JSON mode ---------------------
 #
 # This is the real bug this rule was written for: a check that prints a friendly summary

@@ -325,6 +325,16 @@ def _declare_global_blind_spots(graph: Graph) -> None:
             ["change-impact of task_runner", "urgency", "cross-tenant isolation"],
         ),
         BlindSpot(
+            "BLIND-TEST-001",
+            "tests",
+            "Test protection is import-derived. Code exercised only through the FastAPI "
+            "TestClient — which is how every router in this repository is tested — produces "
+            "no TESTED_BY edge, because no test imports it. Absence of an edge therefore "
+            "means 'no import-derived protection', NOT 'untested'. Reported rather than "
+            "papered over with a naming convention.",
+            ["TESTED_BY", "which tests protect this symbol"],
+        ),
+        BlindSpot(
             "BLIND-MCP-001",
             "framework",
             "MCP tool names are derived by fastapi-mcp from route handler names. That is the "

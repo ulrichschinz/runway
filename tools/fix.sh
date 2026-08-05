@@ -15,8 +15,10 @@ applied=""
 note() { applied="${applied}${applied:+|}$1"; }
 
 if [ -x backend/.venv/bin/ruff ]; then
-	(cd backend && .venv/bin/ruff check app --fix --quiet >/dev/null 2>&1 || true)
-	(cd backend && .venv/bin/ruff format app >/dev/null 2>&1)
+	# The scope MUST match what py-lint.sh and py-format.sh check. When it did not, the
+	# gate failed and told the contributor to run a command that could not fix it.
+	(cd backend && .venv/bin/ruff check app tests ../tools/index --fix --quiet >/dev/null 2>&1 || true)
+	(cd backend && .venv/bin/ruff format app tests ../tools/index >/dev/null 2>&1)
 	note "ruff: import order, safe lint fixes, formatting"
 else
 	note "ruff: SKIPPED (not installed — run make bootstrap)"
@@ -27,6 +29,16 @@ if [ -x frontend/node_modules/.bin/eslint ]; then
 	note "eslint: safe fixes"
 else
 	note "eslint: SKIPPED (not installed — run make bootstrap)"
+fi
+
+# Rebuilding the index is deterministic and semantics-preserving — exactly what this
+# command is for — and it takes about a tenth of a second. Without it here, every edit to
+# any tracked file (including a document) leaves `make check` failing on a stale index,
+# and a gate that is annoying gets bypassed just as surely as one that is slow.
+if python3 tools/index/build.py >/dev/null 2>&1; then
+	note "index rebuilt"
+else
+	note "index: SKIPPED (build failed — run make index to see why)"
 fi
 
 if is_json; then

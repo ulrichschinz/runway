@@ -9,5 +9,6 @@ if out=$("$RUFF" format --check app tests ../tools/index 2>&1); then
 	ok "$(printf '%s' "$out" | tail -1)"
 	exit "$EX_OK"
 fi
-fail_rule RULE-FMT-001 "$(printf '%s' "$out" | grep -c '^Would reformat') file(s) are not formatted"
+count=$(printf '%s\n' "$out" | grep -oE '^[0-9]+ file[s]? would be reformatted' | grep -oE '^[0-9]+' || printf '?')
+fail_rule RULE-FMT-001 "${count} file(s) are not formatted"
 exit "$EX_RULE"
