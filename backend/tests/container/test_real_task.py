@@ -123,36 +123,58 @@ class TestCrossTenantIsolation:
         dirs = _task_dirs(real_data_root)
         assert any(dirs["alice"].rglob("*.sqlite3"))
 
-    def test_a_description_shaped_like_a_config_override_cannot_redirect_the_data_store(self):
-        """FINDING SEC-3, adversarially tested against the real binary.
+    def test_an_rc_shaped_description_is_consumed_as_configuration_not_as_text(self):
+        """FINDING SEC-3, resolved against the real binary on 2026-08-05.
 
         Taskwarrior consumes ``rc.<key>=<value>`` anywhere in its argument list as a
         runtime configuration override, and ``task_runner._run`` places user-supplied
-        tokens AFTER its own ``rc.`` flags. A task description is a bare positional
-        argument and is not validated.
+        tokens AFTER its own ``rc.`` flags. A description is a bare, unvalidated argv
+        token, so the override IS honoured — this test proves it.
 
-        If the binary treats such a description as an override rather than as text, then
-        ``rc.data.location`` redirects the store and the only cross-tenant boundary in
-        this system is bypassable by typing a task title.
+        What saves the system today is an accident of Taskwarrior's own grammar, not any
+        control in this repository: the description is a single argv token, so an override
+        consumes the whole of it and ``task add`` then has no text left and refuses. The
+        attacker gets a redirected data store on a command that cannot run.
 
-        A failure here is a confirmed critical vulnerability, not a flaky test.
+        That is a confirmed injection mechanism whose only reachable exploit path happens
+        to be blocked. Step 12 still validates at the ``_run`` choke point, because
+        "a third-party binary's argument parser rejects it for us" is not a security
+        boundary anyone should rely on.
         """
         task_service.create_task("bob", TaskCreate(description="bob private note"))
-
         payload = f"rc.data.location={settings.data_root / 'bob'}"
-        task_service.create_task("alice", TaskCreate(description=payload))
+
+        with pytest.raises(RuntimeError, match="Additional text must be provided"):
+            task_service.create_task("alice", TaskCreate(description=payload))
+
+    def test_the_rejected_override_leaks_nothing_and_creates_nothing(self):
+        """The other half: the failed command must not leave state behind either."""
+        task_service.create_task("bob", TaskCreate(description="bob private note"))
+        payload = f"rc.data.location={settings.data_root / 'bob'}"
+
+        with pytest.raises(RuntimeError):
+            task_service.create_task("alice", TaskCreate(description=payload))
 
         alice_tasks = [t.description for t in task_service.list_tasks("alice")]
-        assert "bob private note" not in alice_tasks, (
-            "SEC-3 CONFIRMED: a task description containing rc.data.location redirected "
-            "the Taskwarrior data store and exposed another user's tasks"
-        )
+        assert alice_tasks == [], "the rejected command left a task behind"
+        assert "bob private note" not in alice_tasks
 
-    def test_an_annotation_shaped_like_a_config_override_is_also_contained(self):
+    def test_an_rc_shaped_annotation_is_rejected_the_same_way(self):
+        """The annotate path has the same shape: text is a bare argv token."""
         created = task_service.create_task("alice", TaskCreate(description="host"))
-        task_service.annotate_task(
-            "alice", created.uuid, f"rc.data.location={settings.data_root / 'bob'}"
-        )
-        task_service.create_task("bob", TaskCreate(description="bob second note"))
-        alice_tasks = [t.description for t in task_service.list_tasks("alice")]
-        assert "bob second note" not in alice_tasks
+        with pytest.raises(RuntimeError):
+            task_service.annotate_task(
+                "alice", created.uuid, f"rc.data.location={settings.data_root / 'bob'}"
+            )
+
+    def test_an_rc_override_embedded_after_real_text_is_still_one_token(self):
+        """A description is ONE argv element, which is what keeps this contained.
+
+        `task add "rc.data.location=/x buy milk"` does not become an override plus a
+        description: the whole string is the override's value. If any future change ever
+        splits a description into multiple argv tokens, this containment disappears —
+        which is the regression this test exists to catch.
+        """
+        payload = f"rc.data.location={settings.data_root / 'bob'} buy milk"
+        with pytest.raises(RuntimeError, match="Additional text must be provided"):
+            task_service.create_task("alice", TaskCreate(description=payload))
