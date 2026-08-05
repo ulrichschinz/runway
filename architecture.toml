@@ -53,7 +53,7 @@ paths = [
   "frontend/Dockerfile", "frontend/nginx.conf", "frontend/package.json",
   "frontend/package-lock.json", "frontend/vite.config.js", "frontend/eslint.config.js",
   "frontend/postcss.config.js", "frontend/tailwind.config.js", "frontend/index.html",
-  "frontend/public/**", "frontend/src/style.css",
+  "frontend/public/**",
 ]
 
 [[units]]
@@ -91,12 +91,28 @@ owner = "maintainer"
 paths = ["backend/app/services/task_service.py", "backend/app/services/user_service.py", "backend/app/services/__init__.py"]
 
 [[units]]
-id = "be/adapters"
+id = "be/adapters/db"
 scope = "backend"
 layer = 3
 owner = "maintainer"
-paths = ["backend/app/services/task_runner.py", "backend/app/database.py"]
-note = "The only modules permitted to reach outside the process — task_runner owns the subprocess, database owns the connection."
+paths = ["backend/app/database.py"]
+note = """
+Owns the database connection. get_db is a FastAPI dependency provider, so routers import
+it directly for injection — that is the framework's idiom, not a layering breach, and the
+allowed edges below permit it.
+"""
+
+[[units]]
+id = "be/adapters/task"
+scope = "backend"
+layer = 3
+owner = "maintainer"
+paths = ["backend/app/services/task_runner.py"]
+note = """
+Owns the Taskwarrior subprocess. Routers MUST NOT import this: every task operation goes
+through be/services, which is where validation lives. gtd.py currently breaches that and
+the index reports it.
+"""
 
 [[units]]
 id = "be/leaves"
@@ -116,6 +132,7 @@ paths = [
   "frontend/src/components/AppShell.vue",
   "frontend/src/components/NavItem.vue",
   "frontend/src/components/BrandMark.vue",
+  "frontend/src/style.css",
 ]
 
 [[units]]
@@ -161,19 +178,28 @@ paths = ["frontend/src/api/**", "frontend/src/composables/**", "frontend/src/sha
 
 [[allowed_edges]]
 from = "be/entry"
-to = ["be/routers", "be/services", "be/adapters", "be/leaves"]
+to = ["be/routers", "be/services", "be/adapters/db", "be/adapters/task", "be/leaves"]
 
 [[allowed_edges]]
 from = "be/routers"
-to = ["be/services", "be/leaves", "be/entry"]
-note = "be/entry appears here because routers import get_current_user from dependencies.py, the composition root. A router MUST NOT import be/adapters directly."
+to = ["be/services", "be/leaves", "be/entry", "be/adapters/db"]
+note = """
+be/entry appears here because routers import get_current_user from dependencies.py, the
+composition root; be/adapters/db because get_db is a dependency provider injected the same
+way. be/adapters/task is deliberately absent — a router reaching the Taskwarrior subprocess
+directly skips the validation in be/services. gtd.py does exactly that today.
+"""
 
 [[allowed_edges]]
 from = "be/services"
-to = ["be/adapters", "be/leaves"]
+to = ["be/adapters/db", "be/adapters/task", "be/leaves"]
 
 [[allowed_edges]]
-from = "be/adapters"
+from = "be/adapters/db"
+to = ["be/leaves"]
+
+[[allowed_edges]]
+from = "be/adapters/task"
 to = ["be/leaves"]
 
 [[allowed_edges]]
@@ -212,7 +238,7 @@ to = []
 
 [[allowed_edges]]
 from = "tests"
-to = ["be/entry", "be/routers", "be/services", "be/adapters", "be/leaves", "fe/shared", "fe/tasks"]
+to = ["be/entry", "be/routers", "be/services", "be/adapters/db", "be/adapters/task", "be/leaves", "fe/shared", "fe/tasks"]
 note = "Tests may reach anything they protect; that is what makes them tests."
 
 # --- cycles that exist today -------------------------------------------------

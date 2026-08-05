@@ -20,7 +20,7 @@ SHELL := /bin/sh
 export RUNWAY_JSON = $(JSON)
 export RUNWAY_PLAN = $(PLAN)
 
-.PHONY: help doctor bootstrap check verify rebuild-verify test map impact index brief scaffold fix decay-review
+.PHONY: help doctor bootstrap check verify rebuild-verify test map impact flow similar violations mcp index brief scaffold fix decay-review
 
 help: ## List every task-interface command
 	@./run help
@@ -43,11 +43,23 @@ rebuild-verify: ## Clean deterministic rebuild and equivalence validation of the
 test: ## Run the focused test suite for the changed scope
 	@./run test
 
-map: ## Locate a symbol and report the unit that owns it
-	@./run map
+map: ## Locate a symbol or file and report the unit that owns it
+	@./run map $(ARGS)
 
-impact: ## Report the change-impact radius of a symbol, file or unit
-	@./run impact
+impact: ## Report the change-impact radius of a file, and the surfaces it touches
+	@./run impact $(ARGS)
+
+flow: ## Show the end-to-end path from a public surface to a file
+	@./run flow $(ARGS)
+
+similar: ## Find where something like this is already solved
+	@./run similar $(ARGS)
+
+violations: ## Report unit dependencies architecture.toml does not allow
+	@./run violations
+
+mcp: ## Serve the index over MCP on stdio
+	@./run mcp
 
 index: ## Build or refresh the repository knowledge graph
 	@./run index

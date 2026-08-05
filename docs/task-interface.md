@@ -60,12 +60,36 @@ Clean deterministic rebuild and equivalence validation of the index layers. *Imp
 Runs the focused test suite for the changed scope. *Implemented in Step 3.*
 
 ### `make map`
-Locates a symbol and reports the unit that owns it, the contracts and rules that govern it, and the
-uncertainty relevant to the answer. *Implemented in Step 7.*
+Locates a symbol or file and reports the unit that owns it, with the evidence class of every match.
+
+```sh
+./run map task_runner
+```
 
 ### `make impact`
-Reports the change-impact radius of a symbol, file or unit, including connected public surfaces and known
-blind spots. *Implemented in Step 7.*
+Reports what breaks if a file changes: direct and transitive dependents, the **public surfaces connected to
+it — including the MCP tool names that would break** — the tests that protect it, and the files in the blast
+radius with no import-derived test protection.
+
+```sh
+./run impact backend/app/services/task_runner.py
+```
+
+### `make flow`
+Shows the end-to-end path from a public surface down to a file — route → handler → service → adapter.
+
+### `make similar`
+Finds where something like this is already solved. Lexical, over code symbols, files, ADRs, rules and
+routes. Every candidate is labelled `SEMANTIC_MATCH` and carries the caveat that it is a suggestion, never
+an authoritative relationship.
+
+### `make violations`
+Reports unit dependencies that `architecture.toml` does not allow, with the file and line of each import
+that proves it. **Descriptive only** — Step 8 turns this into an enforced gate.
+
+### `make mcp`
+Serves the index over MCP on stdio (JSON-RPC). Same query layer as the CLI, same facts — `RULE-IDX-004`
+proves it on every run.
 
 ### `make index`
 Builds or refreshes the repository knowledge graph. *Implemented in Step 5.*
@@ -296,7 +320,24 @@ unparseable file.
 import-derived protection*, **not** *untested* — declared as `BLIND-TEST-001` rather than papered over with
 a naming convention.
 
-`make map` and `make impact` — the query surface over this graph — arrive in Step 7.
+### Querying it
+
+```sh
+./run map <symbol|path>        # where is it, which unit owns it
+./run impact <path>            # what breaks, which surfaces, which tests
+./run flow <path>              # end-to-end path from a public surface
+./run similar <term>           # where is this already solved (SEMANTIC_MATCH)
+./run violations               # unit dependencies architecture.toml forbids
+./run mcp                      # the same queries over MCP on stdio
+```
+
+**Every answer carries its own uncertainty**: repository revision, index revision, freshness, coverage, and
+the blind spots relevant to *that* answer. A stale index makes the CLI exit `4` and stamps the answer
+`ANSWER MAY BE WRONG` — an answer that hid its own unreliability would be worse than no answer, because it
+would be believed.
+
+`RULE-IDX-004` proves the CLI and the MCP server return the same facts, evidence classes, revisions,
+freshness and blind spots. Presentation differs; facts cannot.
 
 ## Gate conformance
 

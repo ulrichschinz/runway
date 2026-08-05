@@ -41,8 +41,12 @@ case "$cmd" in
 	# command says so and exits 3 — it never pretends to succeed.
 	rebuild-verify) exec tools/stub.sh rebuild-verify 5  "clean index rebuild and equivalence validation" ;;
 	test)           exec tools/test.sh "$@" ;;
-	map)            exec tools/stub.sh map            7  "index query: where is X and who owns it" ;;
-	impact)         exec tools/stub.sh impact         7  "index query: change-impact radius and connected surfaces" ;;
+	map)            exec python3 tools/index/cli.py locate "$@" ;;
+	impact)         exec python3 tools/index/cli.py impact "$@" ;;
+	flow)           exec python3 tools/index/cli.py flow "$@" ;;
+	similar)        exec python3 tools/index/cli.py similar "$@" ;;
+	violations)     exec python3 tools/index/cli.py violations "$@" ;;
+	mcp)            exec python3 tools/index/mcp_server.py "$@" ;;
 	index)          exec python3 tools/index/build.py "$@" ;;
 	brief)          exec tools/stub.sh brief          10 "Change Impact Brief generation and validation" ;;
 	scaffold)       exec tools/stub.sh scaffold       16 "unit scaffold generator" ;;
