@@ -177,6 +177,22 @@ succeeded, the deploy job went green, and the service was down. See ADR 0004.
 Transitive dependencies are still not pinned as a whole — Step 14 owns that. This rule is what makes the
 gap survivable meanwhile.
 
+### Changing frontend dependencies
+
+After any change to `frontend/package.json`, regenerate the lockfile with:
+
+```sh
+tools/npm-lock.sh
+```
+
+Development happens on whatever Node you have; CI and the frontend image build on the version in
+`tools/versions.env`. **npm majors do not agree on lockfile contents** — npm 11 omits the optional
+`@esbuild/*` platform packages that npm 10 then reports as *"Missing from lock file"*, so `npm ci` fails in
+CI while every local command succeeds. This script writes the lockfile using the same npm that will later
+read it.
+
+CI catches the mismatch (that is how it was found), but only after a push.
+
 ## Formatting, linting and types
 
 `RULE-FMT-001`, `RULE-LINT-001`, `RULE-LINT-002`, `RULE-TYPE-001`.
