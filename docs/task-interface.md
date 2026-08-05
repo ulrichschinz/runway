@@ -339,6 +339,30 @@ would be believed.
 `RULE-IDX-004` proves the CLI and the MCP server return the same facts, evidence classes, revisions,
 freshness and blind spots. Presentation differs; facts cannot.
 
+## Boundaries
+
+`RULE-ARCH-001`, `RULE-ARCH-002`, `RULE-ARCH-003`. `architecture.toml` declares the units, their owners and
+the dependencies between them; the checker compares that against what the index actually found.
+
+```sh
+./run violations     # the same facts, reported rather than enforced
+```
+
+| Rule | Fails when |
+|---|---|
+| `RULE-ARCH-001` | a unit depends on one `architecture.toml` does not permit, reported with the file and line that prove it |
+| `RULE-ARCH-002` | a **new** cycle appears between units — or a declared cycle is resolved but left declared, which is the ratchet |
+| `RULE-ARCH-003` | fan-in exceeds `ops/structure-baseline.toml` |
+
+**A single high fan-in is never a failure by itself.** A shared kernel, a composition root and a single HTTP
+egress are all *meant* to be depended on, and four of them are allowlisted by design. What the baseline
+catches is a value **growing** — a module quietly becoming the thing everything needs before anyone decided
+it should be. Raising a number is allowed; doing it silently is not.
+
+**A new cycle always fails.** Two cycles are declared today, `CYCLE-001` and `CYCLE-002`, both caused by one
+design decision: `AppShell` reads the tasks and auth stores directly instead of receiving what it displays.
+Each carries an owner and a teardown path, and the ratchet fails if either is fixed but left declared.
+
 ## Gate conformance
 
 `RULE-GATE-002`. `tools/fixtures/negative.sh` constructs a genuine violation of every executable rule and

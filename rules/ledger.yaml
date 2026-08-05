@@ -248,6 +248,53 @@ rules:
       A protection that can be switched off in a web UI without leaving a trace is not a
       control. The checked-in file is canonical and drift away from it is detectable.
 
+  - id: RULE-ARCH-001
+    statement: >
+      A unit dependency that architecture.toml does not allow MUST fail the gate.
+    class: executable
+    check: tools/checks/boundaries.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#boundaries
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      The index is descriptive and architecture.toml is normative. An edge that exists
+      never legitimises one the contract forbids. This rule is what stops the declared
+      structure from becoming a description of the past.
+
+  - id: RULE-ARCH-002
+    statement: >
+      A new cycle between units MUST fail. Declared cycles are inventoried with an owner
+      and a teardown path, under a ratchet that may only shrink.
+    class: executable
+    check: tools/checks/boundaries.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#boundaries
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A cycle is the one structural fact that is never accidental-but-fine: it means two
+      units cannot be understood, tested or replaced independently. The ratchet also fails
+      when a declared cycle is resolved but left declared, so improvements are locked in
+      rather than quietly forgotten.
+
+  - id: RULE-ARCH-003
+    statement: "Fan-in MUST NOT exceed the checked-in structural baseline."
+    class: executable
+    check: tools/checks/boundaries.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#boundaries
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A single high fan-in is never a failure by itself — a shared kernel and a single
+      egress point are meant to be depended on. What matters is the value GROWING, which
+      is how a module becomes the thing everything needs before anyone decided it should
+      be. Raising a baseline is allowed; doing it silently is not.
+
   - id: RULE-DEP-001
     statement: >
       The backend application MUST import cleanly from its pinned dependency set — the

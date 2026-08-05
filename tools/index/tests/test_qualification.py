@@ -135,22 +135,25 @@ class TestDirectionIsPreserved:
     """A directed graph that loses direction is worse than no graph: it inverts blame."""
 
     def test_a_known_import_points_from_importer_to_imported(self, graph):
+        # The router imports the service; the service never imports the router. This pair
+        # replaced gtd -> task_runner, which was the known edge until Step 8 removed it as
+        # a boundary violation — a fixture that depends on a defect expires when it is fixed.
         edges = [
             e
             for e in graph["edges"]
             if e["kind"] == "IMPORTS"
-            and e["src"] == "file:backend/app/routers/gtd.py"
-            and e["dst"] == "file:backend/app/services/task_runner.py"
+            and e["src"] == "file:backend/app/routers/tasks.py"
+            and e["dst"] == "file:backend/app/services/task_service.py"
         ]
-        assert len(edges) == 1, "the known gtd -> task_runner import is missing or duplicated"
+        assert len(edges) == 1, "the known tasks -> task_service import is missing or duplicated"
         reverse = [
             e
             for e in graph["edges"]
             if e["kind"] == "IMPORTS"
-            and e["src"] == "file:backend/app/services/task_runner.py"
-            and e["dst"] == "file:backend/app/routers/gtd.py"
+            and e["src"] == "file:backend/app/services/task_service.py"
+            and e["dst"] == "file:backend/app/routers/tasks.py"
         ]
-        assert reverse == [], "direction inverted: task_runner does not import gtd"
+        assert reverse == [], "direction inverted: the service does not import the router"
 
     def test_owns_always_points_from_unit_to_file(self, graph):
         for edge in graph["edges"]:
@@ -189,11 +192,11 @@ class TestEvidence:
             e
             for e in graph["edges"]
             if e["kind"] == "IMPORTS"
-            and e["src"] == "file:backend/app/routers/gtd.py"
-            and e["dst"] == "file:backend/app/services/task_runner.py"
+            and e["src"] == "file:backend/app/routers/tasks.py"
+            and e["dst"] == "file:backend/app/services/task_service.py"
         )
-        assert edge["file"] == "backend/app/routers/gtd.py"
-        assert edge["line"] == 7
+        assert edge["file"] == "backend/app/routers/tasks.py"
+        assert isinstance(edge["line"], int) and edge["line"] > 0
 
     def test_mcp_tools_are_declared_not_parsed(self, graph):
         """The one thing the index must not overclaim.
@@ -218,13 +221,17 @@ class TestEvidence:
 
 class TestImpactAndFlow:
     def test_the_change_impact_of_the_taskwarrior_adapter_is_complete(self, graph):
-        """Who breaks if task_runner changes?"""
+        """Who breaks if task_runner changes?
+
+        Exactly one file imports it: the service layer. That is the boundary doing its
+        job — routers reach the subprocess only through validation. Until Step 8, gtd.py
+        imported it directly, and this assertion listed two dependents.
+        """
         target = "file:backend/app/services/task_runner.py"
         dependents = {
             e["src"] for e in graph["edges"] if e["kind"] == "IMPORTS" and e["dst"] == target
         }
-        assert "file:backend/app/services/task_service.py" in dependents
-        assert "file:backend/app/routers/gtd.py" in dependents
+        assert dependents == {"file:backend/app/services/task_service.py"}
 
     def test_an_end_to_end_path_exists_from_a_route_to_the_adapter(self, graph):
         """POST /tasks -> create_task -> task_service -> task_runner."""

@@ -1,0 +1,29 @@
+# Structural baseline — checked in, and a RATCHET.
+#
+# Fan-in is the number of distinct files importing a file. A single high value is never a
+# failure by itself: a shared kernel, a composition root and a single egress point are all
+# meant to be depended on. What matters is a value GROWING, which is how a module quietly
+# becomes the thing everything needs before anyone decides it should be.
+#
+# RULE-ARCH-003 fails when any file exceeds its recorded value. Raising a number here is
+# allowed, but it is a visible, reviewable act rather than a silent drift.
+#
+# Regenerate the observed numbers with:  python3 tools/index/boundaries.py
+
+default_cap = 4
+
+# Legitimate hubs, exempt by design rather than by baseline.
+allowlist = [
+  "backend/app/models.py",  # DTOs — a shared kernel every router legitimately depends on
+  "backend/app/config.py",  # settings — same
+  "frontend/src/api/client.js",  # the single HTTP egress; concentration here is the design
+  "frontend/src/components/AppShell.vue",  # the layout every view wraps itself in
+]
+
+[hubs]
+"backend/app/database.py" = 7
+"frontend/src/components/TaskList.vue" = 6
+"frontend/src/components/TaskModal.vue" = 6
+"backend/app/dependencies.py" = 5
+"frontend/src/stores/tasks.js" = 5
+"frontend/src/views/_useTaskView.js" = 5

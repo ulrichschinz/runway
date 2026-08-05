@@ -69,12 +69,26 @@ owner = "maintainer"
 paths = ["backend/tests/**", "frontend/tests/**"]
 
 [[units]]
-id = "be/entry"
+id = "be/app"
 scope = "backend"
 layer = 0
 owner = "maintainer"
-paths = ["backend/app/main.py", "backend/app/dependencies.py", "backend/app/__init__.py"]
-note = "Composition root. Permitted to reach any layer."
+paths = ["backend/app/main.py", "backend/app/__init__.py"]
+note = """
+Application assembly. Imports routers and wires middleware; nothing imports it back.
+"""
+
+[[units]]
+id = "be/di"
+scope = "backend"
+layer = 1
+owner = "maintainer"
+paths = ["backend/app/dependencies.py"]
+note = """
+Dependency providers that routers inject (get_current_user, get_current_admin). Split out
+of the old be/entry: assembly and provision are opposite directions, and lumping them
+together manufactured a be/entry <-> be/routers cycle that the code does not contain.
+"""
 
 [[units]]
 id = "be/routers"
@@ -122,18 +136,33 @@ owner = "maintainer"
 paths = ["backend/app/models.py", "backend/app/config.py", "backend/app/auth.py"]
 
 [[units]]
-id = "fe/shell"
+id = "fe/app"
 scope = "frontend"
 owner = "maintainer"
 paths = [
   "frontend/src/App.vue",
   "frontend/src/main.js",
   "frontend/src/router/**",
+  "frontend/src/style.css",
+]
+note = """
+Composition root: the router imports every view. Nothing imports it back.
+"""
+
+[[units]]
+id = "fe/layout"
+scope = "frontend"
+owner = "maintainer"
+paths = [
   "frontend/src/components/AppShell.vue",
   "frontend/src/components/NavItem.vue",
   "frontend/src/components/BrandMark.vue",
-  "frontend/src/style.css",
 ]
+note = """
+Chrome that feature views wrap themselves in. Split out of the old fe/shell: the router
+imports views and views import the layout, so keeping both in one unit manufactured a
+cycle for every feature rather than exposing the one real cycle (CYCLE-001).
+"""
 
 [[units]]
 id = "fe/tasks"
@@ -177,16 +206,19 @@ paths = ["frontend/src/api/**", "frontend/src/composables/**", "frontend/src/sha
 # index reports violations descriptively.
 
 [[allowed_edges]]
-from = "be/entry"
-to = ["be/routers", "be/services", "be/adapters/db", "be/adapters/task", "be/leaves"]
+from = "be/app"
+to = ["be/routers", "be/di", "be/services", "be/adapters/db", "be/adapters/task", "be/leaves"]
+
+[[allowed_edges]]
+from = "be/di"
+to = ["be/adapters/db", "be/leaves"]
 
 [[allowed_edges]]
 from = "be/routers"
-to = ["be/services", "be/leaves", "be/entry", "be/adapters/db"]
+to = ["be/services", "be/leaves", "be/di", "be/adapters/db"]
 note = """
-be/entry appears here because routers import get_current_user from dependencies.py, the
-composition root; be/adapters/db because get_db is a dependency provider injected the same
-way. be/adapters/task is deliberately absent — a router reaching the Taskwarrior subprocess
+be/di appears here because routers inject get_current_user; be/adapters/db because get_db
+is a provider injected the same way. be/adapters/task is deliberately absent — a router reaching the Taskwarrior subprocess
 directly skips the validation in be/services. gtd.py does exactly that today.
 """
 
@@ -207,22 +239,30 @@ from = "be/leaves"
 to = []
 
 [[allowed_edges]]
-from = "fe/shell"
-to = ["fe/tasks", "fe/projects", "fe/identity", "fe/shared"]
-note = "Route composition, plus the sidebar's use of the tasks store — see CYCLE-001."
+from = "fe/app"
+to = ["fe/tasks", "fe/projects", "fe/identity", "fe/shared", "fe/layout"]
+note = "Route composition: the router imports every view."
+
+[[allowed_edges]]
+from = "fe/layout"
+to = ["fe/shared", "fe/identity", "fe/tasks"]
+note = """
+The sidebar reads the tasks store for context tags and the auth store for the current
+user. The tasks edge is the remaining real cycle — CYCLE-001.
+"""
 
 [[allowed_edges]]
 from = "fe/tasks"
-to = ["fe/shared", "fe/shell"]
+to = ["fe/shared", "fe/layout"]
 
 [[allowed_edges]]
 from = "fe/projects"
-to = ["fe/shared", "fe/shell", "fe/tasks"]
+to = ["fe/shared", "fe/layout", "fe/tasks"]
 note = "ProjectsView reuses the task list components; recorded rather than forbidden."
 
 [[allowed_edges]]
 from = "fe/identity"
-to = ["fe/shared", "fe/shell"]
+to = ["fe/shared", "fe/layout"]
 
 [[allowed_edges]]
 from = "fe/shared"
@@ -238,7 +278,7 @@ to = []
 
 [[allowed_edges]]
 from = "tests"
-to = ["be/entry", "be/routers", "be/services", "be/adapters/db", "be/adapters/task", "be/leaves", "fe/shared", "fe/tasks"]
+to = ["be/app", "be/di", "be/routers", "be/services", "be/adapters/db", "be/adapters/task", "be/leaves", "fe/shared", "fe/tasks"]
 note = "Tests may reach anything they protect; that is what makes them tests."
 
 # --- cycles that exist today -------------------------------------------------
@@ -246,8 +286,20 @@ note = "Tests may reach anything they protect; that is what makes them tests."
 
 [[known_cycles]]
 id = "CYCLE-001"
-between = ["fe/shell", "fe/tasks"]
-evidence = "AppShell.vue (fe/shell) imports stores/tasks.js (fe/tasks) for the context-tag sidebar, while every task view (fe/tasks) imports AppShell.vue."
+between = ["fe/layout", "fe/tasks"]
+evidence = "AppShell.vue (fe/layout) imports stores/tasks.js (fe/tasks) for the context-tag sidebar, while every task view (fe/tasks) imports AppShell.vue."
 owner = "maintainer"
 teardown = "Pass context tags into AppShell as props or via a slot, so the chrome stops importing the tasks store."
+accepted_on = "2026-08-05"
+
+[[known_cycles]]
+id = "CYCLE-002"
+between = ["fe/layout", "fe/identity"]
+evidence = "AppShell.vue (fe/layout) imports stores/auth.js (fe/identity) to show the current user, while LoginView and SettingsView (fe/identity) import AppShell.vue."
+owner = "maintainer"
+teardown = """
+The same fix as CYCLE-001: AppShell should receive what it displays rather than reach into
+stores. Both cycles are one design decision — the chrome reads global state directly — and
+one change removes both.
+"""
 accepted_on = "2026-08-05"

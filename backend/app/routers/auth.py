@@ -2,7 +2,7 @@ from aiosqlite import Connection
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.auth import create_access_token, hash_password, verify_password
-from app.database import _generate_api_key, get_allow_registration, get_db
+from app.database import generate_api_key, get_allow_registration, get_db
 from app.dependencies import get_current_user
 from app.models import (
     ApiKeyInfo,
@@ -25,7 +25,7 @@ async def register(body: UserCreate, db: Connection = Depends(get_db)):
     try:
         await db.execute(
             "INSERT INTO users (username, hashed_password, api_key) VALUES (?, ?, ?)",
-            (body.username, hash_password(body.password), _generate_api_key()),
+            (body.username, hash_password(body.password), generate_api_key()),
         )
         await db.commit()
     except Exception as e:
@@ -117,7 +117,7 @@ async def get_apikey(username: str = Depends(get_current_user), db: Connection =
 async def regenerate_apikey(
     username: str = Depends(get_current_user), db: Connection = Depends(get_db)
 ):
-    new_key = _generate_api_key()
+    new_key = generate_api_key()
     await db.execute("UPDATE users SET api_key=? WHERE username=?", (new_key, username))
     await db.commit()
     return ApiKeyInfo(api_key=new_key)

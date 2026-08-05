@@ -178,3 +178,19 @@ def annotate_task(username: str, uuid: str, text: str) -> Task:
     _validate_uuid(uuid)
     task_runner.annotate_task(username, uuid, text)
     return get_task(username, uuid)
+
+
+def project_names(username: str) -> list[str]:
+    """Distinct project names across a user's pending tasks, in first-seen order.
+
+    Exists so routers never reach the Taskwarrior adapter directly: every call to the
+    subprocess goes through this layer, which is where validation lives. The GTD router
+    previously imported task_runner.export_tasks itself, which is the boundary breach
+    RULE-ARCH-001 now forbids.
+    """
+    seen: dict[str, None] = {}
+    for raw in task_runner.export_tasks(username, ["status:pending"]):
+        project = raw.get("project")
+        if project:
+            seen[project] = None
+    return list(seen.keys())

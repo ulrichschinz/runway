@@ -147,10 +147,13 @@ class TestAnswersCarryTheirUncertainty:
 
 
 class TestQueryCorrectness:
-    def test_impact_finds_both_real_dependents(self, graph):
-        direct = query.impact(graph, TARGET)["result"]["direct_dependents"]
-        assert "backend/app/services/task_service.py" in direct
-        assert "backend/app/routers/gtd.py" in direct
+    def test_impact_separates_direct_from_transitive_dependents(self, graph):
+        result = query.impact(graph, TARGET)["result"]
+        # The adapter is reachable only through the service layer since Step 8, so routers
+        # appear at the transitive distance rather than the direct one.
+        assert result["direct_dependents"] == ["backend/app/services/task_service.py"]
+        assert "backend/app/routers/gtd.py" in result["transitive_dependents"]
+        assert "backend/app/routers/tasks.py" in result["transitive_dependents"]
 
     def test_impact_reports_the_mcp_tools_that_would_break(self, graph):
         surfaces = query.impact(graph, TARGET)["result"]["connected_public_surfaces"]
@@ -167,19 +170,22 @@ class TestQueryCorrectness:
         assert answer["path_count"] > 0
         assert any("tasks" in p["handler"] for p in answer["paths"])
 
-    def test_violations_reports_the_known_layering_breach(self, graph):
-        found = query.unit_violations(graph)["result"]["forbidden_unit_dependencies"]
-        pairs = {(v["from"], v["to"]) for v in found}
-        assert ("be/routers", "be/adapters/task") in pairs, (
-            "the known gtd -> task_runner breach is not reported"
-        )
+    def test_the_repository_currently_has_no_forbidden_dependency(self, graph):
+        """Step 8 fixed the only one.
 
-    def test_a_violation_carries_the_evidence_that_proves_it(self, graph):
+        That this asserts a clean state rather than a known breach is deliberate: the
+        breach WAS the fixture until it was repaired, and a fixture that depends on a
+        defect expires the moment someone fixes the defect.
+
+        Detection is proven instead by the negative fixture, which reinstates a breach and
+        requires the gate to go red.
+        """
         found = query.unit_violations(graph)["result"]["forbidden_unit_dependencies"]
-        breach = next(
-            v for v in found if (v["from"], v["to"]) == ("be/routers", "be/adapters/task")
-        )
-        assert any(e["file"] == "backend/app/routers/gtd.py" for e in breach["evidence"])
+        assert found == [], f"unexpected forbidden dependencies: {found}"
+
+    def test_the_declared_cycles_are_reported_with_their_identifiers(self, graph):
+        cycles = query.unit_violations(graph)["result"]["declared_cycles"]
+        assert {c["id"] for c in cycles} == {"CYCLE-001", "CYCLE-002"}
 
     def test_an_unknown_target_is_an_error_not_an_empty_success(self, graph):
         answer = query.impact(graph, "backend/app/does_not_exist.py")

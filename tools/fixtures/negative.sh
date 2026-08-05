@@ -268,6 +268,41 @@ p.write_text(t.replace(old, new))
 PATCH
 expect_red "IDX-004" "tools/checks/index-parity.sh" "RULE-IDX-004"
 
+# --- RULE-ARCH-001 — a forbidden unit dependency ----------------------------
+#
+# Reinstates the breach this step fixed: a router reaching past the service layer, and
+# past its validation, straight into the Taskwarrior subprocess adapter.
+printf '\nfrom app.services.task_runner import export_tasks  # noqa: F401\n' \
+	>>"$SANDBOX/backend/app/routers/tasks.py"
+(cd "$SANDBOX" && python3 tools/index/build.py >/dev/null 2>&1)
+expect_red "ARCH-001" "tools/checks/boundaries.sh" "RULE-ARCH-001"
+
+# --- RULE-ARCH-002 — a new cycle between units ------------------------------
+#
+# Makes a leaf import a router. Nothing breaks at runtime; the two units simply stop
+# being independently understandable, which is what a cycle costs.
+printf '\nfrom app.routers import tasks  # noqa: F401\n' >>"$SANDBOX/backend/app/models.py"
+(cd "$SANDBOX" && python3 tools/index/build.py >/dev/null 2>&1)
+expect_red "ARCH-002" "tools/checks/boundaries.sh" "RULE-ARCH-002"
+
+# --- RULE-ARCH-003 — a hub grows past its baseline --------------------------
+python3 - "$SANDBOX" <<'PATCH'
+import pathlib
+import sys
+
+# Point three more files at an already-baselined hub, pushing its fan-in over the line.
+root = pathlib.Path(sys.argv[1])
+for name in ("admin", "auth", "projects"):
+    target = root / "backend" / "app" / "routers" / f"{name}.py"
+    target.write_text(target.read_text() + "\nfrom app.views_hub import thing  # noqa: F401\n")
+hub = root / "backend" / "app" / "views_hub.py"
+hub.write_text("thing = 1\n")
+baseline = root / "ops" / "structure-baseline.toml"
+baseline.write_text(baseline.read_text().replace("default_cap = 4", "default_cap = 2"))
+PATCH
+(cd "$SANDBOX" && git add -A >/dev/null 2>&1 && python3 tools/index/build.py >/dev/null 2>&1)
+expect_red "ARCH-003" "tools/checks/boundaries.sh" "RULE-ARCH-003"
+
 # --- RULE-TI-003 — a check pollutes stdout in JSON mode ---------------------
 #
 # This is the real bug this rule was written for: a check that prints a friendly summary

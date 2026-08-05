@@ -4,7 +4,6 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Task
 from app.services import task_service
-from app.services.task_runner import export_tasks
 
 router = APIRouter(prefix="/gtd", tags=["gtd"])
 
@@ -64,14 +63,10 @@ def someday(username: str = Depends(get_current_user)):
 )
 async def projects(username: str = Depends(get_current_user), db=Depends(get_db)):
     try:
-        raw = export_tasks(username, ["status:pending"])
+        names = task_service.project_names(username)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
-    seen: dict[str, None] = {}
-    for t in raw:
-        p = t.get("project")
-        if p:
-            seen[p] = None
+    seen: dict[str, None] = dict.fromkeys(names)
     async with db.execute(
         "SELECT name FROM projects WHERE username=? ORDER BY created_at",
         (username,),
