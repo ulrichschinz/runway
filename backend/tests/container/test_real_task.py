@@ -179,23 +179,36 @@ class TestCrossTenantIsolation:
             "the override was consumed as configuration, so no annotation text remained"
         )
 
-    def test_the_redirect_cannot_write_into_another_users_store(self):
-        """The decisive question for SEC-3: can the redirect MODIFY another user's data?
+    def test_the_redirect_reaches_the_other_users_store_but_cannot_write_to_it(self):
+        """The decisive test for SEC-3, and the error IS the evidence.
 
-        Alice annotates using Bob's own task UUID while redirecting the data store to
-        Bob's directory. If Taskwarrior writes there, one user can modify another's tasks.
+        Alice annotates using BOB's task UUID while redirecting the data store to Bob's
+        directory. Contrast the two outcomes:
+
+        * redirect + a UUID that matches nothing there -> succeeds silently (previous test)
+        * redirect + a UUID that DOES match -> "Additional text must be provided"
+
+        The second only happens if Taskwarrior opened Bob's store and found Bob's task.
+        So the redirect is real and it reaches another user's data. The write is stopped
+        one step later, because the override consumed the annotation text that the write
+        requires — again the grammar, not a control in this repository.
+
+        Nothing is written, which is why this asserts the error and then checks Bob's task
+        is untouched.
         """
         bob_task = task_service.create_task("bob", TaskCreate(description="bob private note"))
 
-        task_service.annotate_task(
-            "alice", bob_task.uuid, f"rc.data.location={settings.data_root / 'bob'}"
-        )
+        with pytest.raises(RuntimeError, match="Additional text must be provided"):
+            task_service.annotate_task(
+                "alice", bob_task.uuid, f"rc.data.location={settings.data_root / 'bob'}"
+            )
 
         after = task_service.get_task("bob", bob_task.uuid)
         assert after.annotations == [], (
             "SEC-3 ESCALATION: a redirected data store allowed one user to write into "
             "another user's task"
         )
+        assert after.description == "bob private note"
 
     def test_the_redirect_cannot_read_another_users_store(self):
         """And the read direction: no user-controlled token reaches a filter position.

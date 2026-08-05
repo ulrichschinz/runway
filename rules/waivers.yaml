@@ -64,13 +64,19 @@ waivers:
       container test tier that Step 3 builds. Hardening blind would risk rejecting valid
       task text with no test to catch the regression.
     risk: >
-      RESOLVED 2026-08-05 against the real binary in the container test tier. The
-      injection mechanism is CONFIRMED: Taskwarrior does honour an rc.<key>=<value> token
-      supplied as a task description. The exploit path is BLOCKED, but only by an accident
-      of Taskwarrior's own grammar — a description is a single argv token, so the override
-      consumes all of it and `task add` then refuses with "Additional text must be
-      provided". Severity revised from "critical if confirmed" to MEDIUM: a real injection
-      whose only reachable path happens to fail closed.
+      RESOLVED 2026-08-05 against the real binary in the container test tier.
+      CONFIRMED: user input controls which data store Taskwarrior opens. A description or
+      annotation shaped like rc.data.location=<path> is honoured as a runtime override,
+      and the redirect demonstrably reaches another user's directory — proven by the
+      contrast between a redirect whose UUID matches nothing there (succeeds silently)
+      and one whose UUID does match (fails only at the next step, for want of text).
+      READ is blocked: no user-controlled token can reach a filter or export position,
+      because the one user-influenced filter is prefixed with "description:".
+      WRITE is blocked: every command that can carry the override also requires free text,
+      which the override consumes.
+      Severity revised from "critical if confirmed" to MEDIUM — a real, reachable
+      cross-tenant redirect whose read and write paths both fail closed by accident of a
+      third-party argument grammar rather than by any control in this repository.
     mitigation: >
       Incidental and fragile. Nothing in this repository blocks the injection; a
       third-party binary's argument parser does. Four container tests now pin that
