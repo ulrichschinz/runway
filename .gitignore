@@ -11,3 +11,7 @@ DEPLOY.md
 .coverage
 .pytest_cache/
 htmlcov/
+
+# Derived index data — regenerate with `make index`
+index/graph.jsonl
+index/state.json

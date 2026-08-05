@@ -249,6 +249,32 @@ The backend tiers are **characterization** tests: they pin current behaviour *in
 asserted as-is and labelled in place with the step that will change them. A test failing after an
 intentional change is the point — it makes the behaviour change visible in the diff.
 
+## The index
+
+`RULE-IDX-001`, `RULE-IDX-002`. A queryable, evidence-bearing model of the repository.
+
+```sh
+make index          # rebuild (every build is a clean build)
+```
+
+`index/graph.jsonl` is the canonical export — JSON Lines, versioned, documented in `index/schema.md`.
+It and `index/state.json` are **generated and git-ignored**; the extractors, schema, `index/manifest.toml`
+and `architecture.toml` are checked in. `make bootstrap` builds it, so a clean clone has one.
+
+**Every fact carries an evidence class** — `STATIC_CONFIRMED`, `CONFIG_CONFIRMED`, `CONTRACT_DECLARED`,
+`RUNTIME_OBSERVED`, `SEMANTIC_MATCH` or `UNKNOWN`. Nothing is asserted without one, and a heuristic is never
+promoted to a confirmed fact. Test protection is never inferred from a file name: a `TESTED_BY` edge exists
+only where a test *imports* what it protects.
+
+**The index is descriptive; `architecture.toml` is normative.** An edge the index found never legitimises a
+dependency the contract forbids — and the first build found exactly that, reporting a
+`be/routers → be/adapters` dependency that `architecture.toml` does not allow.
+
+Six blind spots are declared up front rather than discovered later, including Taskwarrior's internals, MCP
+tool-name derivation, and the deploy host's compose file. See `index/schema.md`.
+
+`make map` and `make impact` — the query surface over this graph — arrive in Step 7.
+
 ## Gate conformance
 
 `RULE-GATE-002`. `tools/fixtures/negative.sh` constructs a genuine violation of every executable rule and

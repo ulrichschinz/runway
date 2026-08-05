@@ -5,7 +5,7 @@
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["."]
+src = [".", "../tools/index"]
 
 [tool.ruff.lint]
 # Deliberately modest to start. The point of the first lint pass is a gate that is green
@@ -34,6 +34,12 @@ ignore = [
 # Fixtures shadow their own names as arguments, which is pytest's idiom (B008 is not
 # relevant here, but the import-order rule is, so the list stays narrow).
 "tests/**/*.py" = ["S101", "S105", "S106"]
+# The index extractors run as scripts from tools/index and import their siblings by bare
+# name, which requires the sys.path insert that E402 objects to.
+# The index extractors run as scripts and import their siblings by bare name, which needs
+# the sys.path insert E402 objects to. T201 is the point of a CLI. The asserts in model.py
+# guard the schema at construction time and are meant to be loud.
+"../tools/index/*.py" = ["E402", "S101", "S404", "S603", "S607", "T201"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

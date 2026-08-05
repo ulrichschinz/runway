@@ -1,0 +1,197 @@
+# The declared structure of this repository.
+#
+# CANONICAL. The index reads this to answer "which unit owns X"; Step 8 adds the boundary
+# checker that enforces the allowed edges below. This file is NORMATIVE — it states what
+# is allowed. The index is DESCRIPTIVE — it reports what exists. An edge the index found
+# never legitimises a dependency this file forbids.
+#
+# WHY TOML AND NOT YAML. The index parses this file, and Python parses TOML in the
+# standard library (tomllib) while YAML needs a third-party dependency. ADR 0008 commits
+# the index to zero dependencies, so the format follows. rules/ledger.yaml stays YAML for
+# now: it is read by humans and by a shell helper, and Step 9 revisits its format when it
+# gains a validator.
+#
+# Organizing axes (see docs/plan/phase-0-2.md section 1):
+#   repository -> deployable unit          backend | frontend | ops
+#   backend    -> layer, feature inside it routers -> services -> adapters -> leaves
+#   frontend   -> feature / route          declared over the existing folders, no moves
+#
+# Frontend units are DECLARED, not foldered. MODE C forbids restructuring, and a path map
+# gives the index and the boundary checker everything a folder move would, at no
+# migration risk. Re-open trigger: a third feature unit, or components/ exceeding 15 files.
+
+version = 1
+
+# --- scopes -----------------------------------------------------------------
+
+[[scopes]]
+id = "repository"
+axis = "deployable unit"
+rationale = "Only 4 of 26 commits touched both backend/ and frontend/. Separate images, separate toolchains, separate release lifecycles."
+
+[[scopes]]
+id = "backend"
+axis = "layer, with feature slices inside each layer"
+rationale = "What the code already is, and it holds. A domain-package split is the recorded alternative; its trigger is >12 routers or >3,000 backend LOC."
+
+[[scopes]]
+id = "frontend"
+axis = "feature / route plus a shared layer"
+rationale = "Co-change clusters around the tasks feature (store + modal + view controller), not around file type."
+
+# --- units ------------------------------------------------------------------
+
+[[units]]
+id = "ops"
+scope = "repository"
+owner = "maintainer"
+paths = ["tools/**", "ops/**", ".github/**", "Makefile", "run", "docker-compose.yml", "rules/**", "architecture.toml", "index/**"]
+
+[[units]]
+id = "be/entry"
+scope = "backend"
+layer = 0
+owner = "maintainer"
+paths = ["backend/app/main.py", "backend/app/dependencies.py"]
+note = "Composition root. Permitted to reach any layer."
+
+[[units]]
+id = "be/routers"
+scope = "backend"
+layer = 1
+owner = "maintainer"
+paths = ["backend/app/routers/**"]
+
+[[units]]
+id = "be/services"
+scope = "backend"
+layer = 2
+owner = "maintainer"
+paths = ["backend/app/services/task_service.py", "backend/app/services/user_service.py"]
+
+[[units]]
+id = "be/adapters"
+scope = "backend"
+layer = 3
+owner = "maintainer"
+paths = ["backend/app/services/task_runner.py", "backend/app/database.py"]
+note = "The only modules permitted to reach outside the process — task_runner owns the subprocess, database owns the connection."
+
+[[units]]
+id = "be/leaves"
+scope = "backend"
+layer = 4
+owner = "maintainer"
+paths = ["backend/app/models.py", "backend/app/config.py", "backend/app/auth.py"]
+
+[[units]]
+id = "fe/shell"
+scope = "frontend"
+owner = "maintainer"
+paths = [
+  "frontend/src/App.vue",
+  "frontend/src/main.js",
+  "frontend/src/router/**",
+  "frontend/src/components/AppShell.vue",
+  "frontend/src/components/NavItem.vue",
+  "frontend/src/components/BrandMark.vue",
+]
+
+[[units]]
+id = "fe/tasks"
+scope = "frontend"
+owner = "maintainer"
+paths = [
+  "frontend/src/components/TaskList.vue",
+  "frontend/src/components/TaskRow.vue",
+  "frontend/src/components/TaskModal.vue",
+  "frontend/src/components/TaskActionSheet.vue",
+  "frontend/src/components/UrgencyBadge.vue",
+  "frontend/src/stores/tasks.js",
+  "frontend/src/views/InboxView.vue",
+  "frontend/src/views/NextView.vue",
+  "frontend/src/views/WaitingView.vue",
+  "frontend/src/views/SomedayView.vue",
+  "frontend/src/views/AllTasksView.vue",
+  "frontend/src/views/_useTaskView.js",
+]
+
+[[units]]
+id = "fe/projects"
+scope = "frontend"
+owner = "maintainer"
+paths = ["frontend/src/views/ProjectsView.vue", "frontend/src/components/ProjectPlanModal.vue"]
+
+[[units]]
+id = "fe/identity"
+scope = "frontend"
+owner = "maintainer"
+paths = ["frontend/src/views/LoginView.vue", "frontend/src/views/SettingsView.vue", "frontend/src/stores/auth.js"]
+
+[[units]]
+id = "fe/shared"
+scope = "frontend"
+owner = "maintainer"
+paths = ["frontend/src/api/**", "frontend/src/composables/**", "frontend/src/shared/**"]
+
+# --- allowed dependency edges ------------------------------------------------
+# Anything not listed is forbidden. Step 8 turns this into an enforced check; today the
+# index reports violations descriptively.
+
+[[allowed_edges]]
+from = "be/entry"
+to = ["be/routers", "be/services", "be/adapters", "be/leaves"]
+
+[[allowed_edges]]
+from = "be/routers"
+to = ["be/services", "be/leaves", "be/entry"]
+note = "be/entry appears here because routers import get_current_user from dependencies.py, the composition root. A router MUST NOT import be/adapters directly."
+
+[[allowed_edges]]
+from = "be/services"
+to = ["be/adapters", "be/leaves"]
+
+[[allowed_edges]]
+from = "be/adapters"
+to = ["be/leaves"]
+
+[[allowed_edges]]
+from = "be/leaves"
+to = []
+
+[[allowed_edges]]
+from = "fe/shell"
+to = ["fe/tasks", "fe/projects", "fe/identity", "fe/shared"]
+note = "Route composition, plus the sidebar's use of the tasks store — see CYCLE-001."
+
+[[allowed_edges]]
+from = "fe/tasks"
+to = ["fe/shared", "fe/shell"]
+
+[[allowed_edges]]
+from = "fe/projects"
+to = ["fe/shared", "fe/shell", "fe/tasks"]
+note = "ProjectsView reuses the task list components; recorded rather than forbidden."
+
+[[allowed_edges]]
+from = "fe/identity"
+to = ["fe/shared", "fe/shell"]
+
+[[allowed_edges]]
+from = "fe/shared"
+to = []
+
+[[allowed_edges]]
+from = "ops"
+to = []
+
+# --- cycles that exist today -------------------------------------------------
+# With an owner and a teardown path. This inventory may only shrink (Step 8 adds the ratchet).
+
+[[known_cycles]]
+id = "CYCLE-001"
+between = ["fe/shell", "fe/tasks"]
+evidence = "AppShell.vue (fe/shell) imports stores/tasks.js (fe/tasks) for the context-tag sidebar, while every task view (fe/tasks) imports AppShell.vue."
+owner = "maintainer"
+teardown = "Pass context tags into AppShell as props or via a slot, so the chrome stops importing the tasks store."
+accepted_on = "2026-08-05"

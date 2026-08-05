@@ -155,6 +155,35 @@ rules:
       functions, not in component rendering. Testing where the bugs were beats testing
       where tests are conventional.
 
+  - id: RULE-IDX-001
+    statement: "The index MUST be current with the working tree."
+    class: executable
+    check: tools/checks/index-fresh.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#the-index
+    fix: make index
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A stale index is worse than no index: it answers confidently and wrongly. Exit 4 is
+      reserved for it — the answer would have been unreliable, so no answer is given.
+
+  - id: RULE-IDX-002
+    statement: >
+      Rebuilding the index from unchanged sources MUST produce a byte-identical export.
+    class: executable
+    check: tools/checks/index-deterministic.sh
+    fixture: tools/fixtures/negative.sh
+    contract: index/schema.md
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      ADR 0008 removed the incremental build path so that "incremental and clean rebuilds
+      are equivalent" holds by construction. This keeps that claim honest: unordered
+      iteration or a timestamp would break it silently, and a graph that changes without
+      its sources changing cannot be trusted to say anything.
+
   - id: RULE-TI-003
     statement: >
       Every command's JSON=1 output MUST be a single valid JSON object on stdout, with

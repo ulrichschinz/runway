@@ -1,0 +1,71 @@
+# Index qualification manifest — checked in.
+#
+# What the index covers, what it deliberately does not, and what a consumer can pin
+# against. Content hashes and freshness live in index/state.json, which is GENERATED and
+# git-ignored: a manifest that changed on every source edit would be pure churn.
+
+schema_version = "1.0.0"
+implementation_mode = "BUILD"
+decision_record = "docs/adr/0008-index-implementation-mode.md"
+
+[extractors]
+python = { module = "tools/index/extract_python.py", engine = "python stdlib ast", version = "1.0.0" }
+frontend = { module = "tools/index/extract_frontend.py", engine = "ESM scanner over script blocks", version = "1.0.0" }
+declarations = { module = "tools/index/build.py", engine = "tomllib + text readers", version = "1.0.0" }
+
+[coverage]
+languages = ["python", "javascript", "vue"]
+sources = ["backend/app/**/*.py", "frontend/src/**/*.{js,vue}", "docs/adr/*.md", "rules/ledger.yaml", "architecture.toml"]
+exclusions = [
+  "backend/tests/** and frontend/tests/** are indexed as test nodes, not as application symbols",
+  "generated and vendored trees (node_modules, .venv, dist) are never tracked and so never indexed",
+]
+mechanisms = [
+  "FastAPI route decorators",
+  "FastAPI Depends() injection",
+  "fastapi-mcp tool derivation (declared, not observed)",
+  "vue-router route table",
+  "Pinia defineStore",
+  "docker-compose process topology (declared)",
+]
+
+[profiles]
+# Active Coverage Profiles from Phase 0 §0.11, and how this index serves each.
+core = "symbols, imports, units, owners, tests, contracts, rules, routes, processes"
+dynamic_architecture = "FastAPI DI and routing, vue-router, Pinia — all CONFIG_CONFIRMED"
+distributed_polyglot = "two languages, three processes, transports recorded as process nodes"
+critical_runtime = "PARTIAL — runtime evidence is not yet collected; Step 13 adds the MCP tool snapshot"
+scale_operability = "reduced scope by decision F1; no runtime budgets are modelled"
+
+[retrieval]
+implementation = "none yet"
+note = "Conceptual retrieval over docs is Step 7, together with the CLI and MCP adapters."
+
+[unsupported]
+# Known-unsupported mechanisms. These MUST surface as blind spots, never as invented edges.
+items = [
+  "Vue template-only component usage (BLIND-FE-001)",
+  "dynamic import() (BLIND-FE-002)",
+  "fastapi-mcp internal tool naming (BLIND-MCP-001)",
+  "Taskwarrior internals (BLIND-TASK-001)",
+  "the deploy host compose file (BLIND-OPS-001)",
+  "nginx envsubst templating (BLIND-NGINX-001)",
+]
+
+[validation]
+# Deterministic queries whose answers are known. Step 6 turns these into the Index
+# Qualification Gate; they are recorded here so the gate has a checked-in source of truth.
+queries = [
+  "the owning unit of backend/app/routers/tasks.py is be/routers",
+  "backend/app/routers/gtd.py IMPORTS backend/app/services/task_runner.py with STATIC_CONFIRMED evidence",
+  "a DEPENDS_ON edge exists from be/routers to be/adapters, which architecture.toml does not allow",
+  "every REST route has exactly one EXPOSES edge to its handler symbol",
+  "every REST route has exactly one DERIVES_TOOL edge, and the tool is CONTRACT_DECLARED",
+  "no edge carries an evidence class outside the declared set",
+  "a clean rebuild of unchanged sources is byte-identical",
+]
+
+[lifecycle]
+build = "every build is a clean build; there is no incremental path (ADR 0008)"
+freshness = "index/state.json records a sha256 over all tracked file contents; RULE-IDX-001 fails on drift"
+rebuild_trigger = "any change to a tracked file"

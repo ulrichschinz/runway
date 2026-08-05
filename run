@@ -43,7 +43,7 @@ case "$cmd" in
 	test)           exec tools/test.sh "$@" ;;
 	map)            exec tools/stub.sh map            7  "index query: where is X and who owns it" ;;
 	impact)         exec tools/stub.sh impact         7  "index query: change-impact radius and connected surfaces" ;;
-	index)          exec tools/stub.sh index          5  "knowledge-graph extraction and canonical export" ;;
+	index)          exec python3 tools/index/build.py "$@" ;;
 	brief)          exec tools/stub.sh brief          10 "Change Impact Brief generation and validation" ;;
 	scaffold)       exec tools/stub.sh scaffold       16 "unit scaffold generator" ;;
 	fix)            exec tools/fix.sh "$@" ;;

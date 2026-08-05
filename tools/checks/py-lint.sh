@@ -5,7 +5,7 @@ set -eu
 cd "$REPO_ROOT/backend"
 RUFF=.venv/bin/ruff
 [ -x "$RUFF" ] || { printf '  ruff is not installed — run make bootstrap\n' >&2; exit "$EX_TOOLING"; }
-if out=$("$RUFF" check app tests --output-format=concise 2>&1); then
+if out=$("$RUFF" check app tests ../tools/index --output-format=concise 2>&1); then
 	ok "ruff check: no findings"
 	exit "$EX_OK"
 fi

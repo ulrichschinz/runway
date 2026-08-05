@@ -98,6 +98,15 @@ else
 	note "frontend/node_modules installed from package-lock.json"
 fi
 
+# --- index ------------------------------------------------------------------
+#
+# A clean clone has no index (it is derived and git-ignored), and the freshness check
+# fails closed when it is missing. Building it here means `make check` works immediately
+# after bootstrap rather than failing on something the developer has not heard of yet.
+
+run "building the repository knowledge graph" python3 tools/index/build.py
+note "index built"
+
 # --- report -----------------------------------------------------------------
 
 if is_json; then
