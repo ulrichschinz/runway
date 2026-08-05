@@ -198,6 +198,36 @@ expiry, or a reviewed `justified_suppression` explaining why the finding is a fa
 that correspondence a gate check. Suppressing a finding silently is the one thing that turns a lint gate into
 theatre.
 
+## Tests
+
+`RULE-TEST-001`, `RULE-TEST-002`, `RULE-TEST-003`. Two tiers, split at the Taskwarrior boundary (ADR 0006).
+
+| Tier | Where | Needs | Profile |
+|---|---|---|---|
+| unit | `backend/tests/unit` | nothing — Taskwarrior is faked at `task_runner._run` | `check`, `verify` |
+| container | `backend/tests/container` | Docker, x86_64, the real `task` binary | `verify` |
+
+```sh
+./run test              # both, where they can run here
+./run test unit         # the fast tier
+./run test container    # the real-binary tier
+```
+
+Everything above the `_run` seam executes for real in the unit tier: argv construction, validation, routing,
+error mapping. The container tier covers what only the binary can answer — urgency from the checked-in
+coefficients, the storage format, and **cross-tenant isolation**, which rests entirely on three environment
+variables handed to a subprocess.
+
+The container tier **cannot run on arm64**: archlinux publishes no arm64 image and `pacman` fails under
+emulation. The check says so and passes; CI is x86_64 and runs it for real (`RISK-TEST-001`).
+
+Coverage is a **ratchet**, currently a 90% floor against 96% actual. Raise it when coverage rises; never
+lower it to make a change fit.
+
+These are **characterization** tests: they pin current behaviour *including its defects*. Six defects are
+asserted as-is and labelled in place with the step that will change them. A test failing after an
+intentional change is the point — it makes the behaviour change visible in the diff.
+
 ## Gate conformance
 
 `RULE-GATE-002`. `tools/fixtures/negative.sh` constructs a genuine violation of every executable rule and

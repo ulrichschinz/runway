@@ -140,6 +140,28 @@ expect_red "LINT-002" "tools/checks/js-lint.sh" "RULE-LINT-002"
 printf '\nraise ImportError("injected by the negative fixture")\n' >>"$SANDBOX/backend/app/main.py"
 expect_red "DEP-001" "tools/checks/py-import.sh" "RULE-DEP-001"
 
+# --- RULE-TEST-001 — a unit test fails --------------------------------------
+cat >"$SANDBOX/backend/tests/unit/test_injected_failure.py" <<'BROKEN'
+def test_injected_by_the_negative_fixture():
+    assert False, "injected"
+BROKEN
+expect_red "TEST-001" "tools/checks/py-test-unit.sh" "RULE-TEST-001"
+
+# --- RULE-TEST-003 — coverage falls below the floor -------------------------
+#
+# Adding a large block of unreachable code drops the ratio without breaking a test, which
+# is exactly the shape of the regression this rule is meant to catch.
+{
+	printf '\n\ndef never_called_by_any_test() -> int:\n'
+	i=0
+	while [ "$i" -lt 400 ]; do
+		printf '    if %s > 10**9:\n        return %s\n' "$i" "$i"
+		i=$((i + 1))
+	done
+	printf '    return 0\n'
+} >>"$SANDBOX/backend/app/config.py"
+expect_red "TEST-003" "tools/checks/py-test-unit.sh" "RULE-TEST-003"
+
 # --- RULE-TI-003 — a check pollutes stdout in JSON mode ---------------------
 #
 # This is the real bug this rule was written for: a check that prints a friendly summary

@@ -8,3 +8,6 @@ frontend/dist/
 __pycache__/
 *.pyc
 DEPLOY.md
+.coverage
+.pytest_cache/
+htmlcov/

@@ -56,19 +56,32 @@ waivers:
     reason: >
       User-supplied task descriptions and annotation text reach the `task` argv
       unvalidated. Taskwarrior consumes `rc.<key>=<value>` anywhere in its argument list
-      as a runtime config override, so a crafted description may be able to redirect the
-      data store — breaking the only cross-tenant isolation this system has.
+      as a runtime config override. Confirmed on 2026-08-05: the override IS honoured;
+      the command then fails because no description text remains. See the risk field.
     alternatives_evaluated: >
       Fixing it inside Step 2 was rejected: the finding is a hypothesis, not a
       demonstrated exploit, and confirming it needs the real `task` binary in the
       container test tier that Step 3 builds. Hardening blind would risk rejecting valid
       task text with no test to catch the regression.
     risk: >
-      Critical if confirmed — cross-tenant data access. Note the call itself is already
-      safe from *shell* injection: it passes an argv list with shell=False.
+      RESOLVED 2026-08-05 against the real binary in the container test tier.
+      CONFIRMED: user input controls which data store Taskwarrior opens. A description or
+      annotation shaped like rc.data.location=<path> is honoured as a runtime override,
+      and the redirect demonstrably reaches another user's directory — proven by the
+      contrast between a redirect whose UUID matches nothing there (succeeds silently)
+      and one whose UUID does match (fails only at the next step, for want of text).
+      READ is blocked: no user-controlled token can reach a filter or export position,
+      because the one user-influenced filter is prefixed with "description:".
+      WRITE is blocked: every command that can carry the override also requires free text,
+      which the override consumes.
+      Severity revised from "critical if confirmed" to MEDIUM — a real, reachable
+      cross-tenant redirect whose read and write paths both fail closed by accident of a
+      third-party argument grammar rather than by any control in this repository.
     mitigation: >
-      None currently effective. UUIDs, tags, priorities and recurrence values are already
-      validated; description and annotation text are not.
+      Incidental and fragile. Nothing in this repository blocks the injection; a
+      third-party binary's argument parser does. Four container tests now pin that
+      behaviour, including one that fails if a description is ever split into multiple
+      argv tokens — the change that would remove the containment.
     owner: maintainer
     approver: maintainer
     approved_on: 2026-08-04

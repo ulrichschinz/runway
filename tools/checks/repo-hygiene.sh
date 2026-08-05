@@ -19,7 +19,9 @@ set -- \
 	'data|data/' \
 	'backend/.venv|backend/.venv/' \
 	'frontend/node_modules|frontend/node_modules/' \
-	'frontend/dist|frontend/dist/'
+	'frontend/dist|frontend/dist/' \
+	'backend/.coverage|.coverage' \
+	'backend/.pytest_cache|.pytest_cache/'
 
 for entry in "$@"; do
 	path=${entry%%|*}

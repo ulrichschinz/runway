@@ -40,7 +40,7 @@ case "$cmd" in
 	# Declared now, implemented by the step named in each line. An unimplemented
 	# command says so and exits 3 — it never pretends to succeed.
 	rebuild-verify) exec tools/stub.sh rebuild-verify 5  "clean index rebuild and equivalence validation" ;;
-	test)           exec tools/stub.sh test           3  "backend pytest tiers and frontend vitest" ;;
+	test)           exec tools/test.sh "$@" ;;
 	map)            exec tools/stub.sh map            7  "index query: where is X and who owns it" ;;
 	impact)         exec tools/stub.sh impact         7  "index query: change-impact radius and connected surfaces" ;;
 	index)          exec tools/stub.sh index          5  "knowledge-graph extraction and canonical export" ;;

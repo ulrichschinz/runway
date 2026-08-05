@@ -17,6 +17,17 @@ grep -qE "^FROM python:${PYTHON_VERSION}(\.|-)" backend/Dockerfile ||
 grep -qE "^FROM node:${NODE_VERSION}(\.|-)" frontend/Dockerfile ||
 	fail_rule RULE-TI-002 "frontend/Dockerfile does not build on node:${NODE_VERSION} (tools/versions.env)"
 
+# The test image is a separate file rather than a stage, so that adding a `test` stage to
+# backend/Dockerfile cannot make it the default build target and silently ship an image
+# whose CMD is pytest. The cost of that separation is duplication, so it is checked.
+grep -qE "^FROM python:${PYTHON_VERSION}(\.|-)" backend/Dockerfile.test ||
+	fail_rule RULE-TI-002 "backend/Dockerfile.test does not build on python:${PYTHON_VERSION}"
+
+for base in $(grep -oE '^FROM [a-z0-9.:/-]+' backend/Dockerfile | awk '{print $2}'); do
+	grep -qE "^FROM ${base}( |\$)" backend/Dockerfile.test ||
+		fail_rule RULE-TI-002 "backend/Dockerfile builds on '${base}' but backend/Dockerfile.test does not"
+done
+
 if ! check_result; then
 	exit "$EX_RULE"
 fi
