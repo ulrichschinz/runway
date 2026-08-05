@@ -159,13 +159,60 @@ class TestCrossTenantIsolation:
         assert alice_tasks == [], "the rejected command left a task behind"
         assert "bob private note" not in alice_tasks
 
-    def test_an_rc_shaped_annotation_is_rejected_the_same_way(self):
-        """The annotate path has the same shape: text is a bare argv token."""
+    def test_an_rc_shaped_annotation_succeeds_silently_rather_than_failing(self):
+        """The annotate path behaves DIFFERENTLY from add, and this is the sharp edge.
+
+        `task add` refuses when an override eats the description, so the caller gets an
+        error. `task <uuid> annotate` with the same shape returns success: the override is
+        applied, the command runs against whatever data store it names, matches nothing,
+        and reports nothing wrong.
+
+        So a user can make this service run Taskwarrior against another user's data
+        directory and get a 200 back. Whether anything can be read or written through that
+        redirect is the next two tests.
+        """
         created = task_service.create_task("alice", TaskCreate(description="host"))
-        with pytest.raises(RuntimeError):
-            task_service.annotate_task(
-                "alice", created.uuid, f"rc.data.location={settings.data_root / 'bob'}"
-            )
+        task = task_service.annotate_task(
+            "alice", created.uuid, f"rc.data.location={settings.data_root / 'bob'}"
+        )
+        assert task.annotations == [], (
+            "the override was consumed as configuration, so no annotation text remained"
+        )
+
+    def test_the_redirect_cannot_write_into_another_users_store(self):
+        """The decisive question for SEC-3: can the redirect MODIFY another user's data?
+
+        Alice annotates using Bob's own task UUID while redirecting the data store to
+        Bob's directory. If Taskwarrior writes there, one user can modify another's tasks.
+        """
+        bob_task = task_service.create_task("bob", TaskCreate(description="bob private note"))
+
+        task_service.annotate_task(
+            "alice", bob_task.uuid, f"rc.data.location={settings.data_root / 'bob'}"
+        )
+
+        after = task_service.get_task("bob", bob_task.uuid)
+        assert after.annotations == [], (
+            "SEC-3 ESCALATION: a redirected data store allowed one user to write into "
+            "another user's task"
+        )
+
+    def test_the_redirect_cannot_read_another_users_store(self):
+        """And the read direction: no user-controlled token reaches a filter position.
+
+        Export filters are fixed strings chosen by the routers, and the one
+        user-influenced filter is prefixed (`description:...`), so it can never be parsed
+        as an `rc.` override.
+        """
+        task_service.create_task("bob", TaskCreate(description="bob private note"))
+        created = task_service.create_task("alice", TaskCreate(description="alice note"))
+        task_service.annotate_task(
+            "alice", created.uuid, f"rc.data.location={settings.data_root / 'bob'}"
+        )
+
+        alice_tasks = [t.description for t in task_service.list_tasks("alice")]
+        assert "bob private note" not in alice_tasks
+        assert "alice note" in alice_tasks
 
     def test_an_rc_override_embedded_after_real_text_is_still_one_token(self):
         """A description is ONE argv element, which is what keeps this contained.
