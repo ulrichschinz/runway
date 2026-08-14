@@ -27,10 +27,22 @@ tools/apply-ruleset.sh          # push the checked-in state to GitHub
 ```
 
 The ruleset requires the `verify` status check, and forbids branch deletion and non-fast-forward pushes.
-It deliberately does **not** require a pull request: direct pushes to `main` stay allowed (decision F4).
-That combination was verified empirically on a throwaway branch — `required_status_checks` gates pull-request
-merges without rejecting direct pushes, so both halves of the decision hold at once. A direct push that
-fails verification still builds and ships nothing, because `deploy.yml` gates on the same job.
+It does **not** require a pull request. It does, however, require the `verify` status check — and that
+**does reject a direct push to `main`**, because a freshly pushed commit has no check runs yet:
+
+```
+remote: - Required status check "verify" is expected.
+remote: ! [remote rejected] HEAD -> main (push declined due to repository rule violations)
+```
+
+**This corrects a claim made on 2026-08-04.** The test that appeared to show direct pushes surviving was
+invalid: it pushed a *new branch* matching the rule, which is branch creation, not a push onto a protected
+branch. The error was found on 2026-08-14 by trying to push a documentation commit to `main`.
+
+So decision **F4** — a required status check *and* continued direct pushes — is not achievable with this
+ruleset. In practice every change has gone through a pull request regardless, so the half that matters holds.
+The open choice is recorded in `docs/plan/STATUS.md`: keep PR-only, or drop `required_status_checks` and rely
+solely on `deploy.yml` gating, which would restore direct pushes but let a red pull request merge.
 
 Two governance gaps are recorded rather than papered over: `RISK-GOV-001` (a single maintainer cannot be
 independently reviewed) and `RISK-GOV-002` (the drift check cannot prove anything from an offline machine).
