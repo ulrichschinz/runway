@@ -182,8 +182,20 @@ Ten residual risks are recorded in `rules/ledger.yaml`. The ones that shape deci
 Recorded in full in `docs/plan/phase-0-2.md`. In short: **F1** scaling/HA/multi-tenant are
 out of scope · **F2** REST and MCP surfaces are treated as externally consumed, so changes
 go through expand→migrate→switch→contract · **F3** all three security fixes, in plan order,
-with the two preconditions above as hard blockers · **F4** `verify` required, direct pushes
-to `main` still allowed.
+with the two preconditions above as hard blockers · **F4** `verify` required — and see the
+correction below, because the "direct pushes still allowed" half turned out not to be
+achievable.
+
+**Correction to F4, 2026-08-14.** `required_status_checks` *does* reject a direct push to
+`main`: a fresh commit has no check runs, so GitHub declines it. The 2026-08-04 test that
+seemed to show otherwise was invalid — it pushed a *new branch*, which is branch creation
+rather than a push onto a protected branch. Every change has gone through a pull request
+anyway, so nothing was actually blocked, but the claim was wrong and is now corrected in
+`ops/github/ruleset.json` and `docs/operations.md`.
+
+**Open decision for the next session:** keep PR-only (current reality, strongest), or drop
+`required_status_checks` and rely solely on `deploy.yml`'s `needs: verify` — which restores
+direct pushes but would let a red pull request merge.
 
 ---
 
