@@ -25,7 +25,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          # Full history, not the default depth-1. Checks that compare the change against
+          # its base revision cannot resolve one in a shallow clone and fall back to HEAD,
+          # which makes them pass vacuously in CI while binding locally.
+          fetch-depth: 0
 
       - name: Read declared runtime versions
         id: versions
@@ -34,12 +39,12 @@ jobs:
         run: grep -E '^[A-Z_]+=' tools/versions.env >> "$GITHUB_OUTPUT"
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ steps.versions.outputs.NODE_VERSION }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10
 
       - name: Bootstrap from a clean clone
         run: make bootstrap

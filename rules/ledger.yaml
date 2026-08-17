@@ -562,3 +562,14 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a contributor reports a bootstrap failure, or a second CI runner image is added"
     decision_record: docs/adr/0002-python-interpreter-provisioning.md
+
+  - id: RISK-OPS-001
+    statement: >
+      `platforms: linux/amd64` in deploy.yml is a declaration, not an enforced invariant.
+      Nothing in the gate inspects the architecture of a pushed image, so an edit that
+      removes the pin would publish an image matching whatever runner built it, and the
+      failure would surface only as `exec format error` on the production host after the
+      deploy had already replaced the running container.
+    owner: maintainer
+    re_open_trigger: "a second deployment target on a different architecture, or a build that runs anywhere other than a hosted x86_64 runner"
+    decision_record: docs/adr/0015-pin-the-build-platform.md
