@@ -80,5 +80,7 @@ true by construction rather than by testing.
 
 ## Related
 
-- ADR 0001 (task interface), `index/schema.md`, `index/manifest.yaml`
-- `docs/plan/phase-0-2.md` §2.2 recorded the provisional recommendation this ADR confirms with evidence
+- ADR 0001 (task interface), [`index/schema.md`](../../index/schema.md),
+  [`index/manifest.toml`](../../index/manifest.toml)
+- [`docs/plan/phase-0-2.md`](../plan/phase-0-2.md) §2.2 recorded the provisional recommendation this ADR
+  confirms with evidence

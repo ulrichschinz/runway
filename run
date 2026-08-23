@@ -48,7 +48,7 @@ case "$cmd" in
 	violations)     exec python3 tools/index/cli.py violations "$@" ;;
 	mcp)            exec python3 tools/index/mcp_server.py "$@" ;;
 	index)          exec python3 tools/index/build.py "$@" ;;
-	brief)          exec tools/stub.sh brief          10 "Change Impact Brief generation and validation" ;;
+	brief)          exec python3 tools/brief.py "$@" ;;
 	scaffold)       exec tools/stub.sh scaffold       16 "unit scaffold generator" ;;
 	fix)            exec tools/fix.sh "$@" ;;
 	decay-review)   exec tools/stub.sh decay-review   16 "recurring decay review with verifiable evidence" ;;

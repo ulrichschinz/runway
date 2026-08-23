@@ -1,6 +1,6 @@
 # Session handoff — where we are, and how to go on
 
-**Snapshot taken 2026-08-14 at `90b7952`.** This file is a *dated handoff*, not a source of
+**Snapshot taken 2026-08-23 at the head of `step-10-briefs`.** This file is a *dated handoff*, not a source of
 truth. Everything in it can drift; §1 tells you how to re-establish the real state in about
 twenty seconds. When they disagree, the commands win.
 
@@ -43,19 +43,23 @@ the structure was already sound; what was missing was enforcement and knowledge.
 | 7 | PR #9 | CLI + MCP query adapters over one layer, fact-level parity |
 | 8 | PR #10 | Boundary enforcement, cycle ratchet, hub baselines; both violations fixed |
 | 9 | PR #11 | Root `AGENTS.md`, scoped contracts, ledger and waiver validators |
+| — | PR #13 | **CI hardening**: build platform pinned to `linux/amd64`, deploy bounded, actions bumped |
+| 10 | this branch | `./run brief` generation; `RULE-DOC-004` resolves references in records and briefs |
 
-**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**30 rules, 28
+**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**31 rules, 29
 proven able to fail on every run**), index (built, qualified, deterministic, queryable).
 
-`check` ~7s · `verify` ~34s local, ~90s CI.
+`check` ~5s · `verify` ~40s local. Unimplemented commands are now `rebuild-verify` (5),
+`scaffold` (16) and `decay-review` (16); `brief` is implemented.
 
 ---
 
 ## 3. What to do next — Step 11, and it needs the human
 
-**Step 11 is the security wave that touches the running production instance.** It is the
-next step, and it is blocked on two preconditions that cannot be cleared from a dev
-machine. Both were recorded as hard blockers when decision **F3** was frozen.
+Step 10 is done and Step 12 onward is all local work, but **Step 11 is next in plan order**
+and it is the security wave that touches the running production instance. It is blocked on
+two preconditions that cannot be cleared from a dev machine. Both were recorded as hard
+blockers when decision **F3** was frozen.
 
 ### Blocker A — is production running on the default JWT secret?
 
@@ -114,7 +118,7 @@ fix and green after.
 
 | Step | Scope | Notes |
 |---|---|---|
-| **10** (partial) | `make brief` generation; ADR-link resolution as a gate check | `docs/change-workflow.md` and the five delivery patterns already landed in Step 9. `./run brief` still exits 3. |
+| ~~10~~ | ~~`make brief` generation; ADR-link resolution~~ | **Done.** See `docs/briefs/0011-briefs-and-record-resolution.md` and ADR 0016. |
 | **11** ⚠ | Security wave 1 — see §3 | **Behaviour-changing. Blocked on the human.** |
 | **12** ⚠ | Security wave 2 — Taskwarrior argv hardening at the `_run` choke point | Behaviour-changing. SEC-3 is *resolved* (medium, not critical) but the fix is still owed: containment today is an accident of a third-party argument grammar, not a control. |
 | **13** | Public-surface protection: OpenAPI snapshot, **runtime-observed MCP tool list**, DB schema, env-var schema, SPA routes | Also replaces `BLIND-MCP-001` with `RUNTIME_OBSERVED` evidence. |
@@ -123,7 +127,7 @@ fix and green after.
 | **16** | `make scaffold`, `make decay-review`, Phase 4 audit, **Cold-Agent Index and Change Tests** | 16a already landed early. |
 
 Unimplemented commands (each exits `3` naming its step): `rebuild-verify` (5),
-`brief` (10), `scaffold` (16), `decay-review` (16).
+`scaffold` (16), `decay-review` (16).
 
 ---
 
@@ -139,7 +143,7 @@ until each is resolved or deliberately re-approved:
 | `WAIVER-OPS-001` | migrations swallow every exception | Step 15 |
 | `WAIVER-TYPE-001` | unchecked `Row \| None` in two handlers — a reachable 500 on `/auth/me` | its own step |
 
-Ten residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
+Twelve residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
 
 - **`BLIND-OPS-001`** — the deploy host's compose file is **not in this repository**. The
   checked-in one declares `build:` with no `image:`, so `docker compose pull` cannot consume
@@ -174,6 +178,13 @@ Ten residual risks are recorded in `rules/ledger.yaml`. The ones that shape deci
   broke all four, correctly.
 - **The index is descriptive, `architecture.toml` is normative.** Twice the index disagreed
   with the declaration and the *declaration* was wrong.
+- **Do not quote a dangling identifier in prose.** `RULE-DOC-004` resolves every
+  `RULE-`/`RISK-`/`BLIND-`/`WAIVER-`/`CYCLE-` id named in a record or brief, so a document
+  explaining a wrong id must *describe* it, not reproduce it. Step 10 hit this three times
+  while being written.
+- **Records point at files with links, not backticks.** Path existence is deliberately not
+  checked (`RISK-DOC-002`) because prose cannot be distinguished from reference; a markdown
+  link is checked and carries the guarantee for free.
 
 ---
 
@@ -207,6 +218,11 @@ commands, then either
 - **clear Blocker A** by running `docker compose config | grep JWT_SECRET` on the deploy
   host and reporting what it says — that unblocks Step 11 and is the highest-value next
   action; or
-- **do Step 10** (`make brief` generation and the ADR-link gate check), which is entirely
-  local, needs nothing from the human, and is the natural thing to build while the
-  production question is being answered.
+- **build the JWT preflight check** (§3), which is local, needs nothing from the human, and
+  turns Blocker A from something someone remembers to check into something tooling answers;
+  or
+- **start Step 12** (Taskwarrior argv hardening at the `_run` choke point), the next
+  unblocked plan step. It is behaviour-changing, so it wants the Security-or-Operability
+  pattern: failure scenario, control, adversarial proof.
+
+Step 10 is done — see §4.

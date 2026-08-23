@@ -15,6 +15,9 @@ Five things are checked:
 * `RULE-RULE-002` — no waiver has expired, and every waiver records all five groups.
 * `RULE-RULE-003` — every inline suppression corresponds to a waiver or a reviewed
   justified suppression. Silent suppression is what turns a gate into theatre.
+* `RULE-DOC-004` — every reference in a decision record or a change brief resolves. The
+  same resolution `RULE-DOC-001` performs on the contract, applied to the documents the
+  contract points at, because a dangling reference in an ADR is followed just as readily.
 """
 
 from __future__ import annotations
@@ -32,6 +35,8 @@ CONTRACT = ROOT / "AGENTS.md"
 SCOPED = [ROOT / "backend" / "AGENTS.md", ROOT / "frontend" / "AGENTS.md"]
 LEDGER = ROOT / "rules" / "ledger.yaml"
 WAIVERS = ROOT / "rules" / "waivers.yaml"
+ADRS = ROOT / "docs" / "adr"
+BRIEFS = ROOT / "docs" / "briefs"
 
 MAX_LINES = 250
 MAX_BYTES = 12_000
@@ -102,13 +107,29 @@ def _available_commands() -> list[str]:
 
 
 def _declared_identifiers() -> set[str]:
+    """Every identifier that is actually *declared*, as opposed to merely mentioned.
+
+    The ledger and the waiver register are parsed structurally, for `id:` fields only. A
+    regex over the whole file would count an id appearing inside a rationale as declared —
+    so citing `RISK-OPS-002` as an example of drift would make that very id resolve, and
+    the rule meant to catch dangling references would be defeated by the prose explaining
+    it. `architecture.toml` (cycle ids) and the index export (blind-spot ids) have no such
+    prose, and are scanned as text.
+    """
     names: set[str] = set()
-    for path in (LEDGER, WAIVERS, ROOT / "architecture.toml"):
+    for path in (LEDGER, WAIVERS):
+        if not path.exists():
+            continue
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for group in data.values():
+            if not isinstance(group, list):
+                continue
+            for item in group:
+                if isinstance(item, dict) and isinstance(item.get("id"), str):
+                    names.add(item["id"])
+    for path in (ROOT / "architecture.toml", ROOT / "index" / "graph.jsonl"):
         if path.exists():
-            names |= set(m.group(0) for m in _RULE_REF.finditer(path.read_text(encoding="utf-8")))
-    graph = ROOT / "index" / "graph.jsonl"
-    if graph.exists():
-        names |= set(m.group(0) for m in _RULE_REF.finditer(graph.read_text(encoding="utf-8")))
+            names |= {m.group(0) for m in _RULE_REF.finditer(path.read_text(encoding="utf-8"))}
     return names
 
 
@@ -281,6 +302,67 @@ def check_suppressions(waiver_data: dict) -> None:
             )
 
 
+# --- decision records and briefs resolve --------------------------------------
+
+_MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+_ADR_PROSE = re.compile(r"\bADR[ -](\d{4})\b")
+_STATUS = re.compile(r"^-?\s*\*\*Status:\*\*\s*(\w+)", re.MULTILINE)
+
+
+def check_records() -> None:
+    """RULE-DOC-004 — every reference in an ADR or a brief resolves.
+
+    A decision record is read by the next agent as authority. When it cites `RISK-OPS-002`
+    and the ledger declares `RISK-OPS-001`, the reader either chases a phantom or, worse,
+    concludes the risk is untracked. That exact drift shipped in ADR 0015 and passed every
+    gate, because nothing resolved a record's references against anything.
+
+    Three classes of reference are checked, and they share one property: each has an
+    unambiguous ground truth, so a failure is always a real defect. An identifier has a
+    registry — you never casually mention a RISK id that does not exist. A relative link is
+    navigational by definition. An ADR number names a record.
+
+    Backticked paths are deliberately NOT checked, though the first draft of this rule did.
+    A record is prose, and prose names files both as references and as mentions — a rejected
+    alternative that was never built, or a quotation of the very drift the record is
+    correcting. Nothing syntactic separates the two, and the check produced false positives
+    on records that were entirely correct. Records point at files by *linking* to them
+    instead, which the link check covers. Recorded as RISK-DOC-002.
+
+    Records are dated documents, so only an **Accepted** record is held to this: a Superseded
+    or Rejected one describes a world that has moved on, and rewriting it to keep a gate
+    green would falsify the history it exists to preserve.
+    """
+    declared = _declared_identifiers()
+    adr_numbers = {path.name[:4] for path in sorted(ADRS.glob("*.md"))}
+
+    for path in [*sorted(ADRS.glob("*.md")), *sorted(BRIEFS.glob("*.md"))]:
+        rel = path.relative_to(ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+
+        status = _STATUS.search(text)
+        if status and status.group(1).lower() not in ("accepted", "proposed"):
+            continue
+
+        # 1. every identifier it cites must be declared somewhere
+        for name in {m.group(0) for m in _RULE_REF.finditer(text)}:
+            if name not in declared:
+                fail("RULE-DOC-004", f"{rel} cites {name}, which is declared nowhere")
+
+        # 2. every relative markdown link must resolve, from the document's own directory
+        for href in {m.group(1) for m in _MD_LINK.finditer(text)}:
+            if href.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            target = (path.parent / href.split("#", 1)[0]).resolve()
+            if not target.exists():
+                fail("RULE-DOC-004", f"{rel} links to `{href}`, which does not resolve")
+
+        # 3. every ADR referred to in prose must be an ADR that exists
+        for number in {m.group(1) for m in _ADR_PROSE.finditer(text)}:
+            if number not in adr_numbers:
+                fail("RULE-DOC-004", f"{rel} refers to ADR {number}, which does not exist")
+
+
 def main() -> int:
     check_contract_claims()
     check_length_budget()
@@ -288,6 +370,7 @@ def main() -> int:
     check_ledger()
     waiver_data = check_waivers()
     check_suppressions(waiver_data)
+    check_records()
 
     for rule, message in problems:
         print(f"{rule}|{message}")

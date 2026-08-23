@@ -95,7 +95,24 @@ proves it on every run.
 Builds or refreshes the repository knowledge graph. *Implemented in Step 5.*
 
 ### `make brief`
-Generates a Change Impact Brief for the working diff, pre-filled from the index. *Implemented in Step 10.*
+Generates a Change Impact Brief for the working diff, pre-filled from the index: owning units, applicable
+contracts, governing decision records, affected public surfaces and their MCP tools, known dependents,
+protecting tests, changed files with no import-derived protection, relevant blind spots, and the base
+revision. The fields that require intent — requested outcome, delivery pattern, intended scope, behaviour
+change — are emitted as explicit TODO markers rather than guessed, so an unfinished brief looks unfinished.
+
+Print it, read it, then save it into `docs/briefs/`. `RULE-DOC-004` checks that every reference in the
+result resolves.
+
+```sh
+./run brief                          # against the merge base with origin/main
+./run brief --base HEAD              # uncommitted work only
+./run brief --paths backend/app/routers/gtd.py
+./run brief --json                   # the same facts, unrendered
+```
+
+Exits `4` when the index is stale, because the answer would have been unreliable, and `2` when nothing has
+changed against the base.
 
 ### `make scaffold`
 Creates a new unit that is conformant to the structure and the boundary rules by construction, with a
