@@ -55,7 +55,7 @@ manifest would roughly double build time to serve nobody.
 - The declared target architecture lives in the workflow rather than in nobody's head. A future move to
   a different runner does not silently change what is shipped.
 - **The pin is not enforced by a gate check.** Nothing fails if a future edit removes it. Recorded as
-  `RISK-OPS-002` with the re-open trigger *a second deployment target on a different architecture, or a
+  `RISK-OPS-001` with the re-open trigger *a second deployment target on a different architecture, or a
   build that runs anywhere other than a hosted x86_64 runner*.
 - The backend image cannot be built on arm64 at all while Taskwarrior is installed from Arch, so the
   pin costs nothing that was otherwise available.
