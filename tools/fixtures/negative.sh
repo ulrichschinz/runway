@@ -316,6 +316,21 @@ expect_red "DOC-002" "tools/checks/contract.sh" "RULE-DOC-002"
 printf '\nRULE-BE-999: the backend may do whatever it likes.\n' >>"$SANDBOX/backend/AGENTS.md"
 expect_red "DOC-003" "tools/checks/contract.sh" "RULE-DOC-003"
 
+# --- RULE-DOC-004 — a decision record cites an identifier nobody declared ---
+# The drift that shipped in ADR 0015 and passed every gate: a record pointing at a risk id
+# that the ledger does not declare. The reader chases a phantom, or concludes the risk is
+# untracked. Reproduced here against a record the fixture creates, so the assertion does
+# not depend on the content of any real ADR.
+mkdir -p "$SANDBOX/docs/adr"
+cat >"$SANDBOX/docs/adr/9999-fixture-dangling-reference.md" <<'ADR'
+# ADR 9999 — a fixture record with a dangling reference
+
+- **Status:** Accepted
+
+Recorded as `RISK-FIXTURE-999`, which is declared nowhere.
+ADR
+expect_red "DOC-004" "tools/checks/contract.sh" "RULE-DOC-004"
+
 # --- RULE-RULE-001 — an executable rule with no fixture ---------------------
 python3 - "$SANDBOX/rules/ledger.yaml" <<'PATCH'
 import pathlib

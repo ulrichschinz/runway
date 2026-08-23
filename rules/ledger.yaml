@@ -357,6 +357,30 @@ rules:
       defined in two places is a rule with two meanings, so definition lives only in the
       ledger.
 
+  - id: RULE-DOC-004
+    statement: >
+      Every reference in an accepted decision record or change brief MUST resolve: each
+      cited RULE/RISK/BLIND/WAIVER/CYCLE identifier is declared, each relative link
+      resolves, and each ADR referred to in prose exists.
+    class: executable
+    check: tools/checks/contract.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/change-workflow.md#the-change-impact-brief
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      RULE-DOC-001 keeps the contract honest, but the contract is 168 lines and delegates
+      the detail to the records it points at. Those were unchecked, and two had drifted:
+      one ADR cited a risk id the ledger does not declare, another named the index
+      manifest with the wrong file extension. A dangling reference in a decision record is
+      followed exactly as readily as one in the contract, and costs more to discover
+      because the reader assumes the record is authoritative. Only references with a
+      ground truth to resolve against are checked — see ADR 0016 and RISK-DOC-002 for what
+      is deliberately left out. Superseded and rejected records are exempt: they describe
+      a world that has moved on, and editing them to keep a gate green falsifies the
+      history they exist to preserve.
+
   - id: RULE-RULE-001
     statement: >
       Every rule in the ledger MUST declare a statement, class, check, contract, owner and
@@ -484,6 +508,20 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a change lands that the index would have flagged, and nobody queried it"
     decision_record: AGENTS.md
+
+  - id: RISK-DOC-002
+    statement: >
+      RULE-DOC-004 does not resolve file paths named in the prose of decision records and
+      briefs, only identifiers, links and ADR numbers. A record naming a file the way
+      prose does can point at the wrong file, or at one that no longer exists, and the
+      gate stays green. Two drafts tried to check paths and both produced false positives
+      on correct records, because nothing syntactic separates a reference from a mention
+      of something that was never built. The mitigation is a convention rather than a
+      control: records point at files with links, which are checked. Anchor targets within
+      those links are likewise unverified.
+    owner: maintainer
+    re_open_trigger: "a record's prose filename is found to point at the wrong file, a renamed section leaves a link resolving to the wrong place, or a reliable signal is found that separates a reference from a mention"
+    decision_record: docs/adr/0016-briefs-are-generated-references-are-checked.md
 
   - id: RISK-IDX-001
     statement: >

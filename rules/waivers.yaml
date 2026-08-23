@@ -181,12 +181,13 @@ justified_suppressions:
   - rule: "ruff E402 — module level import not at top of file"
     scope: >
       tools/index/build.py, tools/index/cli.py, tools/index/mcp_server.py,
-      tools/index/boundaries.py
+      tools/index/boundaries.py, tools/brief.py
     reason: >
       The index modules run as scripts and import their siblings by bare name, which
       requires inserting their own directory on sys.path before those imports. The
       alternative is turning tools/index into an installable package, which would add
       packaging machinery to a component whose whole design point (ADR 0008) is having no
-      dependencies and no build step.
+      dependencies and no build step. tools/brief.py is a consumer of that same layer and
+      imports it the same way, for the same reason; scope extended 2026-08-23.
     reviewed_by: maintainer
-    reviewed_on: 2026-08-06
+    reviewed_on: 2026-08-23

@@ -18,8 +18,15 @@ tests, intended scope, and the base revision.
 Most of it comes from `./run impact <path>`. The brief is where you say what you *intend*;
 the diff is where you say what you *did*. When they differ materially, revise the brief.
 
-> `make brief` will generate a pre-filled brief from the index and the working diff, and
-> validate its references. Until then briefs are written by hand from the same source.
+`make brief` generates the pre-filled brief from the index and the working diff. It fills
+what the index knows and marks what it cannot infer, so the remaining work is the thinking
+rather than the lookup. `RULE-DOC-004` then holds the result to its references: every
+repository-rooted path exists, every `RULE-`/`RISK-`/`BLIND-`/`WAIVER-`/`CYCLE-` identifier
+is declared, every relative link resolves, and every ADR named in prose is one that exists.
+
+The same rule applies to decision records in `docs/adr/`, with one exception: a record whose
+status is no longer *Accepted* is exempt. A superseded decision describes a world that has
+moved on, and editing it to keep a gate green falsifies the history it exists to preserve.
 
 ## Bug Fix
 
