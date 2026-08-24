@@ -171,7 +171,18 @@ networks:
     external: true
 ```
 
-`.env` beside it declares `JWT_SECRET` and `ALLOW_REGISTRATION`.
+`.env` beside it declares **`JWT_SECRET` only**.
+
+It also carried `ALLOW_REGISTRATION` until 2026-08-24, which did nothing: the host's compose file never
+passed it to the backend, so the container never saw it. `ALLOW_REGISTRATION` is a **first-run seed** —
+`init_db()` writes it into the `site_settings` table with `INSERT OR IGNORE`, so once that row exists the
+environment variable is ignored for the life of the database. The row is the authoritative value and an
+admin changes it through `PUT /admin/settings`. Production reads `allow_registration = false`, so
+registration is closed. The dead line was removed; a backup of the previous file is at `.env.bak-2026-08-24`
+on the host.
+
+The repository-root `docker-compose.yml` still declares `ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}`.
+That is the development file, where seeding a fresh database with registration open is the useful default.
 
 ### What this settles
 
