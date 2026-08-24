@@ -79,5 +79,5 @@ Declared up front and reported on any answer they touch:
 | `BLIND-FE-002` | dynamic `import()` targets |
 | `BLIND-MCP-001` | MCP tool names are the library's documented behaviour, not observed |
 | `BLIND-TASK-001` | Taskwarrior's internal behaviour |
-| `BLIND-OPS-001` | the deploy host's compose file is not in this repository |
+| `BLIND-OPS-001` | the deploy host's compose file is not in this repository (contents recorded, not verifiable) |
 | `BLIND-NGINX-001` | `nginx.conf` is templated by `envsubst` at container start |
