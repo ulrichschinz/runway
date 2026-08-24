@@ -123,6 +123,18 @@ Applies every deterministic, semantics-preserving repository-owned fix: `ruff` i
 and formatting for the backend, `eslint --fix` for the frontend. Tool-owned and generated files are repaired
 by running this, never by hand-editing — a hand-edit produces a diff the tool undoes on its next run.
 
+### `make grant-admin`
+Promotes an account to admin directly in a database, bypassing the API and its last-admin guard. The escape
+hatch for an instance that has ended up with no administrator.
+
+```sh
+./run grant-admin --db /opt/services/runway/users.db uli
+```
+
+`--db` has no default on purpose: this writes to a live database, so the path should be a deliberate
+keystroke. It does not create accounts — register first. Exits `2` when the account does not exist and `3`
+when the database cannot be opened. See [`docs/security.md`](security.md).
+
 ### `make decay-review`
 Runs the recurring agent-readiness decay review and writes verifiable evidence of the run. *Implemented in
 Step 16.*

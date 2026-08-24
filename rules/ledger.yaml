@@ -314,6 +314,27 @@ rules:
       went green, and the service was down. It is the cheapest possible check that the
       thing being shipped can run at all.
 
+  - id: RULE-SEC-001
+    statement: >
+      Every HTTP route MUST declare its required guard in rules/route-guards.toml, the
+      declaration MUST match the guard the handler enforces, and a route declared open
+      MUST record why.
+    class: executable
+    check: tools/checks/route-guards.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/security.md#the-route-guard-declaration
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      A forgotten guard fails silently: the route works, it just works for everybody. That
+      is not something a green test suite notices, and it is not something a reviewer
+      reliably notices either, because the evidence is one missing parameter default among
+      thirty handlers. Declaring the posture as checked-in state turns "did anyone think
+      about authorization for this route" into a question the gate answers. Open routes
+      carry a reason because a route anyone can reach is a decision, and a decision with no
+      recorded reason cannot be told apart from an oversight.
+
   - id: RULE-DOC-001
     statement: "Every factual claim in AGENTS.md MUST hold against the repository."
     class: executable
@@ -566,6 +587,30 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "the container tier breaks again on an unchanged backend, or Step 14 replaces the Arch source"
     decision_record: docs/operations.md#incident-2026-08-25
+
+  - id: RISK-SEC-001
+    statement: >
+      The frontend's role check is cosmetic. `auth.role` in the Vue store is read from
+      localStorage, so a viewer can make the admin UI render for themselves. Every /admin
+      route is guarded server-side, so the result is a screen full of 403s rather than
+      access — a display bug, not a privilege escalation. Making it honest means deriving
+      the role from a server response on every mount rather than from client storage.
+    owner: maintainer
+    re_open_trigger: "any admin-only behaviour is implemented in the frontend without a server-side guard behind it"
+    decision_record: docs/security.md
+
+  - id: RISK-SEC-002
+    statement: >
+      The users.role column is TEXT DEFAULT 'user' with no database-level constraint, so a
+      value written outside the application — by hand on the host, or by a future migration
+      — is not rejected. Every in-application writer validates against VALID_ROLES, and an
+      unrecognised value is not equal to 'admin', so the failure is closed rather than open.
+      A CHECK constraint would need a table rebuild, and migrations currently swallow every
+      exception (WAIVER-OPS-001), which makes a silent half-applied rebuild the more likely
+      failure of the two.
+    owner: maintainer
+    re_open_trigger: "WAIVER-OPS-001 is resolved and migrations report their failures, or a third role is introduced"
+    decision_record: docs/security.md
 
   - id: RISK-TEST-001
     statement: >

@@ -303,6 +303,34 @@ PATCH
 (cd "$SANDBOX" && git add -A >/dev/null 2>&1 && python3 tools/index/build.py >/dev/null 2>&1)
 expect_red "ARCH-003" "tools/checks/boundaries.sh" "RULE-ARCH-003"
 
+# --- RULE-SEC-001 — a route loses its guard -------------------------------
+# The failure this rule exists for: a guard is dropped and nothing notices, because the
+# route still works — it just works for everybody now. Strip the admin dependency from a
+# declared-admin handler and require the gate to say so.
+python3 - "$SANDBOX/backend/app/routers/admin.py" <<'GUARDSTRIP'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "username: str = Depends(get_current_admin), db: Connection = Depends(get_db)\n"
+assert old in t, "admin guard signature not found"
+p.write_text(t.replace(old, "db: Connection = Depends(get_db)\n", 1))
+GUARDSTRIP
+expect_red "SEC-001" "tools/checks/route-guards.sh" "RULE-SEC-001"
+
+# --- RULE-SEC-001 — a new route arrives with no guard decision -------------
+python3 - "$SANDBOX/backend/app/routers/admin.py" <<'NEWROUTE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+t += '\n\n@router.get("/undeclared")\nasync def undeclared_route():\n    return {}\n'
+p.write_text(t)
+NEWROUTE
+expect_red "SEC-001-new" "tools/checks/route-guards.sh" "RULE-SEC-001"
+
 # --- RULE-DOC-001 — the contract claims something untrue --------------------
 printf '\nThe entry point is `tools/checks/does-not-exist.sh`.\n' >>"$SANDBOX/AGENTS.md"
 expect_red "DOC-001" "tools/checks/contract.sh" "RULE-DOC-001"

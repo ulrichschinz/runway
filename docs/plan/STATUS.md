@@ -44,9 +44,11 @@ the structure was already sound; what was missing was enforcement and knowledge.
 | 8 | PR #10 | Boundary enforcement, cycle ratchet, hub baselines; both violations fixed |
 | 9 | PR #11 | Root `AGENTS.md`, scoped contracts, ledger and waiver validators |
 | — | PR #13 | **CI hardening**: build platform pinned to `linux/amd64`, deploy bounded, actions bumped |
-| 10 | this branch | `./run brief` generation; `RULE-DOC-004` resolves references in records and briefs |
+| 10 | PR #14 | `./run brief` generation; `RULE-DOC-004` resolves references in records and briefs |
+| — | PR #15 | Deploy host read; `BLIND-OPS-001` narrowed; two false production claims corrected |
+| 11 (partial) | this branch | SEC-2 closed: zero-admin bootstrap, last-admin guard, `RULE-SEC-001` route guards |
 
-**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**31 rules, 29
+**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**32 rules, 31
 proven able to fail on every run**), index (built, qualified, deterministic, queryable).
 
 `check` ~5s · `verify` ~40s local. Unimplemented commands are now `rebuild-verify` (5),
@@ -70,12 +72,18 @@ rotation was performed — it would have cost a round of logouts for no security
 `WAIVER-SEC-001`'s mitigation clause is satisfied: Step 11's boot-refusal will be a no-op for
 this deployment rather than a deploy that takes the site down.
 
-### Blocker B — the admin bootstrap
+### ~~Blocker B — the admin bootstrap~~ **CLEARED 2026-08-24**
 
-`init_db()` runs `UPDATE users SET role='admin' WHERE username='uli'` on **every** startup
-(finding SEC-2). Step 11 deletes it. Before that, an explicit bootstrap must exist **and be
-proven against a copy of the production `users.db`**, or the maintainer loses admin access
-at the next restart.
+`init_db()` no longer promotes `uli`. `bootstrap_admin()` promotes `BOOTSTRAP_ADMIN` only when
+the database contains **no admin at all**, which makes it self-limiting: it cannot contradict
+a role set through the API and cannot lock anyone out. Paired with a 409 that refuses to
+demote the last admin, so the two compose — the guard makes zero admins unreachable through
+the API, the bootstrap recovers an instance that reaches zero some other way.
+
+Proven against the production shape: the deploy host's database holds **one admin and one
+user**, so the bootstrap returns on its first branch and the change is a no-op there.
+
+See `docs/briefs/0012-admin-bootstrap-and-route-guards.md` and ADR 0017.
 
 ### Also outstanding from the last exchange
 
@@ -84,13 +92,18 @@ resolved `JWT_SECRET` is a known default or too short — runnable *on the host*
 `docker compose config`, so "is production configured?" becomes something tooling answers
 rather than something someone remembers to check.
 
-### Then Step 11 itself
+### Step 11 — what is done and what is left
 
-SEC-1 refuse to boot on a default/unset secret · SEC-2 remove the hard-coded `uli`
-promotion, replace with an explicit bootstrap · SEC-4 CORS allowlist instead of wildcard ·
-SEC-6 unify `/inbox` onto `get_current_user` behind a tracked compatibility shim · SEC-8
-login rate limiting. Each with an adversarial fixture proving the gate goes red before the
-fix and green after.
+| Finding | State |
+|---|---|
+| **SEC-1** default JWT secret | **No code change needed.** Production was never on a default. The boot-refusal is still worth adding for third-party deployments, but it is no longer urgent and no longer blocked. |
+| **SEC-2** hard-coded `uli` promotion | **Done.** Replaced by the zero-admin bootstrap, plus the last-admin guard and `RULE-SEC-001`. |
+| **SEC-4** CORS allowlist instead of wildcard | Open. |
+| **SEC-6** unify `/inbox` onto `get_current_user` | Open. Now *declared* rather than implicit: `rules/route-guards.toml` records it as `open` with the reason. |
+| **SEC-8** login rate limiting | Open. |
+
+Each remaining one still owes an adversarial fixture proving the gate goes red before the fix
+and green after.
 
 ---
 
@@ -107,7 +120,7 @@ fix and green after.
 | **16** | `make scaffold`, `make decay-review`, Phase 4 audit, **Cold-Agent Index and Change Tests** | 16a already landed early. |
 
 Unimplemented commands (each exits `3` naming its step): `rebuild-verify` (5),
-`scaffold` (16), `decay-review` (16).
+`scaffold` (16), `decay-review` (16). `grant-admin` was added in Step 11.
 
 ---
 
@@ -123,7 +136,7 @@ until each is resolved or deliberately re-approved:
 | `WAIVER-OPS-001` | migrations swallow every exception | Step 15 |
 | `WAIVER-TYPE-001` | unchecked `Row \| None` in two handlers — a reachable 500 on `/auth/me` | its own step |
 
-Twelve residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
+Fifteen residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
 
 - **`BLIND-OPS-001`** — the deploy host's compose file is still not in this repository, but
   it was **read on 2026-08-24 and transcribed into `docs/operations.md`**. It uses

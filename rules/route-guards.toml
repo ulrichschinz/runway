@@ -1,0 +1,144 @@
+# Which guard every HTTP route requires. Normative: RULE-SEC-001 fails the gate when the
+# code and this file disagree, in either direction.
+#
+#   admin   Depends(get_current_admin) — an authenticated user whose role is "admin"
+#   user    Depends(get_current_user)  — any authenticated principal
+#   open    reachable unauthenticated, or authenticating by some other means
+#
+# `open` requires a `reason`. A route anyone can reach is a decision, and a decision with
+# no recorded reason cannot be told apart from an oversight.
+#
+# Adding a route means adding a line here. That is the point: the authorization posture of
+# this surface is checked-in state, not an emergent property of thirty function signatures.
+
+version = 1
+
+
+[[routes]]
+route = "GET /admin/settings"
+guard = "admin"
+
+[[routes]]
+route = "PUT /admin/settings"
+guard = "admin"
+
+[[routes]]
+route = "GET /admin/users"
+guard = "admin"
+
+[[routes]]
+route = "PUT /admin/users/{target}/role"
+guard = "admin"
+
+[[routes]]
+route = "GET /auth/apikey"
+guard = "user"
+
+[[routes]]
+route = "POST /auth/apikey/regenerate"
+guard = "user"
+
+[[routes]]
+route = "POST /auth/login"
+guard = "open"
+reason = """
+The route that issues credentials cannot require them.
+"""
+
+[[routes]]
+route = "GET /auth/me"
+guard = "user"
+
+[[routes]]
+route = "PUT /auth/me"
+guard = "user"
+
+[[routes]]
+route = "PUT /auth/password"
+guard = "user"
+
+[[routes]]
+route = "POST /auth/register"
+guard = "open"
+reason = """
+Registration cannot require an account. Gated at runtime by the allow_registration site setting, which an admin controls through PUT /admin/settings.
+"""
+
+[[routes]]
+route = "GET /gtd/inbox"
+guard = "user"
+
+[[routes]]
+route = "GET /gtd/next"
+guard = "user"
+
+[[routes]]
+route = "GET /gtd/projects"
+guard = "user"
+
+[[routes]]
+route = "GET /gtd/projects/{name}"
+guard = "user"
+
+[[routes]]
+route = "GET /gtd/someday"
+guard = "user"
+
+[[routes]]
+route = "GET /gtd/waiting"
+guard = "user"
+
+[[routes]]
+route = "POST /inbox"
+guard = "open"
+reason = """
+Authenticates by its own API-key path (Authorization: Bearer <api_key>) rather than through get_current_user. Not unauthenticated, but a second implementation of authentication — finding SEC-6. Unifying it behind get_current_user with a compatibility shim is owed and tracked; until then it is declared open so this check does not report it as guarded.
+"""
+
+[[routes]]
+route = "POST /projects"
+guard = "user"
+
+[[routes]]
+route = "GET /projects/plans/{name}"
+guard = "user"
+
+[[routes]]
+route = "PUT /projects/plans/{name}"
+guard = "user"
+
+[[routes]]
+route = "GET /tasks"
+guard = "user"
+
+[[routes]]
+route = "POST /tasks"
+guard = "user"
+
+[[routes]]
+route = "DELETE /tasks/{uuid}"
+guard = "user"
+
+[[routes]]
+route = "GET /tasks/{uuid}"
+guard = "user"
+
+[[routes]]
+route = "PUT /tasks/{uuid}"
+guard = "user"
+
+[[routes]]
+route = "POST /tasks/{uuid}/annotate"
+guard = "user"
+
+[[routes]]
+route = "POST /tasks/{uuid}/done"
+guard = "user"
+
+[[routes]]
+route = "POST /tasks/{uuid}/start"
+guard = "user"
+
+[[routes]]
+route = "POST /tasks/{uuid}/stop"
+guard = "user"
