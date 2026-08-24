@@ -303,6 +303,23 @@ PATCH
 (cd "$SANDBOX" && git add -A >/dev/null 2>&1 && python3 tools/index/build.py >/dev/null 2>&1)
 expect_red "ARCH-003" "tools/checks/boundaries.sh" "RULE-ARCH-003"
 
+# --- RULE-HYG-003 — a deployment compose carries a literal secret -----------
+# The checked-in production compose is safe only while its secrets are ${...} references.
+# Replacing one with a literal is a one-token diff that publishes a live credential, so the
+# gate has to be what notices. The first draft of this check found the violation and still
+# exited 0 — fail_rule ran inside a pipeline subshell — which is exactly what this catches.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'LEAKSECRET'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "JWT_SECRET=${JWT_SECRET}"
+assert old in t, "the reference to replace was not found"
+p.write_text(t.replace(old, "JWT_SECRET=a-literal-value-that-must-not-ship", 1))
+LEAKSECRET
+expect_red "HYG-003" "tools/checks/repo-hygiene.sh" "RULE-HYG-003"
+
 # --- RULE-SEC-001 — a route loses its guard -------------------------------
 # The failure this rule exists for: a guard is dropped and nothing notices, because the
 # route still works — it just works for everybody now. Strip the admin dependency from a

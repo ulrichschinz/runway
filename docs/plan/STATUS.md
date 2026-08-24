@@ -48,7 +48,7 @@ the structure was already sound; what was missing was enforcement and knowledge.
 | — | PR #15 | Deploy host read; `BLIND-OPS-001` narrowed; two false production claims corrected |
 | 11 (partial) | this branch | SEC-2 closed: zero-admin bootstrap, last-admin guard, `RULE-SEC-001` route guards |
 
-**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**32 rules, 31
+**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**33 rules, 32
 proven able to fail on every run**), index (built, qualified, deterministic, queryable).
 
 `check` ~5s · `verify` ~40s local. Unimplemented commands are now `rebuild-verify` (5),
@@ -138,12 +138,15 @@ until each is resolved or deliberately re-approved:
 
 Fifteen residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
 
-- **`BLIND-OPS-001`** — the deploy host's compose file is still not in this repository, but
-  it was **read on 2026-08-24 and transcribed into `docs/operations.md`**. It uses
-  `image: ghcr.io/ulrichschinz/runway-*:latest`, so `docker compose pull` *does* consume the
-  images CI pushes. Two claims this repository made turned out false: the healthchecks do
-  not run in production, and the rollback runbook's `RUNWAY_SHA` has nothing to substitute
-  into. Drift is now the open risk (`RISK-OPS-002`).
+- **`BLIND-OPS-001`** — the deploy host's compose file was read on 2026-08-24 and is now
+  **checked in as `ops/deploy/docker-compose.yml`** (no secrets: `JWT_SECRET` is a `${...}`
+  reference, and `RULE-HYG-003` fails the gate if a literal ever replaces it). It uses
+  `image: ghcr.io/ulrichschinz/runway-*`, so `docker compose pull` *does* consume the images
+  CI pushes. Two claims this repository made turned out false — the healthchecks did not run
+  in production, and the rollback runbook's `RUNWAY_SHA` had nothing to substitute into —
+  and both are fixed in the checked-in copy. What remains open is that **nothing compares
+  the copy against the host** (`RISK-OPS-002`); CI has no host access, so it needs a
+  scheduled job somewhere that does.
 - `RISK-GOV-001` — one maintainer, so required-reviewer approval cannot be independent.
 - `RISK-GOV-002` — the branch-protection drift check needs an authenticated `gh`; it
   reports "skipped" in CI, so it effectively only runs from the maintainer's machine.

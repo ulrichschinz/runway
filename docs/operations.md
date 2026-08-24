@@ -122,9 +122,14 @@ client.
 
 ## The deploy host's topology
 
-**Read directly from the host on 2026-08-24.** This section replaces an open question that stood since
-2026-08-04; `BLIND-OPS-001` is narrowed rather than closed, because the file below is a transcription the
-index cannot verify and nothing detects drift once the host changes (`RISK-OPS-002`).
+**Read directly from the host on 2026-08-24 and checked in as** [`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml).
+This section replaces an open question that stood since 2026-08-04. `BLIND-OPS-001` is narrowed rather than
+closed: the file is now reviewable and diffable, but nothing compares it against the host, so drift is still
+undetected (`RISK-OPS-002`).
+
+The file contains no secrets — `JWT_SECRET` is a `${...}` reference resolved from a `.env` beside it on the
+host, which is not and must never be in this repository. `RULE-HYG-003` fails the gate if a literal ever
+replaces a reference there, because in a diff that looks like almost nothing.
 
 The host is `ar00`, reachable as `adm.agentic-reach.com`. The deployment lives in `/opt/services/runway`,
 owned by root, containing `docker-compose.yml`, `.env`, `users.db` and `data/`. Its compose file is **not**
@@ -181,11 +186,31 @@ networks:
   declares `build:` with no `image:`, publishes ports, and has no Traefik labels. Reading it to learn how
   production is wired gives the wrong answer on every one of those points.
 
+### Changing it
+
+`ops/deploy/docker-compose.yml` is **not deployed from here.** The deploy job runs `docker compose pull &&
+docker compose up -d` against whatever file is already on the host. Changing the topology means editing the
+host **and** updating the checked-in copy in the same change; nothing enforces that they agree
+(`RISK-OPS-002`).
+
+```sh
+scp ops/deploy/docker-compose.yml <host>:/tmp/runway-compose-new.yml
+ssh <host> 'cd /opt/services/runway && sudo cp -a docker-compose.yml docker-compose.yml.bak-$(date +%F)'
+ssh <host> 'sudo docker compose --project-directory /opt/services/runway \
+              -f /tmp/runway-compose-new.yml config --quiet'   # validate BEFORE installing
+ssh <host> 'sudo install -o root -g root -m 644 /tmp/runway-compose-new.yml \
+              /opt/services/runway/docker-compose.yml'
+ssh <host> 'cd /opt/services/runway && sudo docker compose up -d'
+```
+
+Validate before installing, always. A compose file that fails to parse leaves `up -d` unable to run at all,
+and the service stays on whatever it was.
+
 ### What is still open
 
-Checking the host's compose file into this repository — with `.env` kept out — would let the gate compare
-the two and fail on divergence. Until then the divergences above are found by looking, and this section is
-correct only as of the date at the top of it.
+Nothing compares the checked-in copy against the host. A gate check cannot do it — CI has no access to the
+deploy host — so the honest options are a scheduled job that reports divergence from somewhere that does, or
+accepting that this file is correct as of the date on it.
 
 ## Incident 2026-08-25
 

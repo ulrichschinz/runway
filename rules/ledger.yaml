@@ -50,6 +50,25 @@ rules:
       RULE-HYG-001 catches a leak that already happened. This one keeps it from being
       possible in the first place.
 
+  - id: RULE-HYG-003
+    statement: >
+      A checked-in deployment compose file MUST reference every secret as ${VAR}, never
+      carry a literal value.
+    class: executable
+    check: tools/checks/repo-hygiene.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/operations.md#the-deploy-hosts-topology
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      ops/deploy/docker-compose.yml is checked in so the production topology is reviewable
+      and diffable, which is only safe while the secrets in it are references resolved from
+      a .env that stays on the host. A literal would publish a live credential to a public
+      repository, and in a diff it looks almost exactly like the reference it replaced —
+      one interpolation removed. RULE-HYG-001 catches a secret-bearing file; this catches a
+      secret smuggled into a file that is supposed to be there.
+
   - id: RULE-TI-001
     statement: >
       Every task-interface command MUST be documented in docs/task-interface.md, and
@@ -532,15 +551,16 @@ residual_risks:
 
   - id: RISK-OPS-002
     statement: >
-      The deploy host's compose file is transcribed into docs/operations.md, not checked
-      in. The transcription was accurate on 2026-08-24 and nothing detects drift after
-      that: an edit on the host silently makes the documented topology wrong, and the
-      failure mode is a reader trusting it. Two claims this repository made about
-      production were already false when the file was first read — the healthchecks in the
-      checked-in compose do not run there, and the rollback runbook's RUNWAY_SHA has
-      nothing to substitute into.
+      The deploy host's compose file is checked in as ops/deploy/docker-compose.yml, but
+      nothing compares it against the host. It matched on 2026-08-24; after that an edit on
+      either side silently makes the other wrong, and the failure mode is a reader trusting
+      the copy. A gate check cannot close this — CI has no access to the deploy host — so
+      it needs a scheduled job running somewhere that does. Two claims this repository made
+      about production were already false when the file was first read: the healthchecks
+      did not run there, and the rollback runbook's RUNWAY_SHA had nothing to substitute
+      into. Both are fixed in the checked-in copy.
     owner: maintainer
-    re_open_trigger: "the host's compose file is checked in and compared by the gate, or a documented topology claim is found to be false again"
+    re_open_trigger: "a job exists that compares the checked-in copy against the host, or a documented topology claim is found to be false again"
     decision_record: docs/operations.md
 
   - id: RISK-DOC-002
