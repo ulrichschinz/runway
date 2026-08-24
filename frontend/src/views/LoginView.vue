@@ -29,7 +29,7 @@
         <button @click="submit" :disabled="loading" class="login-btn w-full">
           {{ loading ? 'Anmelden…' : mode === 'login' ? 'Anmelden' : 'Konto erstellen' }}
         </button>
-        <button @click="mode = mode === 'login' ? 'register' : 'login'" class="w-full text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+        <button v-if="registrationOpen" @click="mode = mode === 'login' ? 'register' : 'login'" class="w-full text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
           {{ mode === 'login' ? 'Noch kein Konto? Registrieren' : 'Schon ein Konto? Anmelden' }}
         </button>
       </div>
@@ -38,9 +38,10 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
+import client from '../api/client.js'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -50,6 +51,25 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 const mode = ref('login')
+
+// Whether to offer registration at all. Registration being closed is the common case on a
+// single-operator instance, and the backend has always refused correctly — but the login
+// page invited people to register regardless, so the refusal arrived only after they had
+// typed a username and password.
+//
+// Fails OPEN on purpose. If the status call errors the option stays visible: the backend is
+// the authority and rejects with a message either way, so a network hiccup should not hide a
+// working feature. Hiding it is a courtesy, not a control.
+const registrationOpen = ref(true)
+
+onMounted(async () => {
+  try {
+    const { data } = await client.get('/auth/registration-status')
+    registrationOpen.value = data.allow_registration
+  } catch {
+    registrationOpen.value = true
+  }
+})
 
 async function submit() {
   error.value = ''

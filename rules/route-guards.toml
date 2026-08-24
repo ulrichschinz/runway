@@ -58,6 +58,15 @@ route = "PUT /auth/password"
 guard = "user"
 
 [[routes]]
+route = "GET /auth/registration-status"
+guard = "open"
+reason = """
+The login page is shown to people who are not logged in, so the one endpoint that tells it
+whether to offer registration cannot require an account. Discloses nothing that POSTing to
+/auth/register does not already reveal.
+"""
+
+[[routes]]
 route = "POST /auth/register"
 guard = "open"
 reason = """

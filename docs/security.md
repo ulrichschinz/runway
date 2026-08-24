@@ -53,10 +53,17 @@ a passing test suite notices, and not something a reviewer reliably notices eith
 the evidence is one missing parameter default among thirty handlers.
 
 An `open` route must record a `reason`. A route anyone can reach is a decision, and a
-decision with no recorded reason cannot be told apart from an oversight. Three are open
-today: `POST /auth/register`, `POST /auth/login`, and `POST /inbox` — the last of which is
-not actually unauthenticated but implements its own API-key check instead of using
-`get_current_user`, which is finding SEC-6 and is owed a unification.
+decision with no recorded reason cannot be told apart from an oversight. Four are open today:
+
+- `POST /auth/register` and `POST /auth/login` — the routes that create and exchange
+  credentials cannot require them. Registration is additionally gated at runtime by the
+  `allow_registration` site setting, which an admin controls.
+- `GET /auth/registration-status` — read-only, reports whether registration is open so the
+  login page can hide the register option instead of inviting someone to type credentials and
+  then refusing them. Discloses nothing that POSTing to `/auth/register` does not already
+  reveal.
+- `POST /inbox` — not actually unauthenticated: it implements its own API-key check instead
+  of using `get_current_user`. Finding SEC-6, and owed a unification.
 
 ## How an instance gets its first admin
 

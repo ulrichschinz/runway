@@ -7,6 +7,7 @@ from app.dependencies import get_current_user
 from app.models import (
     ApiKeyInfo,
     PasswordChange,
+    SiteSettings,
     Token,
     UserCreate,
     UserInfo,
@@ -16,6 +17,18 @@ from app.models import (
 from app.services.user_service import init_user_data
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get(
+    "/registration-status",
+    response_model=SiteSettings,
+    summary="Whether this instance currently accepts new registrations (public)",
+    description="Public so the login page can hide the register option when registration is "
+    "closed, instead of inviting someone to type credentials and then refusing them. "
+    "Discloses nothing: the same answer is obtainable by POSTing to /auth/register.",
+)
+async def registration_status(db: Connection = Depends(get_db)):
+    return SiteSettings(allow_registration=await get_allow_registration(db))
 
 
 @router.post("/register", response_model=UserInfo, status_code=status.HTTP_201_CREATED)

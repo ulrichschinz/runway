@@ -44,9 +44,9 @@ the structure was already sound; what was missing was enforcement and knowledge.
 | 8 | PR #10 | Boundary enforcement, cycle ratchet, hub baselines; both violations fixed |
 | 9 | PR #11 | Root `AGENTS.md`, scoped contracts, ledger and waiver validators |
 | — | PR #13 | **CI hardening**: build platform pinned to `linux/amd64`, deploy bounded, actions bumped |
-| 10 | PR #14 | `./run brief` generation; `RULE-DOC-004` resolves references in records and briefs |
-| — | PR #15 | Deploy host read; `BLIND-OPS-001` narrowed; two false production claims corrected |
-| 11 (partial) | this branch | SEC-2 closed: zero-admin bootstrap, last-admin guard, `RULE-SEC-001` route guards |
+| 10 | PR #17 | `./run brief` generation; `RULE-DOC-004` resolves references in records and briefs |
+| — | PR #15 | Deploy host read; compose checked in; two false production claims corrected; healthchecks and rollback fixed on the host |
+| 11 (partial) | PR #16 | SEC-2 closed: zero-admin bootstrap, last-admin guard, `RULE-SEC-001` route guards |
 
 **All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**33 rules, 32
 proven able to fail on every run**), index (built, qualified, deterministic, queryable).
@@ -136,7 +136,7 @@ until each is resolved or deliberately re-approved:
 | `WAIVER-OPS-001` | migrations swallow every exception | Step 15 |
 | `WAIVER-TYPE-001` | unchecked `Row \| None` in two handlers — a reachable 500 on `/auth/me` | its own step |
 
-Fifteen residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
+Sixteen residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
 
 - **`BLIND-OPS-001`** — the deploy host's compose file was read on 2026-08-24 and is now
   **checked in as `ops/deploy/docker-compose.yml`** (no secrets: `JWT_SECRET` is a `${...}`
