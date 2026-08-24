@@ -55,6 +55,34 @@ class TestSettings:
         client.put("/admin/settings", json={"allow_registration": False}, headers=admin)
         r = client.post("/auth/register", json={"username": "late", "password": "pw"})
         assert r.status_code == 403
+        assert r.json()["detail"] == "Registration is disabled"
+
+    def test_re_enabling_the_flag_actually_reopens_registration(self, client, admin):
+        """The half that matters when an instance has registration closed.
+
+        Production runs with allow_registration = false, so the question "can we let someone
+        in again" has to be answerable without a deployment. It is: the flag is read from
+        site_settings on every request, so flipping it back takes effect immediately, and the
+        account that results is a working one — registered, able to log in, and a plain user.
+        """
+        client.put("/admin/settings", json={"allow_registration": False}, headers=admin)
+        assert (
+            client.post("/auth/register", json={"username": "dana", "password": "pw"}).status_code
+            == 403
+        )
+
+        client.put("/admin/settings", json={"allow_registration": True}, headers=admin)
+        created = client.post("/auth/register", json={"username": "dana", "password": "pw"})
+        assert created.status_code == 201
+        assert created.json()["role"] == "user"
+
+        token = client.post("/auth/login", json={"username": "dana", "password": "pw"})
+        assert token.status_code == 200
+        me = client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {token.json()['access_token']}"}
+        )
+        assert me.status_code == 200
+        assert me.json()["username"] == "dana"
 
 
 class TestUserManagement:
