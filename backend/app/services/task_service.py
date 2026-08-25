@@ -78,10 +78,17 @@ def _build_args(
     until: str | None,
     recur: str | None,
     depends: list[str] | None,
-) -> list[str]:
-    args: list[str] = []
-    if description is not None:
-        args.append(description)
+) -> tuple[list[str], list[str]]:
+    """Split a change into (modifiers, free text).
+
+    Taskwarrior parses everything before `--` and treats everything after it as text, so the
+    two cannot be interleaved. Returning them separately makes the trust boundary explicit in
+    the type: modifiers are built here from validated values, free text is whatever the user
+    typed and never reaches a parsed position (finding SEC-3).
+    """
+    mods: list[str] = []
+    text: list[str] = [description] if description is not None else []
+    args = mods  # modifiers only, from here down
     if project is not None:
         args.append(f"project:{project}")
     if priority is not None:
@@ -106,11 +113,11 @@ def _build_args(
     if depends is not None:
         for dep in depends:
             args.append(f"depends:{_validate_uuid(dep)}")
-    return args
+    return mods, text
 
 
 def create_task(username: str, task: TaskCreate) -> Task:
-    args = _build_args(
+    mods, text = _build_args(
         task.description,
         task.project,
         task.tags,
@@ -122,14 +129,21 @@ def create_task(username: str, task: TaskCreate) -> Task:
         task.recur,
         task.depends,
     )
-    task_runner.add_task(username, args)
-    tasks = list_tasks(username, ["description:" + task.description])
-    return tasks[0] if tasks else list_tasks(username)[0]
+    task_runner.add_task(username, mods, text)
+
+    # Read back by Taskwarrior's own +LATEST virtual tag rather than by re-querying the
+    # description. The old form put the user's text into a *filter* position — the one place
+    # the `--` separator cannot protect — so the same string was an injection surface twice,
+    # and it silently returned the wrong task whenever two tasks shared a description.
+    latest = task_runner.export_latest(username)
+    if latest:
+        return _raw_to_task(latest[0])
+    return list_tasks(username)[0]
 
 
 def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
     _validate_uuid(uuid)
-    args = _build_args(
+    mods, text = _build_args(
         task.description,
         task.project,
         task.tags,
@@ -143,12 +157,12 @@ def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
     )
     # Clear fields when explicitly set to empty
     if task.recur == "":
-        args.append("recur:")
+        mods.append("recur:")
     if task.depends is not None and len(task.depends) == 0:
-        args.append("depends:")
-    if not args:
+        mods.append("depends:")
+    if not mods and not text:
         return get_task(username, uuid)
-    task_runner.modify_task(username, uuid, args)
+    task_runner.modify_task(username, uuid, mods, text)
     return get_task(username, uuid)
 
 

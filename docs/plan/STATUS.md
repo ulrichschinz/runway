@@ -48,7 +48,7 @@ the structure was already sound; what was missing was enforcement and knowledge.
 | — | PR #15 | Deploy host read; compose checked in; two false production claims corrected; healthchecks and rollback fixed on the host |
 | 11 (partial) | PR #16 | SEC-2 closed: zero-admin bootstrap, last-admin guard, `RULE-SEC-001` route guards |
 
-**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**34 rules, 33
+**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**35 rules, 34
 proven able to fail on every run**), index (built, qualified, deterministic, queryable).
 
 `check` ~5s · `verify` ~40s local. Unimplemented commands are now `rebuild-verify` (5),
@@ -104,7 +104,7 @@ rather than something someone remembers to check.
 
 See `docs/briefs/0013-security-wave-2.md` and ADR 0018.
 
-**Next unblocked step is 12** — Taskwarrior argv hardening at the `_run` choke point.
+**Next unblocked step is 13** — public-surface protection: an OpenAPI snapshot, a runtime-observed MCP tool list (which also replaces `BLIND-MCP-001` with `RUNTIME_OBSERVED` evidence), DB and env-var schemas, SPA route snapshots. `SHIM-SEC-006` is scheduled for removal there.
 
 ---
 
@@ -114,7 +114,7 @@ See `docs/briefs/0013-security-wave-2.md` and ADR 0018.
 |---|---|---|
 | ~~10~~ | ~~`make brief` generation; ADR-link resolution~~ | **Done.** See `docs/briefs/0011-briefs-and-record-resolution.md` and ADR 0016. |
 | ~~11~~ | ~~Security wave 1~~ | **Done.** All five findings closed across two changes. |
-| **12** ⚠ | Security wave 2 — Taskwarrior argv hardening at the `_run` choke point | Behaviour-changing. SEC-3 is *resolved* (medium, not critical) but the fix is still owed: containment today is an accident of a third-party argument grammar, not a control. |
+| ~~12~~ | ~~Security wave 2 — Taskwarrior argv hardening~~ | **Done.** Free text after `--`, override refusal at the choke point, `RULE-ARCH-004` keeps `subprocess` there. `WAIVER-SEC-002` resolved. See `docs/briefs/0014-taskwarrior-boundary.md` and ADR 0019. |
 | **13** | Public-surface protection: OpenAPI snapshot, **runtime-observed MCP tool list**, DB schema, env-var schema, SPA routes | Also replaces `BLIND-MCP-001` with `RUNTIME_OBSERVED` evidence. |
 | **14** | Supply chain: hash-pinned lockfile, licence policy, digest-pinned base images, secret scanning | The `mcp` incident is the argument for this one. |
 | **15** | Operability: structured logging with a no-secrets rule, audit log, healthchecks already landed, `WAIVER-OPS-001` resolution | |
@@ -127,12 +127,11 @@ Unimplemented commands (each exits `3` naming its step): `rebuild-verify` (5),
 
 ## 5. Open debt with dates on it
 
-**Three waivers expire 2026-11-04**, and one shim expires 2026-11-25. When that date passes, `RULE-RULE-002` stops the gate
+**Two waivers expire 2026-11-04**, and one shim expires 2026-11-25. When that date passes, `RULE-RULE-002` stops the gate
 until each is resolved or deliberately re-approved:
 
 | Waiver | Finding | Resolved by |
 |---|---|---|
-| `WAIVER-SEC-002` | unvalidated input reaching the `task` argv | Step 12 |
 | `WAIVER-OPS-001` | migrations swallow every exception | Step 15 |
 | `WAIVER-TYPE-001` | unchecked `Row \| None` in two handlers — a reachable 500 on `/auth/me` | its own step |
 

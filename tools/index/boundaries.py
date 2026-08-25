@@ -7,6 +7,7 @@ is the only place in the repository permitted to turn a graph fact into a gate f
 Three checks, each guarding a different kind of decay:
 
 * **forbidden edges** — a dependency the contract does not permit;
+* **restricted imports** — a sensitive stdlib module reached from outside its choke point;
 * **cycles** — a new cycle between units always fails; declared ones are inventoried under
   a ratchet that may only shrink;
 * **hubs** — fan-in concentration measured against a checked-in baseline, so a module
@@ -71,6 +72,56 @@ def forbidden_edges(graph: dict, arch: dict) -> list[dict]:
 
 
 # --- cycles -------------------------------------------------------------------
+
+
+def restricted_imports(arch: dict) -> list[dict]:
+    """Files importing a restricted module from outside its declared choke point.
+
+    Scoped to the declared prefix — the application's own runtime — rather than the whole
+    tree. Repository tooling shells out to git constantly and legitimately, and a rule that
+    flagged it would be turned off within the week.
+
+    Read from source rather than from the index: the index records edges between this
+    repository's modules, and `subprocess` is not one of them. An AST walk is also the
+    honest tool, because it sees `import subprocess`, `from subprocess import run` and
+    `import subprocess as sp` alike, where a grep sees whichever spelling it was written for.
+    """
+    import ast
+    import subprocess as sp  # noqa: S404  # tooling, outside the scope this rule guards
+
+    tracked = sp.run(
+        ["git", "ls-files", "*.py"], cwd=ROOT, capture_output=True, text=True, check=True
+    ).stdout.split()
+
+    violations = []
+    for rule in arch.get("restricted_imports", []):
+        module = rule["module"]
+        allowed = set(rule.get("allowed_in", []))
+        scope = rule.get("scope", "")
+        for rel in tracked:
+            if not rel.startswith(scope) or rel in allowed:
+                continue
+            try:
+                tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
+            except (SyntaxError, OSError):
+                continue
+            for node in ast.walk(tree):
+                imported = []
+                if isinstance(node, ast.Import):
+                    imported = [a.name.split(".")[0] for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imported = [node.module.split(".")[0]]
+                if module in imported:
+                    violations.append(
+                        {
+                            "file": rel,
+                            "module": module,
+                            "line": node.lineno,
+                            "allowed_in": sorted(allowed),
+                        }
+                    )
+                    break
+    return violations
 
 
 def unit_cycles(graph: dict) -> list[tuple[str, ...]]:
@@ -146,6 +197,7 @@ def report() -> dict:
 
     return {
         "forbidden_edges": forbidden_edges(graph, arch),
+        "restricted_imports": restricted_imports(arch),
         "new_cycles": sorted(observed - declared),
         "declared_cycles_still_present": sorted(observed & declared),
         "declared_cycles_resolved": sorted(declared - observed),

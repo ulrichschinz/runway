@@ -150,6 +150,48 @@ real and accepted: someone who knows a username can deny it password login for t
 API keys are unaffected, so agents keep working through a lockout. Unknown usernames are
 throttled identically — exempting them would make the limiter a user-enumeration oracle.
 
+## The Taskwarrior boundary
+
+Per-user isolation rests entirely on three environment variables handed to a subprocess:
+`TASKDATA`, `TASKRC` and `HOME`, each pointing at one user's directory. There is no ownership
+column and no second gate.
+
+Taskwarrior consumes `rc.<key>=<value>` **anywhere in its argument list** as a runtime
+configuration override — including `rc.data.location`, which chooses which store it opens. A
+task description of that shape was therefore addressed at the only tenancy boundary the system
+has (finding **SEC-3**). Confirmed against the real binary, twice, on 2026-08-05 and again on
+2026-08-25 against Taskwarrior 3.5.0:
+
+```
+task add rc.data.location=/tmp/victim hello      ->  /tmp/victim/taskchampion.sqlite3 created
+task add -- rc.data.location=/tmp/victim hello   ->  stored as literal description text
+```
+
+Three controls, in order of how much they are relied on:
+
+1. **`--` terminates option parsing.** All free text — descriptions, annotations — is passed
+   after it, so an override is inert *by Taskwarrior's own grammar* rather than by our
+   filtering. This is the primary control precisely because it does not depend on us
+   enumerating dangerous shapes correctly. Modifiers must precede it, since anything after
+   `--` becomes text.
+2. **`reject_structural_tokens`** refuses `rc.`-shaped tokens in the caller-supplied argument
+   list — the filter and modifier positions, which must stay parseable and so cannot sit
+   behind a separator.
+3. **`RULE-ARCH-004`** keeps `subprocess` importable only from
+   [`backend/app/services/task_runner.py`](../backend/app/services/task_runner.py). A choke
+   point only works while it stays the only door, and a second caller would bypass both
+   controls above with nothing going red.
+
+Reading back a created task uses Taskwarrior's `+LATEST` virtual tag rather than re-querying
+by description. The old form put user text into a *filter* position — the one place `--`
+cannot protect — so the same string was an injection surface twice, and it returned the wrong
+task whenever two shared a description.
+
+**What was there before was not a control.** Every command able to carry an override also
+required free text, and the override consumed it, so writes failed. That is a property of a
+third-party argument parser, and it could change in any release — as the theme-file break of
+2026-08-25 showed, that binary does change under us.
+
 ## What is not enforced here
 
 - **Frontend role checks are cosmetic.** `auth.role` in the Vue store is read from

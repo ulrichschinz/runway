@@ -211,6 +211,26 @@ paths = ["frontend/src/api/**", "frontend/src/composables/**", "frontend/src/sha
 # Anything not listed is forbidden. Step 8 turns this into an enforced check; today the
 # index reports violations descriptively.
 
+# Sensitive standard-library modules, and the exhaustive list of files allowed to import
+# them. Enforced by RULE-ARCH-004.
+#
+# A choke point only works while it stays the only door. Every control in task_runner —
+# the `--` separator, the override refusal — is worth exactly nothing if a second module
+# imports subprocess and calls `task` directly, and that is an easy change to make by
+# accident while chasing something else.
+
+[[restricted_imports]]
+module = "subprocess"
+# The application's runtime only. Repository tooling shells out to git constantly and
+# legitimately; a rule that flagged that would be switched off within the week.
+scope = "backend/app/"
+allowed_in = ["backend/app/services/task_runner.py"]
+reason = """
+task_runner is the single place this application invokes the Taskwarrior binary, which is
+what makes its argv hardening a control rather than a convention (finding SEC-3). A second
+caller would bypass the separator and the override refusal without anything going red.
+"""
+
 [[allowed_edges]]
 from = "be/app"
 to = ["be/routers", "be/di", "be/services", "be/adapters/db", "be/adapters/task", "be/leaves"]
