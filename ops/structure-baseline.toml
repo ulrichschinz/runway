@@ -24,6 +24,10 @@ allowlist = [
 "backend/app/database.py" = 7
 "frontend/src/components/TaskList.vue" = 6
 "frontend/src/components/TaskModal.vue" = 6
-"backend/app/dependencies.py" = 5
+# Raised from 5 on 2026-08-25: /inbox stopped implementing its own authentication and
+# now depends on get_current_user like every other router (finding SEC-6). One more
+# dependent on the auth choke point is the intended shape of that fix — the alternative
+# was a second auth implementation, which is what was wrong.
+"backend/app/dependencies.py" = 6
 "frontend/src/stores/tasks.js" = 5
 "frontend/src/views/_useTaskView.js" = 5

@@ -354,6 +354,24 @@ rules:
       carry a reason because a route anyone can reach is a decision, and a decision with no
       recorded reason cannot be told apart from an oversight.
 
+  - id: RULE-SEC-002
+    statement: >
+      Every compatibility shim MUST be recorded in rules/shims.yaml with what, why, a
+      removal step, evidence, an owner and an expiry, and no shim may be past its expiry.
+    class: executable
+    check: tools/checks/contract.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/change-workflow.md#public-surface-or-data-migration
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Expand → migrate → switch → contract only works if the contract step happens, and it
+      is the step that gets skipped: the old shape keeps working, nothing fails, and
+      "temporary" becomes permanent by default rather than by decision. The countdown has
+      to be enforced by something that goes red, exactly as RULE-RULE-002 does for waivers.
+      A date nothing checks is a wish.
+
   - id: RULE-DOC-001
     statement: "Every factual claim in AGENTS.md MUST hold against the repository."
     class: executable
@@ -607,6 +625,19 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "the container tier breaks again on an unchanged backend, or Step 14 replaces the Arch source"
     decision_record: docs/operations.md#incident-2026-08-25
+
+  - id: RISK-SEC-003
+    statement: >
+      Login rate limiting is in-process and per-worker: the counters live in a module dict,
+      reset on restart, and are not shared between processes. Under one host and one worker
+      (decision F1) that is the whole population, so the limit is real; add a second worker
+      or a second host and the effective limit multiplies by the process count. Keying on
+      username rather than IP is also a deliberate trade: an attacker who knows a username
+      can deny it password login for the window. API keys are checked before any password
+      path, so agents, MCP clients and the webhook keep working through a lockout.
+    owner: maintainer
+    re_open_trigger: "a second worker or host is introduced, or an account lockout is used against a real user"
+    decision_record: docs/adr/0018-cors-startup-refusal-and-the-inbox-shim.md
 
   - id: RISK-SEC-001
     statement: >

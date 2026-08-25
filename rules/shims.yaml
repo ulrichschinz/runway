@@ -1,0 +1,45 @@
+# Compatibility shims — every accepted-but-deprecated shape, with the step that removes it.
+#
+# `docs/change-workflow.md` requires the migration pattern to be expand → migrate → switch →
+# contract, and the contract step is the one that gets skipped: the old shape keeps working,
+# nothing fails, and "temporary" becomes permanent by default rather than by decision.
+#
+# This file is the countdown. `RULE-SEC-002` fails the gate when an entry is missing a field
+# or has passed its expiry, exactly as `RULE-RULE-002` does for waivers. A shim that has
+# outlived its date is either removed or deliberately re-approved with a new one — both are
+# decisions, which is the point.
+#
+# Every entry records five things:
+#   what        the shape being accepted, precisely enough to grep for
+#   why         who breaks if it disappears today
+#   removal     the step that deletes it, and what must be true first
+#   evidence    how we will know nothing depends on it any more
+#   expires     the date this stops being acceptable without a fresh decision
+
+version: 1
+
+shims:
+  - id: SHIM-SEC-006
+    what: >
+      `get_current_user` accepts an API key presented as `Authorization: Bearer <api_key>`,
+      after a failed JWT decode, in backend/app/dependencies.py.
+    why: >
+      /inbox authenticated this way through its own inline lookup — a second implementation
+      of authentication with a different accepted header shape (finding SEC-6). Unifying it
+      onto get_current_user is the fix; removing the old shape in the same change would
+      break every agent, MCP client and webhook caller at once, since all of them send the
+      key in the Bearer slot today.
+    removal: >
+      Step 13. The route's canonical credential is `X-Api-Key`, which now works. Removal
+      means deleting the branch in get_current_user and the entry here, after callers have
+      moved.
+    evidence: >
+      No mechanical check exists: this repository cannot see what its callers send. Removal
+      needs a deliberate look at the deployment's own agents and the MCP client, which is
+      why the expiry is a date rather than a counter. Step 15's audit log would make it
+      observable — that is the honest prerequisite.
+    owner: maintainer
+    approved_on: 2026-08-25
+    expires: 2026-11-25
+    re_open_trigger: "the expiry passes, or a caller is found still using the Bearer shape after Step 13"
+    decision_record: docs/adr/0018-cors-startup-refusal-and-the-inbox-shim.md

@@ -48,7 +48,7 @@ the structure was already sound; what was missing was enforcement and knowledge.
 | — | PR #15 | Deploy host read; compose checked in; two false production claims corrected; healthchecks and rollback fixed on the host |
 | 11 (partial) | PR #16 | SEC-2 closed: zero-admin bootstrap, last-admin guard, `RULE-SEC-001` route guards |
 
-**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**33 rules, 32
+**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**34 rules, 33
 proven able to fail on every run**), index (built, qualified, deterministic, queryable).
 
 `check` ~5s · `verify` ~40s local. Unimplemented commands are now `rebuild-verify` (5),
@@ -92,18 +92,19 @@ resolved `JWT_SECRET` is a known default or too short — runnable *on the host*
 `docker compose config`, so "is production configured?" becomes something tooling answers
 rather than something someone remembers to check.
 
-### Step 11 — what is done and what is left
+### ~~Step 11~~ **COMPLETE 2026-08-25**
 
 | Finding | State |
 |---|---|
-| **SEC-1** default JWT secret | **No code change needed.** Production was never on a default. The boot-refusal is still worth adding for third-party deployments, but it is no longer urgent and no longer blocked. |
-| **SEC-2** hard-coded `uli` promotion | **Done.** Replaced by the zero-admin bootstrap, plus the last-admin guard and `RULE-SEC-001`. |
-| **SEC-4** CORS allowlist instead of wildcard | Open. |
-| **SEC-6** unify `/inbox` onto `get_current_user` | Open. Now *declared* rather than implicit: `rules/route-guards.toml` records it as `open` with the reason. |
-| **SEC-8** login rate limiting | Open. |
+| **SEC-1** default JWT secret | **Done.** `startup_checks` refuses every published default, an empty secret, and anything under 32 characters. No effect on production, which holds a real 64-character secret. `WAIVER-SEC-001` resolved. |
+| **SEC-2** hard-coded `uli` promotion | **Done.** Zero-admin bootstrap, last-admin guard, `RULE-SEC-001` route guards. |
+| **SEC-4** CORS wildcard | **Done.** `CORS_ORIGINS` defaults to empty and the middleware is not mounted at all — no browser path needs it, in production or development. |
+| **SEC-6** `/inbox` auth divergence | **Done.** Unified onto `get_current_user`; the Bearer-as-API-key shape survives as `SHIM-SEC-006`, expiring 2026-11-25, enforced by the new `RULE-SEC-002`. |
+| **SEC-8** login rate limiting | **Done.** 10 failures per username per 5 minutes, then 429. Keyed on username, not IP — `RISK-SEC-003` records what that costs. |
 
-Each remaining one still owes an adversarial fixture proving the gate goes red before the fix
-and green after.
+See `docs/briefs/0013-security-wave-2.md` and ADR 0018.
+
+**Next unblocked step is 12** — Taskwarrior argv hardening at the `_run` choke point.
 
 ---
 
@@ -112,7 +113,7 @@ and green after.
 | Step | Scope | Notes |
 |---|---|---|
 | ~~10~~ | ~~`make brief` generation; ADR-link resolution~~ | **Done.** See `docs/briefs/0011-briefs-and-record-resolution.md` and ADR 0016. |
-| **11** ⚠ | Security wave 1 — see §3 | **Behaviour-changing. Blocked on the human.** |
+| ~~11~~ | ~~Security wave 1~~ | **Done.** All five findings closed across two changes. |
 | **12** ⚠ | Security wave 2 — Taskwarrior argv hardening at the `_run` choke point | Behaviour-changing. SEC-3 is *resolved* (medium, not critical) but the fix is still owed: containment today is an accident of a third-party argument grammar, not a control. |
 | **13** | Public-surface protection: OpenAPI snapshot, **runtime-observed MCP tool list**, DB schema, env-var schema, SPA routes | Also replaces `BLIND-MCP-001` with `RUNTIME_OBSERVED` evidence. |
 | **14** | Supply chain: hash-pinned lockfile, licence policy, digest-pinned base images, secret scanning | The `mcp` incident is the argument for this one. |
@@ -126,17 +127,16 @@ Unimplemented commands (each exits `3` naming its step): `rebuild-verify` (5),
 
 ## 5. Open debt with dates on it
 
-**Four waivers expire 2026-11-04.** When that date passes, `RULE-RULE-002` stops the gate
+**Three waivers expire 2026-11-04**, and one shim expires 2026-11-25. When that date passes, `RULE-RULE-002` stops the gate
 until each is resolved or deliberately re-approved:
 
 | Waiver | Finding | Resolved by |
 |---|---|---|
-| `WAIVER-SEC-001` | default JWT signing key in a public repo | Step 11 |
 | `WAIVER-SEC-002` | unvalidated input reaching the `task` argv | Step 12 |
 | `WAIVER-OPS-001` | migrations swallow every exception | Step 15 |
 | `WAIVER-TYPE-001` | unchecked `Row \| None` in two handlers — a reachable 500 on `/auth/me` | its own step |
 
-Sixteen residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
+Seventeen residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
 
 - **`BLIND-OPS-001`** — the deploy host's compose file was read on 2026-08-24 and is now
   **checked in as `ops/deploy/docker-compose.yml`** (no secrets: `JWT_SECRET` is a `${...}`

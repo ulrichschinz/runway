@@ -52,6 +52,30 @@ def isolated_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _bootable_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every TestClient runs the app's lifespan, which now refuses to start on a default or
+    short JWT_SECRET (finding SEC-1). The suite would otherwise be testing the refusal in
+    every test rather than the behaviour it means to cover, so give it a real secret.
+
+    Autouse on purpose: a test that boots the app without this would fail with a startup
+    error whose cause is three layers away from the assertion that noticed.
+    """
+    monkeypatch.setattr(settings, "jwt_secret", "test-secret-long-enough-to-pass-the-startup-check")
+
+
+@pytest.fixture(autouse=True)
+def _reset_login_rate_limit() -> None:
+    """The limiter is module state and outlives a TestClient. Without this, a suite that
+    logs in repeatedly trips it in whichever test happens to run tenth — a failure that
+    moves when tests are reordered."""
+    from app import rate_limit
+
+    rate_limit.reset_all()
+    yield
+    rate_limit.reset_all()
+
+
 @pytest.fixture
 def fake_task(monkeypatch: pytest.MonkeyPatch) -> FakeTaskCLI:
     """Replace the Taskwarrior binary at the ``_run`` choke point.

@@ -25,6 +25,24 @@ async def get_current_user(
         if username:
             return username
 
+        # SHIM-SEC-006 — an API key presented in the Bearer slot.
+        #
+        # /inbox authenticated this way through its own inline lookup, which was a second
+        # implementation of authentication with a different accepted header shape (finding
+        # SEC-6). Divergent auth paths drift, so /inbox now comes through here — and every
+        # agent, MCP client and webhook caller already sends `Authorization: Bearer <key>`,
+        # so removing the shape in the same change would break all of them at once.
+        #
+        # Tracked in rules/shims.yaml with a removal step. Deliberately last: a real JWT is
+        # tried first, so this costs one database read only for a credential that was going
+        # to be rejected anyway.
+        async with db.execute(
+            "SELECT username FROM users WHERE api_key=?", (credentials.credentials,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            return row["username"]
+
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
 
