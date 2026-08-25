@@ -502,6 +502,20 @@ residual_risks:
     re_open_trigger: "a defect that only manifests in a mounted component or across the SPA/API boundary"
     decision_record: docs/adr/0007-frontend-test-scope.md
 
+  - id: RISK-DEP-001
+    statement: >
+      The backend images install Taskwarrior with `pacman -Sy task` from `archlinux:latest`.
+      Neither is pinned, so every build takes whatever Arch ships that day and the binary
+      can change under a commit that touches nothing. It already has: Taskwarrior 3.5.0
+      began requiring theme files the images were not copying, and every container test
+      failed on an unchanged backend. Pinning the base image by digest would not fix it —
+      pacman resolves against live repositories at build time — and pinning the package
+      version makes the build fail once Arch drops it, which is weeks. Step 14 owns the
+      real answer: a pinned artefact this repository controls rather than a rolling distro.
+    owner: maintainer
+    re_open_trigger: "the container tier breaks again on an unchanged backend, or Step 14 replaces the Arch source"
+    decision_record: docs/operations.md#incident-2026-08-25
+
   - id: RISK-TEST-001
     statement: >
       The container test tier cannot run on arm64: archlinux publishes no arm64 image and

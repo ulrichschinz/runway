@@ -11,11 +11,14 @@
 # RULE-TI-002 checks that the base images here stay in step with backend/Dockerfile.
 
 FROM archlinux:latest AS task-builder
-RUN pacman -Sy --noconfirm task
+# Must stay identical to backend/Dockerfile: the Arch image strips /usr/share/doc, where
+# Taskwarrior 3.5.0 keeps the theme files it now refuses to start without.
+RUN sed -i '/^NoExtract/d' /etc/pacman.conf && pacman -Sy --noconfirm task
 
 FROM python:3.12-slim
 
 COPY --from=task-builder /usr/bin/task /usr/local/bin/task
+COPY --from=task-builder /usr/share/doc/task/rc/ /usr/share/doc/task/rc/
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgnutls30 \
