@@ -116,6 +116,36 @@ This matters and is not currently answerable from the repository:
 rather than of fact.** Resolving it means either checking in the production compose file (with secrets kept
 out) or recording the real topology here.
 
+## Incident 2026-08-25
+
+Every container test failed on a backend nobody had touched:
+
+```
+RuntimeError: Could not find file in CWD, directory of config file or search paths 'default.theme'
+15 failed, 2 passed
+```
+
+Both images install Taskwarrior with `pacman -Sy task` from `archlinux:latest` and copy **only the binary**
+out of the builder stage. That was sufficient until Arch rolled forward to Taskwarrior **3.5.0**, which
+refuses to run without the theme files it keeps in `/usr/share/doc/task/rc/`.
+
+The trap underneath it: the Arch container image ships `NoExtract = usr/share/doc/*` in `pacman.conf` to
+stay small, so those files are never written to disk. `pacman -Ql task` lists them regardless — it reports
+what the package *declares*, not what was extracted — so the obvious diagnostic agrees the files are there
+while the filesystem does not. The builder stage now drops the `NoExtract` rules before installing, and both
+images copy the theme directory.
+
+**Nothing reached production.** The running containers were built before the roll-forward and are healthy;
+the next deploy would have shipped a broken backend, and `verify` gating the deploy (ADR 0005) is what
+stopped it. The container tier — which an arm64 developer never sees locally (`RISK-TEST-001`) — is what
+caught it.
+
+What it cost, and what is still owed: the failure was indistinguishable at a glance from the workflow-level
+failure it was hiding behind, because a run that cannot resolve an action reports the same red `verify` as a
+gate that found real violations, except no rule ran at all. Both are fixed here. The underlying exposure —
+an unpinned rolling distro deciding what binary the tests run against — is recorded as `RISK-DEP-001` and
+belongs to Step 14.
+
 ## Incident 2026-08-04
 
 The backend could not start in any image built after `mcp 2.0.0` was published.

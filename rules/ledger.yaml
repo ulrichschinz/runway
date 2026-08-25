@@ -502,6 +502,20 @@ residual_risks:
     re_open_trigger: "a defect that only manifests in a mounted component or across the SPA/API boundary"
     decision_record: docs/adr/0007-frontend-test-scope.md
 
+  - id: RISK-DEP-001
+    statement: >
+      The backend images install Taskwarrior with `pacman -Sy task` from `archlinux:latest`.
+      Neither is pinned, so every build takes whatever Arch ships that day and the binary
+      can change under a commit that touches nothing. It already has: Taskwarrior 3.5.0
+      began requiring theme files the images were not copying, and every container test
+      failed on an unchanged backend. Pinning the base image by digest would not fix it —
+      pacman resolves against live repositories at build time — and pinning the package
+      version makes the build fail once Arch drops it, which is weeks. Step 14 owns the
+      real answer: a pinned artefact this repository controls rather than a rolling distro.
+    owner: maintainer
+    re_open_trigger: "the container tier breaks again on an unchanged backend, or Step 14 replaces the Arch source"
+    decision_record: docs/operations.md#incident-2026-08-25
+
   - id: RISK-TEST-001
     statement: >
       The container test tier cannot run on arm64: archlinux publishes no arm64 image and
@@ -562,3 +576,14 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a contributor reports a bootstrap failure, or a second CI runner image is added"
     decision_record: docs/adr/0002-python-interpreter-provisioning.md
+
+  - id: RISK-OPS-001
+    statement: >
+      `platforms: linux/amd64` in deploy.yml is a declaration, not an enforced invariant.
+      Nothing in the gate inspects the architecture of a pushed image, so an edit that
+      removes the pin would publish an image matching whatever runner built it, and the
+      failure would surface only as `exec format error` on the production host after the
+      deploy had already replaced the running container.
+    owner: maintainer
+    re_open_trigger: "a second deployment target on a different architecture, or a build that runs anywhere other than a hosted x86_64 runner"
+    decision_record: docs/adr/0015-pin-the-build-platform.md
