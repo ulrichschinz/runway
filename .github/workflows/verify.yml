@@ -44,7 +44,10 @@ jobs:
           node-version: ${{ steps.versions.outputs.NODE_VERSION }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        # Pinned to an exact release, unlike the other actions here, because astral-sh
+        # publishes no floating major tag past v6 — `@v10` does not exist and the workflow
+        # fails to resolve it before any step runs. Bump this deliberately.
+        uses: astral-sh/setup-uv@v10.0.1
 
       - name: Bootstrap from a clean clone
         run: make bootstrap
