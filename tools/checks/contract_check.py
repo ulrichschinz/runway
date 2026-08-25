@@ -15,6 +15,8 @@ Five things are checked:
 * `RULE-RULE-002` — no waiver has expired, and every waiver records all five groups.
 * `RULE-RULE-003` — every inline suppression corresponds to a waiver or a reviewed
   justified suppression. Silent suppression is what turns a gate into theatre.
+* `RULE-SEC-002` — every compatibility shim is fully recorded and has not expired. The
+  contract step of a migration is the one that gets skipped, so the countdown is enforced.
 * `RULE-DOC-004` — every reference in a decision record or a change brief resolves. The
   same resolution `RULE-DOC-001` performs on the contract, applied to the documents the
   contract points at, because a dangling reference in an ADR is followed just as readily.
@@ -35,6 +37,7 @@ CONTRACT = ROOT / "AGENTS.md"
 SCOPED = [ROOT / "backend" / "AGENTS.md", ROOT / "frontend" / "AGENTS.md"]
 LEDGER = ROOT / "rules" / "ledger.yaml"
 WAIVERS = ROOT / "rules" / "waivers.yaml"
+SHIMS = ROOT / "rules" / "shims.yaml"
 ADRS = ROOT / "docs" / "adr"
 BRIEFS = ROOT / "docs" / "briefs"
 
@@ -309,6 +312,40 @@ _ADR_PROSE = re.compile(r"\bADR[ -](\d{4})\b")
 _STATUS = re.compile(r"^-?\s*\*\*Status:\*\*\s*(\w+)", re.MULTILINE)
 
 
+def check_shims() -> None:
+    """RULE-SEC-002 — every shim is fully recorded, and none has outlived its expiry.
+
+    A compatibility shim is the expand half of a migration with the contract half still
+    owed. Nothing fails when the contract step is skipped — the old shape keeps working —
+    so "temporary" becomes permanent by default rather than by decision. This is the same
+    shape as the waiver check, for the same reason: a date that nothing enforces is a wish.
+    """
+    if not SHIMS.exists():
+        return
+    data = yaml.safe_load(SHIMS.read_text(encoding="utf-8")) or {}
+    today = dt.date.today()
+    seen: set[str] = set()
+
+    for shim in data.get("shims", []) or []:
+        sid = shim.get("id", "<no id>")
+        if sid in seen:
+            fail("RULE-SEC-002", f"{sid} is declared twice")
+        seen.add(sid)
+
+        for field in ("what", "why", "removal", "evidence", "owner", "expires"):
+            if not str(shim.get(field, "")).strip():
+                fail("RULE-SEC-002", f"{sid} has no `{field}` — a shim records all six")
+
+        expires = shim.get("expires")
+        if isinstance(expires, dt.date) and expires < today:
+            fail(
+                "RULE-SEC-002",
+                f"{sid} expired on {expires}: remove the shim or re-approve it with a new date",
+            )
+        elif expires is not None and not isinstance(expires, dt.date):
+            fail("RULE-SEC-002", f"{sid} has an unparseable `expires` value {expires!r}")
+
+
 def check_records() -> None:
     """RULE-DOC-004 — every reference in an ADR or a brief resolves.
 
@@ -370,6 +407,7 @@ def main() -> int:
     check_ledger()
     waiver_data = check_waivers()
     check_suppressions(waiver_data)
+    check_shims()
     check_records()
 
     for rule, message in problems:

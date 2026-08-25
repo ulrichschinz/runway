@@ -1,6 +1,7 @@
 from aiosqlite import Connection
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app import rate_limit
 from app.auth import create_access_token, hash_password, verify_password
 from app.database import generate_api_key, get_allow_registration, get_db
 from app.dependencies import get_current_user
@@ -49,12 +50,27 @@ async def register(body: UserCreate, db: Connection = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 async def login(body: UserLogin, db: Connection = Depends(get_db)):
+    # Checked before the password is verified: a locked-out username must not buy an
+    # attacker the bcrypt work as a lever (finding SEC-8).
+    wait = rate_limit.seconds_until_retry(body.username)
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Try again later.",
+            headers={"Retry-After": str(wait)},
+        )
+
     async with db.execute(
         "SELECT hashed_password FROM users WHERE username = ?", (body.username,)
     ) as cur:
         row = await cur.fetchone()
     if not row or not verify_password(body.password, row["hashed_password"]):
+        # An unknown username counts too. Skipping it would turn the limiter into a user
+        # enumeration oracle: throttled means "this account exists".
+        rate_limit.record_failure(body.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    rate_limit.clear(body.username)
     return Token(access_token=create_access_token(body.username))
 
 

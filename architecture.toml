@@ -133,7 +133,13 @@ id = "be/leaves"
 scope = "backend"
 layer = 4
 owner = "maintainer"
-paths = ["backend/app/models.py", "backend/app/config.py", "backend/app/auth.py"]
+paths = [
+  "backend/app/models.py",
+  "backend/app/config.py",
+  "backend/app/auth.py",
+  "backend/app/startup_checks.py",
+  "backend/app/rate_limit.py",
+]
 
 [[units]]
 id = "fe/app"

@@ -348,6 +348,22 @@ p.write_text(t)
 NEWROUTE
 expect_red "SEC-001-new" "tools/checks/route-guards.sh" "RULE-SEC-001"
 
+# --- RULE-SEC-002 — a compatibility shim outlives its expiry -----------------
+# The contract step of a migration is the one that gets skipped: the old shape keeps
+# working, nothing fails, and "temporary" becomes permanent by default. Backdate the expiry
+# and require the gate to notice.
+python3 - "$SANDBOX/rules/shims.yaml" <<'EXPIRESHIM'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "expires: 2026-11-25"
+assert old in t, "shim expiry not found"
+p.write_text(t.replace(old, "expires: 2020-01-01", 1))
+EXPIRESHIM
+expect_red "SEC-002" "tools/checks/contract.sh" "RULE-SEC-002"
+
 # --- RULE-DOC-001 — the contract claims something untrue --------------------
 printf '\nThe entry point is `tools/checks/does-not-exist.sh`.\n' >>"$SANDBOX/AGENTS.md"
 expect_red "DOC-001" "tools/checks/contract.sh" "RULE-DOC-001"

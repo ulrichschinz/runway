@@ -99,10 +99,7 @@ guard = "user"
 
 [[routes]]
 route = "POST /inbox"
-guard = "open"
-reason = """
-Authenticates by its own API-key path (Authorization: Bearer <api_key>) rather than through get_current_user. Not unauthenticated, but a second implementation of authentication — finding SEC-6. Unifying it behind get_current_user with a compatibility shim is owed and tracked; until then it is declared open so this check does not report it as guarded.
-"""
+guard = "user"
 
 [[routes]]
 route = "POST /projects"

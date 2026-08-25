@@ -89,7 +89,7 @@ expand → migrate → switch → contract — not a changelog line.
 |---|---|
 | REST API (32 routes) | Breaking changes go through the migration pattern. |
 | **MCP tools (32)** | **Tool names are the route handler *function* names**, derived by `fastapi-mcp`. Renaming a Python function is a breaking public-surface change. `./run impact` reports which tools a change touches. |
-| Auth: `Authorization: Bearer <jwt>`, `X-Api-Key`, and Bearer-as-API-key on `/inbox` | The third form is a known inconsistency (SEC-6), scheduled for repair with a compatibility shim. |
+| Auth: `Authorization: Bearer <jwt>`, `X-Api-Key`, and Bearer-as-API-key everywhere | The third form is `SHIM-SEC-006`, a dated compatibility shim in `rules/shims.yaml`, not a design. `RULE-SEC-002` fails the gate when it expires. |
 | SQLite schema | Forward-only, additive. Migrations run in `init_db()` on every start. |
 | Taskwarrior data and `backend/taskrc_template.txt` | **Urgency coefficients are a behavioural contract** — changing one re-orders every user's list. Existing users' `.taskrc` files are *not* updated. |
 | Container images | `:latest` plus an immutable `:<commit-sha>` — the rollback target. |

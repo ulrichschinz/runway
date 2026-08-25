@@ -1,7 +1,11 @@
-"""Characterization tests for the agent-facing inbox webhook.
+"""Tests for the agent-facing inbox webhook.
 
-This endpoint carries its own authentication, separate from dependencies.get_current_user
-(finding SEC-6). These tests pin what that second path currently accepts.
+This endpoint used to carry its own authentication, separate from
+dependencies.get_current_user (finding SEC-6). Step 11 unified it. What remains is a shim —
+an API key in the Bearer slot, accepted by get_current_user for every route, tracked as
+SHIM-SEC-006 with a removal step — because every agent and MCP client sends the key that way
+today. These tests pin both the unified behaviour and the shim, so the shim's removal shows
+up as a deliberate test change rather than a silent break.
 """
 
 
@@ -52,26 +56,31 @@ class TestWebhook:
         )
         assert r.status_code == 401
 
-    def test_requires_the_authorization_header(self, client, registered):
-        assert client.post("/inbox", json={"description": "x"}).status_code == 422
+    def test_an_unauthenticated_request_is_401_not_422(self, client, registered):
+        """Changed by the unification: a missing credential used to be a 422, because the
+        header was a route parameter rather than a guard. Unauthenticated is 401."""
+        assert client.post("/inbox", json={"description": "x"}).status_code == 401
 
-    def test_does_not_accept_the_x_api_key_header_that_every_other_route_takes(
+    def test_it_now_accepts_the_x_api_key_header_that_every_other_route_takes(
         self, client, registered
     ):
-        """DEFECT, pinned as-is — finding SEC-6 and a documentation drift.
-
-        README states that X-Api-Key is accepted by all API endpoints. This one is not:
-        it reads the key out of Authorization: Bearer instead. Step 11 unifies the two
-        paths behind get_current_user, keeping the old shape working via a tracked shim.
-        """
+        """The defect this pinned is fixed. README always claimed X-Api-Key worked on every
+        endpoint; this was the one that did not."""
         r = client.post(
             "/inbox",
             json={"description": "x"},
             headers={"X-Api-Key": registered["api_key"]},
         )
-        assert r.status_code == 422
+        assert r.status_code == 201
 
-    def test_a_jwt_is_not_accepted_here(self, client, auth):
-        """CURRENT behaviour: the inbox looks the token up as an API key only."""
+    def test_it_now_accepts_a_jwt_like_every_other_route(self, client, auth):
         r = client.post("/inbox", json={"description": "x"}, headers=auth)
-        assert r.status_code == 401
+        assert r.status_code == 201
+
+    def test_the_bearer_api_key_shim_still_works_everywhere(self, client, registered):
+        """SHIM-SEC-006. The shim lives in get_current_user, so it applies to every route,
+        not only /inbox — that is what unification means here. When the shim is removed this
+        test is deleted with it, which is the signal that the contract step happened."""
+        r = client.get("/auth/me", headers={"Authorization": f"Bearer {registered['api_key']}"})
+        assert r.status_code == 200
+        assert r.json()["username"] == registered["username"]

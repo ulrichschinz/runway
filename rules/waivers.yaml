@@ -21,33 +21,6 @@
 version: 1
 
 waivers:
-  - id: WAIVER-SEC-001
-    class: scheduled_remediation
-    rule: "ruff S105 — hardcoded password assigned to jwt_secret"
-    scope: backend/app/config.py
-    finding: SEC-1
-    reason: >
-      config.py ships a working default JWT signing key in a public repository. Any
-      deployment that forgets .env boots with a publicly known key, so any attacker can
-      forge a token for any user. The fix is to refuse to start without JWT_SECRET.
-    alternatives_evaluated: >
-      Fixing it inside Step 2 was rejected: it is a runtime behaviour change that stops
-      a deployment missing .env from booting, and no characterization tests exist yet to
-      prove nothing else breaks. Step 3 supplies those tests; Step 11 applies the fix.
-      Widening the ruff ignore list was rejected because it would hide future occurrences.
-    risk: "Critical. Full authentication bypass on any deployment running the default."
-    mitigation: >
-      `make bootstrap` generates a random JWT_SECRET locally rather than copying the
-      placeholder, so no new environment is created on the default. Production must be
-      confirmed set before Step 11 lands — recorded as a hard blocker in that step.
-    owner: maintainer
-    approver: maintainer
-    approved_on: 2026-08-04
-    approval_reference: "docs/plan/phase-0-2.md F3"
-    expires: 2026-11-04
-    re_open_trigger: "Step 11 lands, or the expiry date passes, whichever is first"
-    resolution: "Step 11 — the app refuses to start on a default or unset JWT_SECRET"
-
   - id: WAIVER-SEC-002
     class: scheduled_remediation
     rule: "ruff S603 — subprocess call with untrusted input"
@@ -156,10 +129,40 @@ waivers:
       Decide the status code for the missing-user state, apply it under the
       Public-Surface Migration pattern with a regression test, and delete the ignores.
 
+# Resolved waivers. Kept rather than deleted: briefs and decision records cite these ids,
+# and RULE-DOC-004 resolves every identifier a record names. Deleting the entry would make
+# a truthful historical document fail the gate, and editing the document to match would
+# falsify the history it exists to preserve.
+resolved:
+  - id: WAIVER-SEC-001
+    finding: SEC-1
+    was: >
+      config.py shipped a working default JWT signing key in a public repository, so any
+      deployment that forgot .env booted with a publicly known key and anyone could forge a
+      token for any user.
+    resolved_on: 2026-08-25
+    resolved_by: >
+      Step 11. backend/app/startup_checks.py refuses to start on any published default, on
+      an empty secret, or on one shorter than 32 characters. The literal default remains in
+      config.py so `import app.main` still succeeds with no environment, and is now inert:
+      it cannot reach a serving process. Recorded as a justified suppression below.
+    evidence: docs/briefs/0013-security-wave-2.md
+
 # Permanently justified suppressions. These are NOT waivers: the finding is a false
 # positive and there is nothing to remediate. They are recorded here so the reasoning is
 # reviewable rather than buried in a bare `# noqa`.
 justified_suppressions:
+  - rule: "ruff S105 — hardcoded password assigned to jwt_secret"
+    scope: backend/app/config.py
+    reason: >
+      The default is kept so that `import app.main` succeeds with no environment — the
+      import check (RULE-DEP-001), the unit tier and any tooling that reads the app object
+      would otherwise all need a secret provisioned first. It is inert: startup_checks
+      rejects this exact string, so no serving process can ever hold it. Was
+      WAIVER-SEC-001, a scheduled remediation, until Step 11 made it fatal at boot.
+    reviewed_by: maintainer
+    reviewed_on: 2026-08-25
+
   - rule: "ruff S105 — hardcoded password assigned to token_type"
     scope: backend/app/models.py
     reason: >

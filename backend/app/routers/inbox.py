@@ -1,8 +1,7 @@
-from aiosqlite import Connection
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.database import get_db
+from app.dependencies import get_current_user
 from app.services import task_service
 
 router = APIRouter(prefix="/inbox", tags=["inbox"])
@@ -18,24 +17,15 @@ class InboxItem(BaseModel):
     "",
     status_code=201,
     summary="Add to inbox via API key",
-    description="Add a task to the inbox of the user identified by their API key. "
-    "Pass the key as 'Authorization: Bearer <api_key>'. "
-    "Intended for agents and automations — no login required.",
+    description="Add a task to the inbox of the authenticated user. Accepts the same "
+    "credentials as every other route — 'X-Api-Key: <key>' or 'Authorization: Bearer "
+    "<jwt>' — and, for compatibility with existing agents, an API key in the Bearer slot. "
+    "Intended for agents and automations.",
 )
 async def webhook_inbox(
     item: InboxItem,
-    authorization: str = Header(...),
-    db: Connection = Depends(get_db),
+    username: str = Depends(get_current_user),
 ):
-    token = authorization.removeprefix("Bearer ").strip()
-
-    async with db.execute("SELECT username FROM users WHERE api_key=?", (token,)) as cur:
-        row = await cur.fetchone()
-    if not row:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-    username = row["username"]
-
     from app.models import TaskCreate
 
     task = task_service.create_task(

@@ -26,8 +26,14 @@ Two credentials reach the same principal, checked in this order by `get_current_
 
 1. **`X-Api-Key`** — matched against the `api_key` column. Checked **first**, before any
    token work, which is why rotating `JWT_SECRET` does not disturb agents, MCP clients or
-   automations.
+   automations, and why an account locked out of password login can still be used by them.
 2. **`Authorization: Bearer <jwt>`** — signed with `JWT_SECRET`, `HS256`, 24h.
+3. **`Authorization: Bearer <api_key>`** — an API key in the Bearer slot, tried last, only
+   after a JWT decode fails. This is `SHIM-SEC-006`, not a design: it is the shape `/inbox`
+   used before it was unified onto `get_current_user` (finding SEC-6), kept because every
+   agent and MCP client sends it today. Recorded in
+   [`rules/shims.yaml`](../rules/shims.yaml) with a removal step and an expiry, enforced by
+   `RULE-SEC-002`.
 
 `get_current_admin` builds on `get_current_user` and additionally requires `role = 'admin'`,
 returning **403** when the principal is authenticated but not an admin — distinct from the
@@ -53,7 +59,7 @@ a passing test suite notices, and not something a reviewer reliably notices eith
 the evidence is one missing parameter default among thirty handlers.
 
 An `open` route must record a `reason`. A route anyone can reach is a decision, and a
-decision with no recorded reason cannot be told apart from an oversight. Four are open today:
+decision with no recorded reason cannot be told apart from an oversight. Three are open today:
 
 - `POST /auth/register` and `POST /auth/login` — the routes that create and exchange
   credentials cannot require them. Registration is additionally gated at runtime by the
@@ -62,8 +68,7 @@ decision with no recorded reason cannot be told apart from an oversight. Four ar
   login page can hide the register option instead of inviting someone to type credentials and
   then refusing them. Discloses nothing that POSTing to `/auth/register` does not already
   reveal.
-- `POST /inbox` — not actually unauthenticated: it implements its own API-key check instead
-  of using `get_current_user`. Finding SEC-6, and owed a unification.
+
 
 ## How an instance gets its first admin
 
@@ -108,6 +113,43 @@ keystroke rather than an inherited one.
 Use it when an instance has no admin and restarting with `BOOTSTRAP_ADMIN` set is not
 practical.
 
+## Refusing to start
+
+`startup_checks.run_all()` runs before the database is touched. It refuses every JWT signing
+key this repository has ever published as a default, an empty key, and anything shorter than
+32 characters (finding SEC-1). A container that will not start is a louder signal than one
+that serves forgeable tokens quietly.
+
+The literal default stays in [`backend/app/config.py`](../backend/app/config.py) so that
+`import app.main` still succeeds with no environment — the import check, the unit tier and
+the OpenAPI tooling all need that — and it is now inert, because it cannot reach a serving
+process.
+
+## Cross-origin access
+
+`CORS_ORIGINS` is **empty by default** and the middleware is not mounted at all when it is.
+
+This is not caution. The SPA reaches the API through a same-origin `/api` proxy — nginx in
+production, vite in development — so no browser ever makes a cross-origin request to it, and
+agents and MCP clients are not browsers. Set `CORS_ORIGINS` only for a real browser consumer
+on another origin.
+
+The previous configuration paired `allow_origins=["*"]` with `allow_credentials=True`, which
+makes Starlette reflect the caller's own `Origin` back — every origin held full credentialed
+access (finding SEC-4).
+
+## Login throttling
+
+`POST /auth/login` allows `LOGIN_RATE_LIMIT` failed attempts per username per
+`LOGIN_RATE_WINDOW_SECONDS`, then answers **429** with `Retry-After` (finding SEC-8). Only
+failures count, a success clears the budget, and the check runs *before* the password is
+verified so a locked-out username buys an attacker no bcrypt work.
+
+Keyed on username rather than IP, because rotating source addresses is cheap. The trade is
+real and accepted: someone who knows a username can deny it password login for the window.
+API keys are unaffected, so agents keep working through a lockout. Unknown usernames are
+throttled identically — exempting them would make the limiter a user-enumeration oracle.
+
 ## What is not enforced here
 
 - **Frontend role checks are cosmetic.** `auth.role` in the Vue store is read from
@@ -118,5 +160,6 @@ practical.
   accept anything written outside the application. Every in-application writer validates
   against `VALID_ROLES`; a value written by hand would not be an admin, so it fails closed.
   Recorded as `RISK-SEC-002`.
-- Rate limiting on login (SEC-8), the CORS allowlist (SEC-4), and the `/inbox` unification
-  (SEC-6) are open findings, not part of this model yet.
+- **The login limiter is in-process and per-worker** (`RISK-SEC-003`). Under one host and
+  one worker — decision F1 — that is the whole population; a second worker would multiply the
+  effective limit by the process count.
