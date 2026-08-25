@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import get_allow_registration, get_db
 from app.dependencies import get_current_admin
-from app.models import RoleUpdate, SiteSettings, UserInfo
+from app.models import VALID_ROLES, RoleUpdate, SiteSettings, UserInfo
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -53,12 +53,28 @@ async def set_user_role(
     username: str = Depends(get_current_admin),
     db: Connection = Depends(get_db),
 ):
-    if body.role not in ("admin", "user"):
+    if body.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
-    async with db.execute("SELECT username FROM users WHERE username=?", (target,)) as cur:
+    async with db.execute("SELECT username, role FROM users WHERE username=?", (target,)) as cur:
         row = await cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Refuse to remove the last administrator. Without this an admin can demote themselves
+    # — or the only other admin — leaving an instance nobody can administer: /admin/users
+    # and /admin/settings both require an admin, so there is no route back through the API.
+    # Recovery would mean editing the database on the host. The check is on the count, not
+    # on self-demotion, because demoting someone else is just as final when they are the
+    # only one left.
+    if row["role"] == "admin" and body.role != "admin":
+        async with db.execute("SELECT COUNT(*) AS n FROM users WHERE role='admin'") as cur:
+            admins = await cur.fetchone()
+        if admins and admins["n"] <= 1:
+            raise HTTPException(
+                status_code=409,
+                detail="Refusing to demote the last admin — promote another user first",
+            )
+
     await db.execute("UPDATE users SET role=? WHERE username=?", (body.role, target))
     await db.commit()
     async with db.execute(

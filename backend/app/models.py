@@ -1,5 +1,11 @@
 from pydantic import BaseModel
 
+# The complete set of roles. Two is deliberate: `admin` may administer other users and
+# site settings, `user` may not. Every place that writes a role — the API, the bootstrap
+# and the CLI escape hatch — validates against this tuple, so adding a third role is one
+# edit rather than a search.
+VALID_ROLES: tuple[str, ...] = ("admin", "user")
+
 
 class TaskAnnotation(BaseModel):
     entry: str
@@ -94,7 +100,7 @@ class SiteSettings(BaseModel):
 
 
 class RoleUpdate(BaseModel):
-    role: str  # "admin" or "user"
+    role: str  # validated against VALID_ROLES in the handler
 
 
 class BrainstormItem(BaseModel):

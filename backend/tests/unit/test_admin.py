@@ -55,6 +55,34 @@ class TestSettings:
         client.put("/admin/settings", json={"allow_registration": False}, headers=admin)
         r = client.post("/auth/register", json={"username": "late", "password": "pw"})
         assert r.status_code == 403
+        assert r.json()["detail"] == "Registration is disabled"
+
+    def test_re_enabling_the_flag_actually_reopens_registration(self, client, admin):
+        """The half that matters when an instance has registration closed.
+
+        Production runs with allow_registration = false, so the question "can we let someone
+        in again" has to be answerable without a deployment. It is: the flag is read from
+        site_settings on every request, so flipping it back takes effect immediately, and the
+        account that results is a working one — registered, able to log in, and a plain user.
+        """
+        client.put("/admin/settings", json={"allow_registration": False}, headers=admin)
+        assert (
+            client.post("/auth/register", json={"username": "dana", "password": "pw"}).status_code
+            == 403
+        )
+
+        client.put("/admin/settings", json={"allow_registration": True}, headers=admin)
+        created = client.post("/auth/register", json={"username": "dana", "password": "pw"})
+        assert created.status_code == 201
+        assert created.json()["role"] == "user"
+
+        token = client.post("/auth/login", json={"username": "dana", "password": "pw"})
+        assert token.status_code == 200
+        me = client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {token.json()['access_token']}"}
+        )
+        assert me.status_code == 200
+        assert me.json()["username"] == "dana"
 
 
 class TestUserManagement:
@@ -82,15 +110,154 @@ class TestUserManagement:
         r = client.put("/admin/users/ghost/role", json={"role": "admin"}, headers=admin)
         assert r.status_code == 404
 
-    def test_an_admin_can_demote_themselves(self, client, admin, registered):
-        """DEFECT, pinned as-is.
+    # The defect this class used to pin — "an admin can demote themselves, after which no
+    # account can reach /admin at all" — is fixed in this change. Its characterization test
+    # expired with it; TestLastAdminGuard below asserts the repaired behaviour.
 
-        Nothing stops the last administrator demoting themselves, after which no account
-        can reach /admin at all and the only recovery is editing users.db by hand. Not
-        fixed here: the repair belongs with the admin-bootstrap work in Step 11.
-        """
+
+class TestLastAdminGuard:
+    """An instance must never be left with nobody who can administer it.
+
+    /admin/users and /admin/settings both require an admin, so an instance with zero
+    admins has no route back through the API — recovery means editing the database on the
+    deploy host. The guard is on the admin *count*, not on self-demotion: demoting someone
+    else is just as final when they are the only one left.
+    """
+
+    def test_the_only_admin_cannot_demote_themselves(self, client, admin, registered):
+        r = client.put(
+            f"/admin/users/{registered['username']}/role", json={"role": "user"}, headers=admin
+        )
+        assert r.status_code == 409
+        assert "last admin" in r.json()["detail"]
+
+    def test_the_role_survives_the_refusal(self, client, admin, registered):
+        client.put(
+            f"/admin/users/{registered['username']}/role", json={"role": "user"}, headers=admin
+        )
+        r = client.get("/admin/users", headers=admin)
+        roles = {u["username"]: u["role"] for u in r.json()}
+        assert roles[registered["username"]] == "admin"
+
+    def test_demotion_is_allowed_once_a_second_admin_exists(self, client, admin, registered):
+        client.post("/auth/register", json={"username": "second", "password": "pw-for-second"})
+        assert (
+            client.put(
+                "/admin/users/second/role", json={"role": "admin"}, headers=admin
+            ).status_code
+            == 200
+        )
         r = client.put(
             f"/admin/users/{registered['username']}/role", json={"role": "user"}, headers=admin
         )
         assert r.status_code == 200
-        assert client.get("/admin/users", headers=admin).status_code == 403
+        assert r.json()["role"] == "user"
+
+    def test_an_unknown_role_is_refused_without_changing_the_surface(
+        self, client, admin, registered
+    ):
+        """The 400 and its exact detail string are a public surface (decision F2)."""
+        r = client.put(
+            f"/admin/users/{registered['username']}/role", json={"role": "superuser"}, headers=admin
+        )
+        assert r.status_code == 400
+        assert r.json()["detail"] == "Role must be 'admin' or 'user'"
+
+
+class TestAdminBootstrap:
+    """SEC-2: the hard-coded `uli` promotion is gone, and what replaced it is inert
+    whenever an admin already exists."""
+
+    @pytest.mark.anyio
+    async def test_no_promotion_happens_when_an_admin_exists(self, monkeypatch):
+        from app import database
+
+        monkeypatch.setattr(settings, "bootstrap_admin", "somebody")
+        db = _FakeDb(admin_count=1)
+        assert "noop" in await database.bootstrap_admin(db)
+        assert db.updates == []
+
+    @pytest.mark.anyio
+    async def test_nothing_happens_without_configuration(self, monkeypatch):
+        from app import database
+
+        monkeypatch.setattr(settings, "bootstrap_admin", "")
+        db = _FakeDb(admin_count=0)
+        assert "BOOTSTRAP_ADMIN is unset" in await database.bootstrap_admin(db)
+        assert db.updates == []
+
+    @pytest.mark.anyio
+    async def test_an_unregistered_name_is_not_created(self, monkeypatch):
+        from app import database
+
+        monkeypatch.setattr(settings, "bootstrap_admin", "ghost")
+        db = _FakeDb(admin_count=0, existing_user=None)
+        assert "not a registered user" in await database.bootstrap_admin(db)
+        assert db.updates == []
+
+    @pytest.mark.anyio
+    async def test_a_registered_name_is_promoted_when_there_is_no_admin(self, monkeypatch):
+        from app import database
+
+        monkeypatch.setattr(settings, "bootstrap_admin", "uli")
+        db = _FakeDb(admin_count=0, existing_user="uli")
+        assert "promoted 'uli'" in await database.bootstrap_admin(db)
+        assert db.updates == [("UPDATE users SET role='admin' WHERE username=?", ("uli",))]
+
+    @pytest.mark.anyio
+    async def test_the_hard_coded_uli_rule_is_gone(self, monkeypatch):
+        """The exact defect: an unconfigured instance must never promote anyone."""
+        from app import database
+
+        monkeypatch.setattr(settings, "bootstrap_admin", "")
+        db = _FakeDb(admin_count=0, existing_user="uli")
+        await database.bootstrap_admin(db)
+        assert db.updates == []
+
+
+class _FakeDb:
+    """Minimal aiosqlite stand-in: enough to observe which branch bootstrap_admin takes."""
+
+    def __init__(self, admin_count: int, existing_user: str | None = None):
+        self.admin_count = admin_count
+        self.existing_user = existing_user
+        self.updates: list[tuple] = []
+
+    def execute(self, sql, params=()):
+        if sql.strip().upper().startswith("UPDATE"):
+            self.updates.append((sql, params))
+            return _NullCursor()
+        if "COUNT(*)" in sql:
+            return _RowCursor({"n": self.admin_count})
+        if "SELECT username FROM users WHERE username=?" in sql:
+            found = self.existing_user is not None and params[0] == self.existing_user
+            return _RowCursor({"username": params[0]} if found else None)
+        return _RowCursor(None)
+
+    async def commit(self):
+        return None
+
+
+class _RowCursor:
+    def __init__(self, row):
+        self._row = row
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def fetchone(self):
+        return self._row
+
+    def __await__(self):
+        async def _self():
+            return self
+
+        return _self().__await__()
+
+
+class _NullCursor(_RowCursor):
+    def __init__(self):
+        super().__init__(None)

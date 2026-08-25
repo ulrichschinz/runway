@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     data_root: Path = Path("/app/data")
     db_path: str = "/app/users.db"
     allow_registration: bool = False
+    # Promoted to admin at startup ONLY when the database contains no admin at all.
+    # Empty means "never bootstrap". See database.bootstrap_admin and ADR 0017.
+    bootstrap_admin: str = ""
 
     class Config:
         env_file = ".env"

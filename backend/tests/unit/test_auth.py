@@ -191,3 +191,39 @@ class TestApiKey:
         assert (
             client.get("/auth/me", headers={"X-Api-Key": registered["api_key"]}).status_code == 401
         )
+
+
+class TestRegistrationStatus:
+    """The public endpoint the login page reads to decide whether to offer registration.
+
+    Public on purpose: the page is shown to people who are not logged in, so the endpoint
+    that tells it what to render cannot require an account. It discloses nothing that POSTing
+    to /auth/register does not already reveal.
+    """
+
+    def test_it_needs_no_credentials(self, client):
+        assert client.get("/auth/registration-status").status_code == 200
+
+    def test_it_reports_open_when_registration_is_open(self, client):
+        _set_registration(True)
+        assert client.get("/auth/registration-status").json() == {"allow_registration": True}
+
+    def test_it_reports_closed_when_registration_is_closed(self, client):
+        _set_registration(False)
+        assert client.get("/auth/registration-status").json() == {"allow_registration": False}
+
+    def test_it_agrees_with_what_register_actually_does(self, client):
+        """The whole point: a status the login page can trust to match the real refusal."""
+        _set_registration(False)
+        assert client.get("/auth/registration-status").json()["allow_registration"] is False
+        assert (
+            client.post("/auth/register", json={"username": "erin", "password": "pw"}).status_code
+            == 403
+        )
+
+        _set_registration(True)
+        assert client.get("/auth/registration-status").json()["allow_registration"] is True
+        assert (
+            client.post("/auth/register", json={"username": "erin", "password": "pw"}).status_code
+            == 201
+        )
