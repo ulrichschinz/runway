@@ -33,3 +33,10 @@ for hub in report["hub_regressions"]:
         f"RULE-ARCH-003|{hub['file']} fan-in rose to {hub['fan_in']}, baseline "
         f"{hub['baseline']} — raise it in ops/structure-baseline.toml only deliberately"
     )
+
+for breach in report["restricted_imports"]:
+    allowed = ", ".join(breach["allowed_in"]) or "nothing"
+    print(
+        f"RULE-ARCH-004|{breach['file']}:{breach['line']} imports {breach['module']}, which "
+        f"is restricted to {allowed} — a choke point only works while it is the only door"
+    )

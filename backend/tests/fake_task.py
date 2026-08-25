@@ -41,26 +41,34 @@ class FakeTaskCLI:
 
     def __init__(self) -> None:
         self.stores: dict[str, list[dict[str, Any]]] = {}
-        self.calls: list[tuple[str, list[str]]] = []
+        self.calls: list[tuple[str, list[str], list[str]]] = []
+        self.latest: dict[str, str] = {}
 
     # -- the seam ---------------------------------------------------------------
 
-    def run(self, username: str, args: list[str]) -> str:
-        """Drop-in replacement for ``task_runner._run``."""
-        self.calls.append((username, list(args)))
+    def run(self, username: str, args: list[str], text: list[str] | None = None) -> str:
+        """Drop-in replacement for ``task_runner._run``.
+
+        `text` models what the real binary does with everything after `--`: it is joined
+        into the description verbatim and **never parsed**. A fake that quietly parsed it
+        would make the hardening look like it worked while the real binary disagreed —
+        which is the whole reason SEC-3 needed the container tier to confirm it.
+        """
+        text = list(text or [])
+        self.calls.append((username, list(args), text))
         tasks = self.stores.setdefault(username, [])
 
         if args and args[-1] == "export":
-            return json.dumps(self._filter(tasks, args[:-1]))
+            return json.dumps(self._filter(tasks, args[:-1], username))
         if args and args[0] == "add":
-            return self._add(tasks, args[1:])
+            return self._add(tasks, args[1:], text, username)
         if len(args) >= 2:
             target, command = args[0], args[1]
             task = self._by_uuid(tasks, target)
             if task is None:
                 raise FakeTaskError(f"no task matches {target}")
             if command == "modify":
-                return self._modify(task, args[2:])
+                return self._modify(task, args[2:], text)
             if command == "done":
                 task["status"] = "completed"
                 return "Completed 1 task."
@@ -75,14 +83,20 @@ class FakeTaskCLI:
                 return "Stopped 1 task."
             if command == "annotate":
                 task.setdefault("annotations", []).append(
-                    {"entry": "20260804T090000Z", "description": " ".join(args[2:])}
+                    {"entry": "20260804T090000Z", "description": " ".join(text)}
                 )
                 return "Annotated 1 task."
         raise FakeTaskError(f"unsupported argv: {args!r}")
 
     # -- mutation ---------------------------------------------------------------
 
-    def _add(self, tasks: list[dict[str, Any]], args: list[str]) -> str:
+    def _add(
+        self,
+        tasks: list[dict[str, Any]],
+        args: list[str],
+        text: list[str],
+        username: str,
+    ) -> str:
         task: dict[str, Any] = {
             "uuid": str(uuidlib.uuid4()),
             "id": len(tasks) + 1,
@@ -93,16 +107,19 @@ class FakeTaskCLI:
             "annotations": [],
             "entry": "20260804T090000Z",
         }
-        self._apply(task, args)
+        self._apply(task, args, text)
         tasks.append(task)
+        self.latest[username] = task["uuid"]
         return f"Created task {task['id']}."
 
-    def _modify(self, task: dict[str, Any], args: list[str]) -> str:
-        self._apply(task, args)
+    def _modify(self, task: dict[str, Any], args: list[str], text: list[str]) -> str:
+        self._apply(task, args, text)
         return "Modified 1 task."
 
-    def _apply(self, task: dict[str, Any], args: list[str]) -> None:
-        words: list[str] = []
+    def _apply(self, task: dict[str, Any], args: list[str], text: list[str]) -> None:
+        # Free text is description, verbatim. It is never inspected for tags, attributes
+        # or rc. overrides — that is exactly what `--` buys from the real binary.
+        words: list[str] = list(text)
         for arg in args:
             if arg.startswith("+"):
                 tag = arg[1:]
@@ -130,10 +147,15 @@ class FakeTaskCLI:
     def _by_uuid(self, tasks: list[dict[str, Any]], target: str) -> dict[str, Any] | None:
         return next((t for t in tasks if t["uuid"] == target), None)
 
-    def _filter(self, tasks: list[dict[str, Any]], filters: list[str]) -> list[dict[str, Any]]:
+    def _filter(
+        self, tasks: list[dict[str, Any]], filters: list[str], username: str = ""
+    ) -> list[dict[str, Any]]:
         result = list(tasks)
         for f in filters:
-            if f == "status:pending":
+            if f == "+LATEST":
+                newest = self.latest.get(username)
+                result = [t for t in result if t["uuid"] == newest]
+            elif f == "status:pending":
                 result = [t for t in result if t["status"] == "pending"]
             elif f == "-TAGGED":
                 result = [t for t in result if not t["tags"]]

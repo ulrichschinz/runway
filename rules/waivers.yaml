@@ -21,50 +21,6 @@
 version: 1
 
 waivers:
-  - id: WAIVER-SEC-002
-    class: scheduled_remediation
-    rule: "ruff S603 — subprocess call with untrusted input"
-    scope: backend/app/services/task_runner.py
-    finding: SEC-3
-    reason: >
-      User-supplied task descriptions and annotation text reach the `task` argv
-      unvalidated. Taskwarrior consumes `rc.<key>=<value>` anywhere in its argument list
-      as a runtime config override. Confirmed on 2026-08-05: the override IS honoured;
-      the command then fails because no description text remains. See the risk field.
-    alternatives_evaluated: >
-      Fixing it inside Step 2 was rejected: the finding is a hypothesis, not a
-      demonstrated exploit, and confirming it needs the real `task` binary in the
-      container test tier that Step 3 builds. Hardening blind would risk rejecting valid
-      task text with no test to catch the regression.
-    risk: >
-      RESOLVED 2026-08-05 against the real binary in the container test tier.
-      CONFIRMED: user input controls which data store Taskwarrior opens. A description or
-      annotation shaped like rc.data.location=<path> is honoured as a runtime override,
-      and the redirect demonstrably reaches another user's directory — proven by the
-      contrast between a redirect whose UUID matches nothing there (succeeds silently)
-      and one whose UUID does match (fails only at the next step, for want of text).
-      READ is blocked: no user-controlled token can reach a filter or export position,
-      because the one user-influenced filter is prefixed with "description:".
-      WRITE is blocked: every command that can carry the override also requires free text,
-      which the override consumes.
-      Severity revised from "critical if confirmed" to MEDIUM — a real, reachable
-      cross-tenant redirect whose read and write paths both fail closed by accident of a
-      third-party argument grammar rather than by any control in this repository.
-    mitigation: >
-      Incidental and fragile. Nothing in this repository blocks the injection; a
-      third-party binary's argument parser does. Four container tests now pin that
-      behaviour, including one that fails if a description is ever split into multiple
-      argv tokens — the change that would remove the containment.
-    owner: maintainer
-    approver: maintainer
-    approved_on: 2026-08-04
-    approval_reference: "docs/plan/phase-0-2.md F3"
-    expires: 2026-11-04
-    re_open_trigger: "Step 12 lands, or the expiry date passes, whichever is first"
-    resolution: >
-      Step 12 — validate every user-supplied argv token at the task_runner._run choke
-      point, with an adversarial fixture that confirms or refutes the finding either way.
-
   - id: WAIVER-OPS-001
     class: scheduled_remediation
     rule: "ruff S110 — try/except/pass swallows the exception"
@@ -134,6 +90,25 @@ waivers:
 # a truthful historical document fail the gate, and editing the document to match would
 # falsify the history it exists to preserve.
 resolved:
+  - id: WAIVER-SEC-002
+    finding: SEC-3
+    was: >
+      User-supplied task descriptions and annotation text reached the `task` argv
+      unvalidated. Taskwarrior consumes `rc.<key>=<value>` anywhere in its argument list as
+      a runtime configuration override, including rc.data.location, which chooses which data
+      store it opens — the only per-user isolation boundary the system has. Confirmed
+      against the real binary on 2026-08-05: the override IS honoured. What stopped it being
+      exploitable was an accident of Taskwarrior's own argument grammar, not a control.
+    resolved_on: 2026-08-25
+    resolved_by: >
+      Step 12. Free text now travels after `--`, where Taskwarrior stops interpreting
+      options, so an override in a description is inert by the binary's own grammar rather
+      than by our filtering. task_runner.reject_structural_tokens refuses rc.-shaped tokens
+      in the positions that must stay parseable, and RULE-ARCH-004 keeps subprocess reachable
+      only from task_runner so the choke point stays the only door. Re-confirmed against
+      Taskwarrior 3.5.0 in the container tier.
+    evidence: docs/briefs/0014-taskwarrior-boundary.md
+
   - id: WAIVER-SEC-001
     finding: SEC-1
     was: >
@@ -152,6 +127,18 @@ resolved:
 # positive and there is nothing to remediate. They are recorded here so the reasoning is
 # reviewable rather than buried in a bare `# noqa`.
 justified_suppressions:
+  - rule: "ruff S603 — subprocess call with untrusted input"
+    scope: backend/app/services/task_runner.py
+    reason: >
+      The argv is a list, so shell=False applies and no shell metacharacter can start a
+      process. What S603 cannot see is the real question — whether the callee interprets its
+      own arguments — and that is now answered structurally: free text is passed after `--`,
+      and reject_structural_tokens refuses configuration overrides in every other position.
+      RULE-ARCH-004 keeps this the only module that may import subprocess. Was
+      WAIVER-SEC-002, a scheduled remediation, until Step 12.
+    reviewed_by: maintainer
+    reviewed_on: 2026-08-25
+
   - rule: "ruff S105 — hardcoded password assigned to jwt_secret"
     scope: backend/app/config.py
     reason: >

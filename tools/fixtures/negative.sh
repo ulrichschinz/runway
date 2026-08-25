@@ -364,6 +364,19 @@ p.write_text(t.replace(old, "expires: 2020-01-01", 1))
 EXPIRESHIM
 expect_red "SEC-002" "tools/checks/contract.sh" "RULE-SEC-002"
 
+# --- RULE-ARCH-004 — subprocess escapes its choke point ---------------------
+# The control in task_runner is worth nothing if a second module can call `task` directly.
+# Import subprocess somewhere else in the application and require the gate to say so.
+python3 - "$SANDBOX/backend/app/services/task_service.py" <<'ESCAPECHOKE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+p.write_text("import subprocess  # a second door\n" + t)
+ESCAPECHOKE
+expect_red "ARCH-004" "tools/checks/boundaries.sh" "RULE-ARCH-004"
+
 # --- RULE-DOC-001 — the contract claims something untrue --------------------
 printf '\nThe entry point is `tools/checks/does-not-exist.sh`.\n' >>"$SANDBOX/AGENTS.md"
 expect_red "DOC-001" "tools/checks/contract.sh" "RULE-DOC-001"

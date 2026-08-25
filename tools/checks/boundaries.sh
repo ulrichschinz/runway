@@ -3,6 +3,7 @@
 # RULE-ARCH-002  A new cycle between units FAILS. Declared cycles are inventoried under a
 #                ratchet that may only shrink.
 # RULE-ARCH-003  Fan-in MUST NOT exceed the checked-in structural baseline.
+# RULE-ARCH-004  A restricted stdlib module MUST NOT be imported outside its choke point.
 #
 # The index is descriptive; architecture.toml is normative. This is where they are
 # compared, and the only place a graph fact becomes a gate failure.
@@ -28,6 +29,6 @@ if [ -n "$findings" ]; then
 	exit "$EX_RULE"
 fi
 
-summary=$(printf '%s' "$report" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("{} declared cycle(s) inventoried, 0 new, 0 forbidden edges, 0 hub regressions".format(len(d["declared_cycles_still_present"])))')
+summary=$(printf '%s' "$report" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("{} declared cycle(s) inventoried, 0 new, 0 forbidden edges, 0 hub regressions, 0 restricted imports".format(len(d["declared_cycles_still_present"])))')
 ok "$summary"
 exit "$EX_OK"

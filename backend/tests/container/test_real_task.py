@@ -123,118 +123,81 @@ class TestCrossTenantIsolation:
         dirs = _task_dirs(real_data_root)
         assert any(dirs["alice"].rglob("*.sqlite3"))
 
-    def test_an_rc_shaped_description_is_consumed_as_configuration_not_as_text(self):
-        """FINDING SEC-3, resolved against the real binary on 2026-08-05.
+    def test_an_rc_shaped_description_is_stored_as_text(self):
+        """FINDING SEC-3, closed against the real binary on 2026-08-25.
 
-        Taskwarrior consumes ``rc.<key>=<value>`` anywhere in its argument list as a
-        runtime configuration override, and ``task_runner._run`` places user-supplied
-        tokens AFTER its own ``rc.`` flags. A description is a bare, unvalidated argv
-        token, so the override IS honoured — this test proves it.
+        This test used to assert the opposite. The override WAS honoured — confirmed on
+        2026-08-05 — and what stopped it being exploitable was an accident of Taskwarrior's
+        own grammar: the override consumed the description, so `task add` had no text left
+        and refused. A third-party argument parser rejecting the payload for us is not a
+        control, and it could change in any release. Taskwarrior 3.5.0 is a different
+        version than the one that investigation ran against.
 
-        What saves the system today is an accident of Taskwarrior's own grammar, not any
-        control in this repository: the description is a single argv token, so an override
-        consumes the whole of it and ``task add`` then has no text left and refuses. The
-        attacker gets a redirected data store on a command that cannot run.
-
-        That is a confirmed injection mechanism whose only reachable exploit path happens
-        to be blocked. Step 12 still validates at the ``_run`` choke point, because
-        "a third-party binary's argument parser rejects it for us" is not a security
-        boundary anyone should rely on.
+        Now the description travels after `--`, where Taskwarrior stops interpreting
+        options. The payload is data.
         """
         task_service.create_task("bob", TaskCreate(description="bob private note"))
         payload = f"rc.data.location={settings.data_root / 'bob'}"
 
-        with pytest.raises(RuntimeError, match="Additional text must be provided"):
-            task_service.create_task("alice", TaskCreate(description=payload))
+        created = task_service.create_task("alice", TaskCreate(description=payload))
+        assert created.description == payload, "the override should be stored verbatim"
 
-    def test_the_rejected_override_leaks_nothing_and_creates_nothing(self):
-        """The other half: the failed command must not leave state behind either."""
+        alice = [t.description for t in task_service.list_tasks("alice")]
+        assert payload in alice
+        assert "bob private note" not in alice, "the store was redirected"
+
+    def test_the_redirect_no_longer_reaches_another_users_store(self, real_data_root):
+        """The decisive test, inverted. Alice writes an override naming Bob's directory and
+        Bob's store must be untouched — no new file, no new task, nothing."""
         task_service.create_task("bob", TaskCreate(description="bob private note"))
+        bob_dir = real_data_root / "bob"
+        before = sorted(f.name for f in bob_dir.rglob("*") if f.is_file())
+
+        payload = f"rc.data.location={bob_dir}"
+        # Both paths that carry free text: add, and the annotate path that used to be the
+        # sharp edge because it applied the override and still returned success.
+        alice_task = task_service.create_task("alice", TaskCreate(description=payload))
+        task_service.annotate_task("alice", alice_task.uuid, payload)
+
+        after_files = sorted(f.name for f in bob_dir.rglob("*") if f.is_file())
+        assert after_files == before, "alice's command touched bob's data directory"
+
+        bob_tasks = [t.description for t in task_service.list_tasks("bob")]
+        assert bob_tasks == ["bob private note"]
+
+    def test_an_rc_shaped_annotation_is_stored_as_annotation_text(self):
+        """The annotate path was the sharp edge: it returned success while applying the
+        override, so a user could run Taskwarrior against another store and get a 200.
+        Now the text is text."""
         payload = f"rc.data.location={settings.data_root / 'bob'}"
-
-        with pytest.raises(RuntimeError):
-            task_service.create_task("alice", TaskCreate(description=payload))
-
-        alice_tasks = [t.description for t in task_service.list_tasks("alice")]
-        assert alice_tasks == [], "the rejected command left a task behind"
-        assert "bob private note" not in alice_tasks
-
-    def test_an_rc_shaped_annotation_succeeds_silently_rather_than_failing(self):
-        """The annotate path behaves DIFFERENTLY from add, and this is the sharp edge.
-
-        `task add` refuses when an override eats the description, so the caller gets an
-        error. `task <uuid> annotate` with the same shape returns success: the override is
-        applied, the command runs against whatever data store it names, matches nothing,
-        and reports nothing wrong.
-
-        So a user can make this service run Taskwarrior against another user's data
-        directory and get a 200 back. Whether anything can be read or written through that
-        redirect is the next two tests.
-        """
         created = task_service.create_task("alice", TaskCreate(description="host"))
-        task = task_service.annotate_task(
-            "alice", created.uuid, f"rc.data.location={settings.data_root / 'bob'}"
-        )
-        assert task.annotations == [], (
-            "the override was consumed as configuration, so no annotation text remained"
-        )
+        task = task_service.annotate_task("alice", created.uuid, payload)
+        assert [a.description for a in task.annotations] == [payload]
 
-    def test_the_redirect_reaches_the_other_users_store_but_cannot_write_to_it(self):
-        """The decisive test for SEC-3, and the error IS the evidence.
-
-        Alice annotates using BOB's task UUID while redirecting the data store to Bob's
-        directory. Contrast the two outcomes:
-
-        * redirect + a UUID that matches nothing there -> succeeds silently (previous test)
-        * redirect + a UUID that DOES match -> "Additional text must be provided"
-
-        The second only happens if Taskwarrior opened Bob's store and found Bob's task.
-        So the redirect is real and it reaches another user's data. The write is stopped
-        one step later, because the override consumed the annotation text that the write
-        requires — again the grammar, not a control in this repository.
-
-        Nothing is written, which is why this asserts the error and then checks Bob's task
-        is untouched.
-        """
+    def test_annotating_another_users_task_still_fails(self):
+        """The uuid is a filter, not free text, so the isolation that always held must
+        still hold: alice cannot reach bob's task at all."""
         bob_task = task_service.create_task("bob", TaskCreate(description="bob private note"))
-
-        with pytest.raises(RuntimeError, match="Additional text must be provided"):
-            task_service.annotate_task(
-                "alice", bob_task.uuid, f"rc.data.location={settings.data_root / 'bob'}"
-            )
+        with pytest.raises((ValueError, RuntimeError)):
+            task_service.annotate_task("alice", bob_task.uuid, "sneaky")
 
         after = task_service.get_task("bob", bob_task.uuid)
-        assert after.annotations == [], (
-            "SEC-3 ESCALATION: a redirected data store allowed one user to write into "
-            "another user's task"
-        )
+        assert after.annotations == []
         assert after.description == "bob private note"
 
-    def test_the_redirect_cannot_read_another_users_store(self):
-        """And the read direction: no user-controlled token reaches a filter position.
-
-        Export filters are fixed strings chosen by the routers, and the one
-        user-influenced filter is prefixed (`description:...`), so it can never be parsed
-        as an `rc.` override.
-        """
-        task_service.create_task("bob", TaskCreate(description="bob private note"))
-        created = task_service.create_task("alice", TaskCreate(description="alice note"))
-        task_service.annotate_task(
-            "alice", created.uuid, f"rc.data.location={settings.data_root / 'bob'}"
-        )
-
-        alice_tasks = [t.description for t in task_service.list_tasks("alice")]
-        assert "bob private note" not in alice_tasks
-        assert "alice note" in alice_tasks
-
-    def test_an_rc_override_embedded_after_real_text_is_still_one_token(self):
-        """A description is ONE argv element, which is what keeps this contained.
-
-        `task add "rc.data.location=/x buy milk"` does not become an override plus a
-        description: the whole string is the override's value. If any future change ever
-        splits a description into multiple argv tokens, this containment disappears —
-        which is the regression this test exists to catch.
-        """
+    def test_an_rc_override_embedded_after_real_text_is_inert(self):
+        """The old containment argument was that a description is ONE argv token, so the
+        whole string became the override's value. That argument is gone — the string is
+        text now, whatever its shape — and this asserts the outcome rather than the
+        accident."""
         payload = f"rc.data.location={settings.data_root / 'bob'} buy milk"
-        with pytest.raises(RuntimeError, match="Additional text must be provided"):
-            task_service.create_task("alice", TaskCreate(description=payload))
+        created = task_service.create_task("alice", TaskCreate(description=payload))
+        assert created.description == payload
+
+    def test_the_choke_point_refuses_an_override_in_a_structural_position(self):
+        """Defence in depth, against the real binary: `--` covers free text, and this
+        covers the positions that must stay parseable."""
+        from app.services import task_runner
+
+        with pytest.raises(task_runner.UnsafeArgument):
+            task_runner.export_tasks("alice", [f"rc.data.location={settings.data_root / 'bob'}"])

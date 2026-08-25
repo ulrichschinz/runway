@@ -372,6 +372,25 @@ rules:
       to be enforced by something that goes red, exactly as RULE-RULE-002 does for waivers.
       A date nothing checks is a wish.
 
+  - id: RULE-ARCH-004
+    statement: >
+      A standard-library module listed in architecture.toml's restricted_imports MUST NOT be
+      imported anywhere inside its declared scope except the files that declaration allows.
+    class: executable
+    check: tools/checks/boundaries.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/security.md#the-taskwarrior-boundary
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      task_runner is the single place this application invokes the Taskwarrior binary, and
+      that is the only reason its argv hardening is a control rather than a convention
+      (finding SEC-3). A second module importing subprocess would bypass the `--` separator
+      and the override refusal with nothing going red — an easy change to make by accident
+      while chasing something else. A choke point only works while it stays the only door,
+      and "stays" is a property that needs enforcing rather than intending.
+
   - id: RULE-DOC-001
     statement: "Every factual claim in AGENTS.md MUST hold against the repository."
     class: executable
