@@ -346,8 +346,11 @@ def _declare_global_blind_spots(graph: Graph) -> None:
         BlindSpot(
             "BLIND-OPS-001",
             "deployment",
-            "The deploy host's compose file is not in this repository, so the mapping from "
-            "built images to running containers is unknown. See docs/operations.md.",
+            "The deploy host's compose file is not in this repository. Its contents were "
+            "read on 2026-08-24 and are recorded in docs/operations.md, so the mapping from "
+            "built images to running containers is no longer unknown — but it is a "
+            "transcription the index cannot verify, and nothing detects drift once the host "
+            "changes. See RISK-OPS-002.",
             ["process topology", "rollback"],
         ),
         BlindSpot(

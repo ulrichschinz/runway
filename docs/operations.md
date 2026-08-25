@@ -69,11 +69,34 @@ build.
 
 To roll back, pin the last good SHA on the deploy host:
 
+> **This does not work as written today.** The host's compose file pins `:latest` literally, with no
+> variable to substitute — see *The deploy host's topology* below. `export RUNWAY_SHA=...` has no effect,
+> and `docker compose pull` will fetch `:latest`, which is the broken build you are trying to escape.
+
+**Rolling back today** means editing the tag on the host by hand:
+
 ```sh
 # on the deploy host
 cd /opt/services/runway
+sudo cp docker-compose.yml docker-compose.yml.bak
+sudo sed -i 's|runway-backend:latest|runway-backend:<sha>|; s|runway-frontend:latest|runway-frontend:<sha>|' \
+  docker-compose.yml
+sudo docker compose pull && sudo docker compose up -d --remove-orphans
+```
+
+**To make the documented procedure work**, the host's compose file needs the tag parameterised once:
+
+```yaml
+image: ghcr.io/ulrichschinz/runway-backend:${RUNWAY_SHA:-latest}
+image: ghcr.io/ulrichschinz/runway-frontend:${RUNWAY_SHA:-latest}
+```
+
+That is behaviour-preserving while `RUNWAY_SHA` is unset, and it turns the block below into a real runbook:
+
+```sh
+cd /opt/services/runway
 export RUNWAY_SHA=<the last good commit sha>
-docker compose pull && docker compose up -d --remove-orphans
+sudo docker compose pull && sudo docker compose up -d --remove-orphans
 ```
 
 Find candidate SHAs in the Actions run summary of any successful deploy, or:
@@ -83,38 +106,86 @@ gh api /users/ulrichschinz/packages/container/runway-backend/versions \
   --jq '.[] | .metadata.container.tags' | head
 ```
 
-> **This procedure is unverified.** See the open question below — the compose file the deploy host actually
-> uses is not in this repository, so the exact mechanism for pinning a SHA there cannot be confirmed from
-> here. Treat the block above as the intended shape, not a tested runbook.
-
 ## Health
 
-Both services declare a healthcheck in `docker-compose.yml`, and `frontend` waits for `backend` to be
-healthy rather than merely started. A crash-looping container used to be indistinguishable from a working
-one: `docker compose up -d` returns success either way.
+Both services declare a healthcheck in the **checked-in** `docker-compose.yml`, and `frontend` waits for
+`backend` to be healthy rather than merely started. A crash-looping container used to be indistinguishable
+from a working one: `docker compose up -d` returns success either way.
 
 The backend healthcheck calls `/health` with Python's `urllib`, because the runtime image ships no HTTP
 client.
 
-## Open question — the deploy host's compose file
+> **These healthchecks do not run in production.** The host uses its own compose file, which declares no
+> `healthcheck` for either service and orders `frontend` after `backend` with a plain `depends_on` — which
+> waits for *started*, not *healthy*. The defect the healthchecks were added to prevent is therefore still
+> live on the deploy host. Copying the two `healthcheck` blocks into the host's compose file closes it.
 
-`docker-compose.yml` in this repository declares `build:` for both services and **no `image:`**. The deploy
-host runs `docker compose pull && docker compose up -d`, which cannot pull anything for a service that
-declares no image name. The images this repository pushes to `ghcr.io` are therefore either consumed by a
-**different compose file that is not checked in**, or not consumed at all and the host builds from source.
+## The deploy host's topology
 
-`DEPLOY.md` is listed in `.gitignore`, which suggests deployment documentation exists outside version
-control.
+**Read directly from the host on 2026-08-24.** This section replaces an open question that stood since
+2026-08-04; `BLIND-OPS-001` is narrowed rather than closed, because the file below is a transcription the
+index cannot verify and nothing detects drift once the host changes (`RISK-OPS-002`).
 
-This matters and is not currently answerable from the repository:
+The host is `ar00`, reachable as `adm.agentic-reach.com`. The deployment lives in `/opt/services/runway`,
+owned by root, containing `docker-compose.yml`, `.env`, `users.db` and `data/`. Its compose file is **not**
+the one in this repository:
 
-- the rollback procedure above cannot be confirmed without knowing how the host selects an image;
-- the healthchecks added here only take effect if the host uses *this* compose file;
-- if the host builds from source, the images built in CI are decorative and the real build is unverified.
+```yaml
+services:
+  backend:
+    image: ghcr.io/ulrichschinz/runway-backend:latest
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./users.db:/app/users.db
+    environment:
+      - JWT_SECRET=...        # from .env, beside the compose file
+      - DATA_ROOT=...
+      - DB_PATH=...
+    networks:
+      - traefik-public
 
-**Until this is resolved, the checked-in deployment topology should be treated as a description of intent
-rather than of fact.** Resolving it means either checking in the production compose file (with secrets kept
-out) or recording the real topology here.
+  frontend:
+    image: ghcr.io/ulrichschinz/runway-frontend:latest
+    restart: unless-stopped
+    environment:
+      - BACKEND_HOST=...
+    depends_on:
+      - backend
+    networks:
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.runway.rule=Host(`runway.agentic-reach.com`)"
+      - "traefik.http.routers.runway.entrypoints=websecure"
+      - "traefik.http.routers.runway.tls.certresolver=letsencrypt"
+      - "traefik.http.services.runway.loadbalancer.server.port=4000"
+
+networks:
+  traefik-public:
+    external: true
+```
+
+`.env` beside it declares `JWT_SECRET` and `ALLOW_REGISTRATION`.
+
+### What this settles
+
+- **The images CI pushes are the images that run.** Both services name `ghcr.io/ulrichschinz/runway-*`, so
+  `docker compose pull` consumes them. They are not decorative, and the host does not build from source.
+- **No ports are published.** Traffic arrives through Traefik on the external `traefik-public` network, TLS
+  terminated by Let's Encrypt, routed to the frontend on port 4000. The backend is not reachable from
+  outside the compose network except through the frontend.
+- **The rollback runbook does not work as written** — the tag is a literal `:latest`. See *Rolling back*.
+- **The healthchecks in this repository do not run.** See *Health*.
+- **The checked-in `docker-compose.yml` is a development artefact**, not a description of production. It
+  declares `build:` with no `image:`, publishes ports, and has no Traefik labels. Reading it to learn how
+  production is wired gives the wrong answer on every one of those points.
+
+### What is still open
+
+Checking the host's compose file into this repository — with `.env` kept out — would let the gate compare
+the two and fail on divergence. Until then the divergences above are found by looking, and this section is
+correct only as of the date at the top of it.
 
 ## Incident 2026-08-25
 
@@ -167,5 +238,6 @@ What changed as a result:
 | Healthchecks in compose | a crash-looping container reporting success |
 | Immutable SHA tags | having no rollback target |
 
-Still open: transitive dependencies are unpinned as a whole (Step 14's hash-pinned lockfile), and the
-deploy host's real topology is unknown (above).
+Still open: transitive dependencies are unpinned as a whole (Step 14's hash-pinned lockfile). The deploy
+host's topology is no longer unknown, but two of the mitigations in that table — the healthchecks, and the
+SHA tags as a rollback mechanism — turn out not to be active on the host. Both are recorded above.

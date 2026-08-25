@@ -152,8 +152,9 @@ Recorded so a green gate is not mistaken for a broader guarantee:
 - **Frontend rendering, routing and gestures are untested** (`RISK-TEST-004`). The tests
   cover the pure logic where every shipped frontend defect actually was.
 - **The container test tier cannot run on arm64** (`RISK-TEST-001`); CI runs it.
-- **The deploy host's compose file is not in this repository** (`BLIND-OPS-001`), so the
-  rollback runbook in `docs/operations.md` is intent, not verified fact.
+- **The deploy host's compose file is not in this repository** (`BLIND-OPS-001`). Its
+  contents are now recorded in `docs/operations.md`, but nothing detects drift once the
+  host changes (`RISK-OPS-002`), and the rollback runbook does not work as written.
 - **Transitive dependencies are not pinned as a whole.** One incident already came from
   that; `RULE-DEP-001` makes the gap survivable, not closed.
 

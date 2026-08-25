@@ -61,34 +61,14 @@ and it is the security wave that touches the running production instance. It is 
 two preconditions that cannot be cleared from a dev machine. Both were recorded as hard
 blockers when decision **F3** was frozen.
 
-### Blocker A — is production running on the default JWT secret?
+### ~~Blocker A — is production running on the default JWT secret?~~ **CLEARED 2026-08-24**
 
-`docker-compose.yml` resolves `JWT_SECRET=${JWT_SECRET:-changeme-set-in-.env}` at compose
-parse time, from a `.env` beside the compose file on the deploy host. **Nobody has yet
-confirmed what that resolves to in production.**
+Checked on the host: `JWT_SECRET` resolves to a **non-default 64-character value** (42 distinct
+characters, no dictionary words). Production was never on the publicly known default, so no
+rotation was performed — it would have cost a round of logouts for no security benefit.
 
-The operator runs, on the host:
-
-```sh
-cd /opt/services/runway
-docker compose config | grep JWT_SECRET     # the authoritative answer
-```
-
-If it prints `changeme-set-in-.env`, production is live on the publicly known default
-(finding SEC-1) and must be fixed *before* Step 11 lands.
-
-**Agreed sequencing (from the last exchange): set a real secret as a separate ops action
-first.** Then Step 11's boot-refusal is a no-op for production rather than a coupled
-code-and-config change that can leave a container refusing to start with no obvious cause.
-
-```sh
-openssl rand -base64 48        # then set JWT_SECRET in /opt/services/runway/.env
-docker compose up -d
-```
-
-Cost: **one round of logouts** — JWTs stop validating. **API keys are unaffected**:
-`get_current_user` checks `X-Api-Key` against a database row *before* trying the JWT, so
-agents, MCP clients and the `/inbox` webhook keep working across a rotation.
+`WAIVER-SEC-001`'s mitigation clause is satisfied: Step 11's boot-refusal will be a no-op for
+this deployment rather than a deploy that takes the site down.
 
 ### Blocker B — the admin bootstrap
 
@@ -145,10 +125,12 @@ until each is resolved or deliberately re-approved:
 
 Twelve residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
 
-- **`BLIND-OPS-001`** — the deploy host's compose file is **not in this repository**. The
-  checked-in one declares `build:` with no `image:`, so `docker compose pull` cannot consume
-  the images CI pushes. Until this is resolved, the rollback runbook in
-  `docs/operations.md` is intent, not verified fact. *This is the single largest unknown.*
+- **`BLIND-OPS-001`** — the deploy host's compose file is still not in this repository, but
+  it was **read on 2026-08-24 and transcribed into `docs/operations.md`**. It uses
+  `image: ghcr.io/ulrichschinz/runway-*:latest`, so `docker compose pull` *does* consume the
+  images CI pushes. Two claims this repository made turned out false: the healthchecks do
+  not run in production, and the rollback runbook's `RUNWAY_SHA` has nothing to substitute
+  into. Drift is now the open risk (`RISK-OPS-002`).
 - `RISK-GOV-001` — one maintainer, so required-reviewer approval cannot be independent.
 - `RISK-GOV-002` — the branch-protection drift check needs an authenticated `gh`; it
   reports "skipped" in CI, so it effectively only runs from the maintainer's machine.
