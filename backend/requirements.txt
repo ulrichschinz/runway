@@ -1,7 +1,20 @@
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
-python-jose[cryptography]==3.3.0
+# 3.3.0 carried the algorithm-confusion and JWT-bomb advisories (finding SEC-7). 3.5.0 was
+# verified drop-in against this application's exact usage — HS256 encode/decode, and an
+# `alg: none` token still refused — on 2026-08-26.
+python-jose[cryptography]==3.5.0
+
+# passlib 1.7.4 is the LATEST release, and it is from 2020-10-08. Unmaintained, not merely
+# pinned. See ADR 0021 and RISK-DEP-003.
 passlib[bcrypt]==1.7.4
+
+# LOAD-BEARING PIN, and not for the reason it looks like. passlib reads
+# bcrypt.__about__.__version__, which bcrypt removed. Tested against bcrypt 5.0.0 on
+# 2026-08-26: it does not warn, it FAILS — `ValueError: password cannot be longer than 72
+# bytes` on every hash, because bcrypt 5 dropped the silent truncation passlib relies on.
+# Bumping this breaks every login. Dependabot will offer 5.0.0; do not take it without
+# replacing passlib first.
 bcrypt==4.0.1
 python-multipart==0.0.12
 pydantic-settings==2.6.1

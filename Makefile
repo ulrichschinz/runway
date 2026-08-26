@@ -20,7 +20,7 @@ SHELL := /bin/sh
 export RUNWAY_JSON = $(JSON)
 export RUNWAY_PLAN = $(PLAN)
 
-.PHONY: help doctor bootstrap check verify rebuild-verify test map impact flow similar violations mcp index brief scaffold fix grant-admin surfaces decay-review
+.PHONY: help doctor bootstrap check verify rebuild-verify test map impact flow similar violations mcp index brief scaffold fix grant-admin surfaces lock decay-review
 
 help: ## List every task-interface command
 	@./run help
@@ -72,6 +72,9 @@ grant-admin: ## Promote an account to admin directly (escape hatch; needs --db)
 
 surfaces: ## Report public-surface drift (--update rewrites the snapshots)
 	@./run surfaces $(ARGS)
+
+lock: ## Regenerate the hash-pinned Python dependency locks
+	@./run lock
 
 scaffold: ## Create a new unit that is conformant by construction
 	@./run scaffold

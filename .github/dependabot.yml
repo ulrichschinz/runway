@@ -1,0 +1,42 @@
+# Dependabot opens the update, the gate decides whether it may land.
+#
+# Everything here is pinned exactly — requirements.txt, package.json, and four base images by
+# digest — which makes updates deliberate and also makes them invisible: a pinned dependency
+# never announces that it has a newer version. Dependabot is what turns "pinned" from "frozen
+# and forgotten" into "current as of a decision someone made".
+#
+# Weekly, not daily: a pull request nobody reads is worse than none, because it teaches people
+# to close them unread.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, backend]
+    # mcp is deliberately held: fastapi-mcp 0.3.3 declares mcp>=1.6.0 with no upper bound,
+    # and mcp 2.0.0 broke `import app.main` in production through a green deploy (ADR 0004).
+    # Unhold it when fastapi-mcp supports 2.x.
+    ignore:
+      - dependency-name: mcp
+        versions: [">=2.0.0"]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, frontend]
+
+  - package-ecosystem: docker
+    directories: [/backend, /frontend]
+    schedule:
+      interval: weekly
+    labels: [dependencies, images]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, ci]

@@ -406,6 +406,68 @@ p.write_text(t.replace(old, "PHANTOM_SETTING=1\nJWT_ALGORITHM=HS256", 1))
 PHANTOMVAR
 expect_red "SURF-002" "tools/checks/surfaces.sh" "RULE-SURF-002"
 
+# --- RULE-DEP-002 — a dependency's licence becomes forbidden ----------------
+# Shipping strong copyleft inside a public container image carries source obligations onto
+# everyone who redeploys it.
+#
+# This moves a licence the tree ACTUALLY uses into the forbidden list, rather than forging an
+# installed package. The first version of this fixture wrote a fake dist-info into
+# backend/.venv — which the sandbox SYMLINKS rather than copies, so it polluted the real
+# developer environment and left a phantom GPL package behind. A fixture that mutates state
+# outside the sandbox is a bug, not a test.
+python3 - "$SANDBOX/policy/licenses.yaml" <<'FORBIDLICENCE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+assert "\n  - MIT\n" in t, "MIT not in the allowed list"
+t = t.replace("\n  - MIT\n", "\n", 1)          # stop allowing it
+t = t.replace("forbidden:\n", "forbidden:\n  - MIT\n", 1)  # and forbid it
+p.write_text(t)
+FORBIDLICENCE
+expect_red "DEP-002" "tools/checks/supply-chain.sh" "RULE-DEP-002"
+
+# --- RULE-DEP-003 — a credential is committed -------------------------------
+# The repository is public, so a pushed credential is disclosed and rotation is the only
+# remedy. Catching it before the push is the whole value.
+python3 - "$SANDBOX/backend/app/config.py" <<'LEAKCRED'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+p.write_text(p.read_text() + '\nAWS_KEY = "AKIA' + "IOSFODNN7EXAMPLB" + '"\n')
+LEAKCRED
+expect_red "DEP-003" "tools/checks/supply-chain.sh" "RULE-DEP-003"
+
+# --- RULE-DEP-004 — a base image floats -------------------------------------
+# What ships must be a function of the commit, not the calendar. Unpin the runtime image.
+python3 - "$SANDBOX/backend/Dockerfile" <<'UNPINIMAGE'
+import pathlib
+import re
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+t2 = re.sub(r"^FROM python:3\.12-slim@sha256:[0-9a-f]+", "FROM python:3.12-slim", t, count=1, flags=re.M)
+assert t2 != t, "digest-pinned python base not found"
+p.write_text(t2)
+UNPINIMAGE
+expect_red "DEP-004" "tools/checks/supply-chain.sh" "RULE-DEP-004"
+
+# --- RULE-DEP-004 — a dependency install stops requiring hashes -------------
+python3 - "$SANDBOX/backend/Dockerfile" <<'UNHASHDEPS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "pip install --no-cache-dir --require-hashes -r requirements.lock"
+assert old in t, "hashed install not found"
+p.write_text(t.replace(old, "pip install --no-cache-dir -r requirements.txt", 1))
+UNHASHDEPS
+expect_red "DEP-004-hash" "tools/checks/supply-chain.sh" "RULE-DEP-004"
+
 # --- RULE-DOC-001 — the contract claims something untrue --------------------
 printf '\nThe entry point is `tools/checks/does-not-exist.sh`.\n' >>"$SANDBOX/AGENTS.md"
 expect_red "DOC-001" "tools/checks/contract.sh" "RULE-DOC-001"

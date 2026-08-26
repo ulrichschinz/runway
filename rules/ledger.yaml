@@ -430,6 +430,62 @@ rules:
       undocumented variable the app does read is a knob nobody can find, which is how
       CORS_ORIGINS, BOOTSTRAP_ADMIN and the rate-limit settings all shipped.
 
+  - id: RULE-DEP-002
+    statement: >
+      Every dependency's licence MUST be classified by policy/licenses.yaml, and MUST NOT be
+      forbidden, unclassified, absent, or an unapproved review case.
+    class: executable
+    check: tools/checks/supply-chain.sh
+    fixture: tools/fixtures/negative.sh
+    contract: policy/licenses.yaml
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      This repository publishes container images publicly, so a dependency's licence is an
+      obligation passed on to whoever redeploys them. Strong copyleft would carry source
+      obligations onto them, which this project does not ask. Unknown fails closed on purpose:
+      a dependency whose licence nobody could determine is not one whose licence is fine, it
+      is one nobody has looked at. The escape hatch costs a minute of reading rather than a
+      suppression.
+
+  - id: RULE-DEP-003
+    statement: "No credential may be committed to this repository."
+    class: executable
+    check: tools/checks/supply-chain.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/security.md
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      RULE-HYG-001 keeps secret-bearing paths out of git and RULE-HYG-003 keeps literals out
+      of the deployment compose. Neither catches the ordinary case: a key pasted into a source
+      file, a fixture or a documentation example, in a file that belongs here. This repository
+      is public, so a committed credential is disclosed the moment it is pushed and rotation
+      is the only remedy — the cheapest moment to catch it is before the push.
+
+  - id: RULE-DEP-004
+    statement: >
+      Every base image MUST be pinned by digest, Arch packages MUST come from a dated archive
+      snapshot rather than live mirrors, and Python dependencies MUST install from a
+      hash-pinned lock with --require-hashes.
+    class: executable
+    check: tools/checks/supply-chain.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/operations.md
+    fix: ./run lock
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A floating tag means what ships is a function of the calendar rather than of the commit.
+      This repository has been bitten twice: mcp 2.0.0 shipped a backend that could not start
+      through a green deploy on 2026-08-04, and Taskwarrior rolled forward under
+      archlinux:latest on 2026-08-25 and broke every container test on an unchanged backend.
+      The archive snapshot is checked separately from the digest because a digest does not pin
+      what pacman installs — pacman resolves against live mirrors at build time, so without it
+      the binary version is still whatever Arch published that day.
+
   - id: RULE-DOC-001
     statement: "Every factual claim in AGENTS.md MUST hold against the repository."
     class: executable
@@ -672,17 +728,40 @@ residual_risks:
 
   - id: RISK-DEP-001
     statement: >
-      The backend images install Taskwarrior with `pacman -Sy task` from `archlinux:latest`.
-      Neither is pinned, so every build takes whatever Arch ships that day and the binary
-      can change under a commit that touches nothing. It already has: Taskwarrior 3.5.0
-      began requiring theme files the images were not copying, and every container test
-      failed on an unchanged backend. Pinning the base image by digest would not fix it —
-      pacman resolves against live repositories at build time — and pinning the package
-      version makes the build fail once Arch drops it, which is weeks. Step 14 owns the
-      real answer: a pinned artefact this repository controls rather than a rolling distro.
+      RESOLVED 2026-08-26 by Step 14. The base image is digest-pinned and the package
+      repository is pinned to the Arch Linux Archive snapshot of 2026-08-25, so `task` is
+      reproducible at 3.5.0. What remains is the cost of that choice: the archive snapshot is
+      a date someone must move deliberately, and a snapshot left alone for a year silently
+      accumulates unpatched packages. Dependabot does not watch it — nothing announces that a
+      pinned archive date has aged.
     owner: maintainer
-    re_open_trigger: "the container tier breaks again on an unchanged backend, or Step 14 replaces the Arch source"
-    decision_record: docs/operations.md#incident-2026-08-25
+    re_open_trigger: "the archive snapshot date is more than six months old, or archive.archlinux.org stops serving the pinned date"
+    decision_record: docs/adr/0021-supply-chain-pinning.md
+
+  - id: RISK-DEP-003
+    statement: >
+      passlib 1.7.4 is the LATEST release and it is from 2020-10-08 — unmaintained rather than
+      merely pinned. It is the only thing hashing and verifying passwords here. bcrypt is held
+      at 4.0.1 because passlib reads an attribute bcrypt removed: bcrypt 5.0.0 does not warn,
+      it fails every hash with "password cannot be longer than 72 bytes" (tested 2026-08-26).
+      So the security-relevant dependency is frozen by a dead one, and Dependabot will keep
+      offering the bump that breaks every login. Replacing passlib means re-verifying stored
+      hashes against a different implementation, which is its own change with its own
+      migration evidence.
+    owner: maintainer
+    re_open_trigger: "a passlib advisory is published, or the bcrypt pin blocks a fix, or a password-hashing migration is scheduled"
+    decision_record: docs/adr/0021-supply-chain-pinning.md
+
+  - id: RISK-DEP-002
+    statement: >
+      Secret scanning is pattern-based. It catches provider-issued credentials by their
+      prefixes and high-entropy assignments to credential-shaped names; it will miss a secret
+      that looks like ordinary prose, one split across lines, or one encoded. It also only
+      reads the current tree — a credential committed and later deleted stays in history and
+      stays disclosed. Rotation, not deletion, remains the remedy.
+    owner: maintainer
+    re_open_trigger: "a credential is found in this repository that the scanner did not report, or history rewriting is ever considered as a remedy"
+    decision_record: docs/adr/0021-supply-chain-pinning.md
 
   - id: RISK-SEC-003
     statement: >

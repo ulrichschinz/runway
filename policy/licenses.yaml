@@ -1,0 +1,80 @@
+# Which dependency licences this repository will ship, and which need a decision first.
+#
+# This is a **public, self-hosted** application distributed as container images. That shape
+# is what the policy is calibrated to: permissive licences are unremarkable here, strong
+# copyleft would impose obligations on anyone redeploying the images, and "no licence at all"
+# means no grant of rights — the most restrictive state there is, not the least.
+#
+# Enforced by RULE-DEP-002 over both ecosystems. Four verdicts:
+#
+#   allowed    ship it, no decision needed
+#   review     permitted only with an entry in `approved_exceptions` recording who and why
+#   forbidden  fails the gate
+#   unknown    anything not classified here — treated as forbidden, deliberately
+#
+# `unknown` failing closed is the point. A dependency whose licence nobody could determine is
+# not a dependency whose licence is fine; it is one nobody has looked at.
+
+version: 1
+
+allowed:
+  # Permissive, no redistribution obligations beyond attribution.
+  - MIT
+  - MIT License
+  - BSD
+  - BSD License
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - Apache-2.0
+  - Apache Software License
+  - Apache License 2.0
+  - ISC
+  - ISC License (ISCL)
+  - Python Software Foundation License
+  - PSF-2.0
+  - Zlib
+  - Unlicense
+  - CC0-1.0
+  - 0BSD
+  - MIT AND Python-2.0
+  - MPL-2.0                     # weak copyleft, file-scoped; safe for a linked dependency
+  # Classified 2026-08-26, each read rather than waved through:
+  - Mozilla Public License 2.0 (MPL 2.0)   # the classifier spelling of MPL-2.0 (certifi, pathspec)
+  - MIT-0                       # MIT with the attribution clause removed — strictly weaker (cffi)
+  - BlueOak-1.0.0               # permissive, no copyleft, explicit patent grant (minimatch)
+  - CC-BY-4.0                   # attribution only. caniuse-lite is a browser-support DATA set,
+                                # not code; the obligation is credit, which the licence file
+                                # shipped inside the package satisfies.
+
+review:
+  # Weak copyleft and dual licensing: permitted, but someone has to have thought about it.
+  - LGPL-2.1
+  - LGPL-3.0
+  - LGPL-2.1-or-later
+  - LGPL-3.0-or-later
+  - EPL-2.0
+  - CDDL-1.0
+
+forbidden:
+  # Strong copyleft — redistributing the image would carry source obligations onto whoever
+  # redeploys it, which this project does not ask of its users.
+  - GPL-2.0
+  - GPL-3.0
+  - GPL-2.0-or-later
+  - GPL-3.0-or-later
+  - AGPL-3.0
+  - AGPL-3.0-or-later
+  # Non-commercial and source-available: not open source, and incompatible with a public
+  # repository anyone may deploy.
+  - CC-BY-NC-4.0
+  - BUSL-1.1
+  - SSPL-1.0
+  - Elastic-2.0
+  - Commons Clause
+
+# Packages whose licence string cannot be read from metadata, with the licence confirmed by
+# reading the project directly. Each is a recorded act, not a silent skip.
+resolved_unknowns: []
+
+# `review` licences that have been approved, and by whom.
+approved_exceptions: []

@@ -10,12 +10,32 @@
 # the deploy workflow would silently start shipping an image whose CMD is pytest.
 # RULE-TI-002 checks that the base images here stay in step with backend/Dockerfile.
 
-FROM archlinux:latest AS task-builder
-# Must stay identical to backend/Dockerfile: the Arch image strips /usr/share/doc, where
-# Taskwarrior 3.5.0 keeps the theme files it now refuses to start without.
-RUN sed -i '/^NoExtract/d' /etc/pacman.conf && pacman -Sy --noconfirm task
+FROM archlinux@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309 AS task-builder
+# Must stay byte-identical to backend/Dockerfile's builder stage: the tier that proves
+# the binary behaves has to build the same binary. RULE-TI-002 checks the base images agree.
+#
+# Three things were wrong before, and only the first is obvious:
+#
+#   archlinux:latest   a floating tag — the base moved whenever Arch rebuilt it
+#   pacman -Sy         sync without upgrade: the classic partial-upgrade pattern, and it
+#                      installed whatever `task` Arch published that day
+#   NoExtract          the Arch image drops /usr/share/doc, where Taskwarrior 3.5.0 keeps
+#                      the theme files it refuses to start without (incident 2026-08-25)
+#
+# The digest pins the base. The Arch Linux Archive pins the *package repository* to a dated
+# snapshot, which is what actually pins the binary: a digest alone would not, because pacman
+# resolves against live mirrors at build time. `task` is the engine of this product, and its
+# version was previously a function of the calendar.
+#
+# Bumping the snapshot date is a deliberate act. It is the supply-chain equivalent of
+# updating a lockfile, and the container tier is what proves the new binary still behaves.
+RUN printf 'Server=https://archive.archlinux.org/repos/2026/08/25/$repo/os/$arch\n' \
+      > /etc/pacman.d/mirrorlist \
+ && sed -i '/^NoExtract/d' /etc/pacman.conf \
+ && pacman -Syu --noconfirm task \
+ && task --version
 
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17
 
 COPY --from=task-builder /usr/bin/task /usr/local/bin/task
 COPY --from=task-builder /usr/share/doc/task/rc/ /usr/share/doc/task/rc/
@@ -26,8 +46,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt requirements-dev.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
+# The dev lock covers runtime and tooling together: a gate whose tools float is a gate whose
+# verdict changes without anyone changing code.
+COPY requirements.txt requirements-dev.txt requirements-dev.lock ./
+RUN pip install --no-cache-dir --require-hashes -r requirements-dev.lock
 
 COPY pyproject.toml taskrc_template.txt ./
 COPY app/ ./app/

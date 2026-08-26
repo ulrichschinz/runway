@@ -23,7 +23,11 @@ grep -qE "^FROM node:${NODE_VERSION}(\.|-)" frontend/Dockerfile ||
 grep -qE "^FROM python:${PYTHON_VERSION}(\.|-)" backend/Dockerfile.test ||
 	fail_rule RULE-TI-002 "backend/Dockerfile.test does not build on python:${PYTHON_VERSION}"
 
-for base in $(grep -oE '^FROM [a-z0-9.:/-]+' backend/Dockerfile | awk '{print $2}'); do
+# The character class includes @ so a digest-pinned ref is captured whole. That also makes
+# the comparison stricter than it was: the two Dockerfiles must agree on the DIGEST, not just
+# the image name — the tier that proves the Taskwarrior binary behaves has to build the same
+# binary the runtime image ships.
+for base in $(grep -oE '^FROM [a-z0-9.:/@-]+' backend/Dockerfile | awk '{print $2}'); do
 	grep -qE "^FROM ${base}( |\$)" backend/Dockerfile.test ||
 		fail_rule RULE-TI-002 "backend/Dockerfile builds on '${base}' but backend/Dockerfile.test does not"
 done

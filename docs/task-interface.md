@@ -151,6 +151,15 @@ documented variable is unread or a read variable is undocumented.
 Updating a snapshot is not a way around the rule; it is the rule working. The diff is what makes a
 public-surface change something a human commits rather than something that happens.
 
+### `make lock`
+Regenerates `backend/requirements.lock` and `backend/requirements-dev.lock` from the `.txt` files, with
+artefact hashes. Requires `uv`.
+
+The `.txt` files are the intent — nine direct dependencies pinned exactly. The `.lock` files are the
+closure: every transitive dependency with its hashes, which is what the images install with
+`--require-hashes`, so a substituted artefact is refused rather than trusted. Run this after changing a
+`.txt`; `RULE-DEP-004` fails if a lock is missing or unhashed.
+
 ### `make decay-review`
 Runs the recurring agent-readiness decay review and writes verifiable evidence of the run. *Implemented in
 Step 16.*

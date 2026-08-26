@@ -140,9 +140,13 @@ justified_suppressions:
     reviewed_on: 2026-08-25
 
   - rule: "ruff S105 — hardcoded password assigned to jwt_secret"
-    scope: backend/app/config.py
+    scope: >
+      backend/app/config.py, tools/surfaces.py
     reason: >
-      The default is kept so that `import app.main` succeeds with no environment — the
+      In tools/surfaces.py the assignment is a throwaway value that lets startup_checks
+      allow the capture to boot; capturing a public surface must not depend on an operator's
+      environment. In config.py the default is kept so that `import app.main` succeeds with
+      no environment — the
       import check (RULE-DEP-001), the unit tier and any tooling that reads the app object
       would otherwise all need a secret provisioned first. It is inert: startup_checks
       rejects this exact string, so no serving process can ever hold it. Was
@@ -167,6 +171,18 @@ justified_suppressions:
       value is passed as a bound parameter. Verified by reading the construction site.
     reviewed_by: maintainer
     reviewed_on: 2026-08-04
+
+  - rule: "ruff S404 — import of the subprocess module"
+    scope: >
+      tools/checks/pinning.py, tools/checks/secret_scan.py, tools/index/boundaries.py
+    reason: >
+      These are repository tooling, not the application. Each imports subprocess for exactly
+      one thing — running `git ls-files` to get the tracked-file list — with a literal argv and
+      no user input anywhere near it. RULE-ARCH-004 restricts subprocess inside backend/app/,
+      which is the boundary that matters; extending it to the toolchain would mean five
+      standing exceptions, and a rule with five standing exceptions teaches people it is noise.
+    reviewed_by: maintainer
+    reviewed_on: 2026-08-26
 
   - rule: "ruff E402 — module level import not at top of file"
     scope: >
