@@ -48,7 +48,7 @@ the structure was already sound; what was missing was enforcement and knowledge.
 | — | PR #15 | Deploy host read; compose checked in; two false production claims corrected; healthchecks and rollback fixed on the host |
 | 11 (partial) | PR #16 | SEC-2 closed: zero-admin bootstrap, last-admin guard, `RULE-SEC-001` route guards |
 
-**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**35 rules, 34
+**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**37 rules, 36
 proven able to fail on every run**), index (built, qualified, deterministic, queryable).
 
 `check` ~5s · `verify` ~40s local. Unimplemented commands are now `rebuild-verify` (5),
@@ -104,7 +104,13 @@ rather than something someone remembers to check.
 
 See `docs/briefs/0013-security-wave-2.md` and ADR 0018.
 
-**Next unblocked step is 13** — public-surface protection: an OpenAPI snapshot, a runtime-observed MCP tool list (which also replaces `BLIND-MCP-001` with `RUNTIME_OBSERVED` evidence), DB and env-var schemas, SPA route snapshots. `SHIM-SEC-006` is scheduled for removal there.
+**Next unblocked step is 14** — supply chain: hash-pinned lockfile, licence policy, digest-pinned
+base images, secret scanning. `RISK-DEP-001` is the standing argument for it: the Taskwarrior
+binary rolled forward under an unchanged commit on 2026-08-25 and broke every container test.
+
+**`SHIM-SEC-006` did not get removed in Step 13**, though that was its scheduled step. Removal
+was always conditional on callers having moved, and nothing here can see what callers send;
+removal moved to Step 15 where the audit log answers it. The expiry did **not** move.
 
 ---
 
@@ -115,7 +121,7 @@ See `docs/briefs/0013-security-wave-2.md` and ADR 0018.
 | ~~10~~ | ~~`make brief` generation; ADR-link resolution~~ | **Done.** See `docs/briefs/0011-briefs-and-record-resolution.md` and ADR 0016. |
 | ~~11~~ | ~~Security wave 1~~ | **Done.** All five findings closed across two changes. |
 | ~~12~~ | ~~Security wave 2 — Taskwarrior argv hardening~~ | **Done.** Free text after `--`, override refusal at the choke point, `RULE-ARCH-004` keeps `subprocess` there. `WAIVER-SEC-002` resolved. See `docs/briefs/0014-taskwarrior-boundary.md` and ADR 0019. |
-| **13** | Public-surface protection: OpenAPI snapshot, **runtime-observed MCP tool list**, DB schema, env-var schema, SPA routes | Also replaces `BLIND-MCP-001` with `RUNTIME_OBSERVED` evidence. |
+| ~~13~~ | ~~Public-surface protection~~ | **Done.** Five snapshots under `ops/surfaces/`, env vars cross-checked against README. `BLIND-MCP-001` resolved. Found: every MCP tool name in the README was wrong, and `PORT` was documented but unread. See `docs/briefs/0015-public-surface-protection.md` and ADR 0020. |
 | **14** | Supply chain: hash-pinned lockfile, licence policy, digest-pinned base images, secret scanning | The `mcp` incident is the argument for this one. |
 | **15** | Operability: structured logging with a no-secrets rule, audit log, healthchecks already landed, `WAIVER-OPS-001` resolution | |
 | **16** | `make scaffold`, `make decay-review`, Phase 4 audit, **Cold-Agent Index and Change Tests** | 16a already landed early. |
@@ -135,8 +141,11 @@ until each is resolved or deliberately re-approved:
 | `WAIVER-OPS-001` | migrations swallow every exception | Step 15 |
 | `WAIVER-TYPE-001` | unchecked `Row \| None` in two handlers — a reachable 500 on `/auth/me` | its own step |
 
-Seventeen residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
+Eighteen residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
 
+- **`RISK-MCP-001`** — the index derives `mcp_tool` nodes by declaration while the surface
+  snapshot derives them by booting the app. Two producers of one fact, only one observed, and
+  nothing compares them: an index query returns a handler name, a client sees an operation id.
 - **`BLIND-OPS-001`** — the deploy host's compose file was read on 2026-08-24 and is now
   **checked in as `ops/deploy/docker-compose.yml`** (no secrets: `JWT_SECRET` is a `${...}`
   reference, and `RULE-HYG-003` fails the gate if a literal ever replaces it). It uses

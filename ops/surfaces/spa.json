@@ -1,0 +1,22 @@
+{
+  "local_storage_keys": [
+    "email",
+    "fullName",
+    "role",
+    "theme",
+    "token",
+    "username"
+  ],
+  "routes": [
+    "/",
+    "/all",
+    "/inbox",
+    "/login",
+    "/next",
+    "/projects",
+    "/projects/:name",
+    "/settings",
+    "/someday",
+    "/waiting"
+  ]
+}

@@ -30,14 +30,17 @@ shims:
       break every agent, MCP client and webhook caller at once, since all of them send the
       key in the Bearer slot today.
     removal: >
-      Step 13. The route's canonical credential is `X-Api-Key`, which now works. Removal
-      means deleting the branch in get_current_user and the entry here, after callers have
-      moved.
+      Step 15, moved from Step 13 on 2026-08-26. Step 13 arrived and its precondition did
+      not: removal was always conditional on callers having moved, and nothing here can yet
+      see what callers send. Removing it on schedule regardless would break every agent and
+      MCP client in one step — the exact outcome the shim exists to prevent — so the date
+      moved rather than the promise. The expiry did NOT move: 2026-11-25 still stands, and
+      RULE-SEC-002 still fails when it passes.
     evidence: >
-      No mechanical check exists: this repository cannot see what its callers send. Removal
-      needs a deliberate look at the deployment's own agents and the MCP client, which is
-      why the expiry is a date rather than a counter. Step 15's audit log would make it
-      observable — that is the honest prerequisite.
+      No mechanical check exists: this repository cannot see what its callers send. Step 15's
+      audit log is the honest prerequisite, because it makes "is anyone still using the Bearer
+      shape" a question the deployment can answer instead of one someone guesses at. Until
+      then, removal would be a decision taken blind.
     owner: maintainer
     approved_on: 2026-08-25
     expires: 2026-11-25

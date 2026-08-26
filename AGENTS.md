@@ -87,13 +87,13 @@ expand → migrate → switch → contract — not a changelog line.
 
 | Surface | Promise |
 |---|---|
-| REST API (32 routes) | Breaking changes go through the migration pattern. |
-| **MCP tools (32)** | **Tool names are the route handler *function* names**, derived by `fastapi-mcp`. Renaming a Python function is a breaking public-surface change. `./run impact` reports which tools a change touches. |
+| REST API (32 routes) | Breaking changes go through the migration pattern. The served OpenAPI schema is snapshotted in `ops/surfaces/openapi.json`. |
+| **MCP tools (32)** | Tool names are FastAPI **operation ids** — function name, path, method (`create_task_tasks_post`) — *not* the bare function names this table claimed until Step 13. Observed by booting the app; snapshot in `ops/surfaces/mcp-tools.json`, enforced by `RULE-SURF-001`. Renaming a Python function still renames its tool, so it is a breaking public-surface change. |
 | Auth: `Authorization: Bearer <jwt>`, `X-Api-Key`, and Bearer-as-API-key everywhere | The third form is `SHIM-SEC-006`, a dated compatibility shim in `rules/shims.yaml`, not a design. `RULE-SEC-002` fails the gate when it expires. |
-| SQLite schema | Forward-only, additive. Migrations run in `init_db()` on every start. |
+| SQLite schema | Forward-only, additive. Migrations run in `init_db()` on every start, and the migrated schema is snapshotted in `ops/surfaces/db-schema.sql`. |
 | Taskwarrior data and `backend/taskrc_template.txt` | **Urgency coefficients are a behavioural contract** — changing one re-orders every user's list. Existing users' `.taskrc` files are *not* updated. |
 | Container images | `:latest` plus an immutable `:<commit-sha>` — the rollback target. |
-| Env vars, SPA routes, localStorage keys | Documented in `docs/operations.md`. |
+| Env vars, SPA routes, localStorage keys | Every variable the app reads is documented in `README.md` and `RULE-SURF-002` fails when the two disagree in either direction. SPA routes and storage keys are snapshotted in `ops/surfaces/spa.json`. |
 
 ## 6. Ownership
 

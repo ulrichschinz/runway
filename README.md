@@ -48,8 +48,46 @@ cp .env.example .env
 ```env
 JWT_SECRET=your-secret-here
 ALLOW_REGISTRATION=true
-PORT=4000
 ```
+
+**Every setting the application reads.** Only `JWT_SECRET` is required; the rest have working
+defaults. `RULE-SURF-002` fails the build if this table and the code disagree in either
+direction, so a variable documented here always does something and a variable that does
+something is always here.
+
+```env
+# Required. The app refuses to start on a default, an empty value, or fewer than 32
+# characters. Generate one with: openssl rand -base64 48
+JWT_SECRET=
+
+# Seeded into the database on FIRST RUN ONLY. Afterwards the stored value wins and an
+# administrator changes it in Settings; editing this variable later does nothing.
+ALLOW_REGISTRATION=false
+
+# Promoted to admin at startup ONLY when the database contains no admin at all. It cannot
+# override a role set through the app, and it never creates an account.
+BOOTSTRAP_ADMIN=
+
+# Browser origins allowed to call the API cross-origin, comma-separated. Empty means none,
+# which is correct behind the bundled nginx proxy — the SPA is same-origin there.
+CORS_ORIGINS=
+
+# Failed logins allowed per username before the API answers 429, and the window in seconds.
+LOGIN_RATE_LIMIT=10
+LOGIN_RATE_WINDOW_SECONDS=300
+
+# JWT signing algorithm and token lifetime.
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_HOURS=24
+
+# Container paths. Change these only alongside the compose bind mounts.
+DATA_ROOT=/app/data
+DB_PATH=/app/users.db
+```
+
+> `PORT` used to be listed here and was read by nothing — the frontend's port is fixed in
+> `frontend/nginx.conf` and published by the compose file. Removed in Step 13, which is the
+> change that added the check that would have caught it.
 
 ```bash
 docker compose up -d
@@ -139,7 +177,25 @@ This allows any MCP-compatible client (Claude Desktop, Claude Code, custom agent
 }
 ```
 
-Available MCP tools mirror the REST API: `list_tasks`, `create_task`, `start_task`, `complete_task`, `gtd_inbox`, `list_projects`, `add_to_inbox`, and more.
+Available MCP tools mirror the REST API. **The tool names are FastAPI operation ids** — the
+handler function name, then the path, then the method — not the bare function names this
+section claimed until Step 13, none of which ever existed:
+
+| REST | MCP tool |
+|---|---|
+| `GET /tasks` | `list_tasks_tasks_get` |
+| `POST /tasks` | `create_task_tasks_post` |
+| `POST /tasks/{uuid}/done` | `complete_task_tasks__uuid__done_post` |
+| `POST /inbox` | `add_to_inbox_inbox_post` |
+
+MCP clients discover tools at connect time, so nothing had to hardcode these — which is
+exactly why the documentation could be wrong for so long without anyone noticing. The full
+list of all 32 is checked in at
+[`ops/surfaces/mcp-tools.json`](ops/surfaces/mcp-tools.json), captured by booting the app and
+reading the tool list, and `RULE-SURF-001` fails the build when it changes.
+
+**Renaming a route handler function renames its MCP tool.** That is a breaking change to a
+public surface — see [`AGENTS.md`](AGENTS.md).
 
 ---
 

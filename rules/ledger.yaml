@@ -391,6 +391,45 @@ rules:
       while chasing something else. A choke point only works while it stays the only door,
       and "stays" is a property that needs enforcing rather than intending.
 
+  - id: RULE-SURF-001
+    statement: >
+      Every protected public surface — the served OpenAPI schema, the runtime MCP tool list,
+      the migrated database schema, the Taskwarrior template, and the SPA routes and
+      localStorage keys — MUST match its snapshot in ops/surfaces/.
+    class: executable
+    check: tools/checks/surfaces.sh
+    fixture: tools/fixtures/negative.sh
+    contract: AGENTS.md
+    fix: ./run surfaces --update
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      These are treated as externally consumed, and the failure mode is silence: renaming a
+      route handler function renames its MCP tool, which breaks every client, and the diff
+      shows only a Python rename. The snapshot does not prevent the change — it makes the
+      change appear in a file a human has to commit. Runtime observation rather than
+      declaration is the point: the contract claimed for months that MCP tool names were
+      handler function names, and booting the app showed they are operation ids. Zero of the
+      seven tool names the README documented existed.
+
+  - id: RULE-SURF-002
+    statement: >
+      Every environment variable the application reads MUST be documented in README.md, and
+      every variable documented there MUST be read by the application.
+    class: executable
+    check: tools/checks/surfaces.sh
+    fixture: tools/fixtures/negative.sh
+    contract: AGENTS.md
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Both directions are failures with the same shape — a configuration surface that lies.
+      A documented variable nothing reads gives an operator silence instead of an effect;
+      README documented PORT that way, and this check is what finally caught it. An
+      undocumented variable the app does read is a knob nobody can find, which is how
+      CORS_ORIGINS, BOOTSTRAP_ADMIN and the rate-limit settings all shipped.
+
   - id: RULE-DOC-001
     statement: "Every factual claim in AGENTS.md MUST hold against the repository."
     class: executable
@@ -742,6 +781,19 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a contributor reports a bootstrap failure, or a second CI runner image is added"
     decision_record: docs/adr/0002-python-interpreter-provisioning.md
+
+  - id: RISK-MCP-001
+    statement: >
+      The index derives its mcp_tool nodes from route declarations, while the surface
+      snapshot derives them by booting the app. Two producers of the same fact, and only one
+      of them is observed. They agreed on the count when BLIND-MCP-001 was resolved, but
+      nothing compares them, and the names differ in form — the index records the handler
+      function name, the snapshot records the operation id. A query answered from the index
+      will therefore give a tool name no client would recognise. Making the extractor read
+      the snapshot would close it.
+    owner: maintainer
+    re_open_trigger: "an index query returns an mcp_tool name that does not appear in ops/surfaces/mcp-tools.json, or the extractor is changed to read the snapshot"
+    decision_record: docs/adr/0020-runtime-observed-surfaces.md
 
   - id: RISK-OPS-001
     statement: >
