@@ -1,5 +1,5 @@
 fastapi==0.115.5
-uvicorn[standard]==0.32.1
+uvicorn[standard]==0.52.4
 # 3.3.0 carried the algorithm-confusion and JWT-bomb advisories (finding SEC-7). 3.5.0 was
 # verified drop-in against this application's exact usage — HS256 encode/decode, and an
 # `alg: none` token still refused — on 2026-08-26.
