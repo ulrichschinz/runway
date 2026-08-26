@@ -52,6 +52,7 @@ case "$cmd" in
 	scaffold)       exec tools/stub.sh scaffold       16 "unit scaffold generator" ;;
 	fix)            exec tools/fix.sh "$@" ;;
 	grant-admin)    exec python3 tools/grant-admin.py "$@" ;;
+	surfaces)       exec backend/.venv/bin/python tools/surfaces.py "$@" ;;
 	decay-review)   exec tools/stub.sh decay-review   16 "recurring decay review with verifiable evidence" ;;
 
 	*)

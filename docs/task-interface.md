@@ -135,6 +135,22 @@ hatch for an instance that has ended up with no administrator.
 keystroke. It does not create accounts — register first. Exits `2` when the account does not exist and `3`
 when the database cannot be opened. See [`docs/security.md`](security.md).
 
+### `make surfaces`
+Reports drift in the protected public surfaces, and with `--update` rewrites the snapshots in `ops/surfaces/`.
+
+```sh
+./run surfaces              # report drift
+./run surfaces --update     # accept it, then commit the diff
+```
+
+Five surfaces are snapshotted: the served OpenAPI schema, the **runtime-observed** MCP tool list, the
+migrated database schema, the Taskwarrior template, and the SPA routes and localStorage keys. Environment
+variables are cross-checked against `README.md` instead of snapshotted — `RULE-SURF-002` fails when a
+documented variable is unread or a read variable is undocumented.
+
+Updating a snapshot is not a way around the rule; it is the rule working. The diff is what makes a
+public-surface change something a human commits rather than something that happens.
+
 ### `make decay-review`
 Runs the recurring agent-readiness decay review and writes verifiable evidence of the run. *Implemented in
 Step 16.*

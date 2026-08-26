@@ -337,10 +337,15 @@ def _declare_global_blind_spots(graph: Graph) -> None:
         BlindSpot(
             "BLIND-MCP-001",
             "framework",
-            "MCP tool names are derived by fastapi-mcp from route handler names. That is the "
-            "library's documented behaviour, recorded as CONTRACT_DECLARED — not observed. "
-            "Step 13 replaces it with RUNTIME_OBSERVED by booting the app and reading the "
-            "actual tool list.",
+            "RESOLVED 2026-08-26 by runtime observation. Tool names were recorded as "
+            "CONTRACT_DECLARED on the belief that fastapi-mcp derives them from route handler "
+            "names. Booting the app showed otherwise: they are FastAPI operation ids — "
+            "function, path and method — so `create_task` is really "
+            "`create_task_tasks_post`, and none of the seven names the README documented "
+            "existed. The observed list is checked in at ops/surfaces/mcp-tools.json and "
+            "enforced by RULE-SURF-001. What remains blind is narrower and recorded as "
+            "RISK-MCP-001: the index still derives its mcp_tool nodes by declaration, so the "
+            "graph and the snapshot are produced by different means.",
             ["mcp_tool nodes", "public surface S2"],
         ),
         BlindSpot(

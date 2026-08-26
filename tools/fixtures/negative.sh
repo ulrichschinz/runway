@@ -377,6 +377,35 @@ p.write_text("import subprocess  # a second door\n" + t)
 ESCAPECHOKE
 expect_red "ARCH-004" "tools/checks/boundaries.sh" "RULE-ARCH-004"
 
+# --- RULE-SURF-001 — a public surface moves without its snapshot ------------
+# The urgency coefficients in the Taskwarrior template are a behavioural contract: changing
+# one re-orders every user's list. Change it and require the gate to notice.
+python3 - "$SANDBOX/backend/taskrc_template.txt" <<'MOVESURFACE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "urgency.user.tag.next.coefficient=15.0"
+assert old in t, "urgency coefficient not found"
+p.write_text(t.replace(old, "urgency.user.tag.next.coefficient=99.0", 1))
+MOVESURFACE
+expect_red "SURF-001" "tools/checks/surfaces.sh" "RULE-SURF-001"
+
+# --- RULE-SURF-002 — README documents a variable nothing reads --------------
+# Exactly the PORT drift this rule was written for: an operator sets it and gets silence.
+python3 - "$SANDBOX/README.md" <<'PHANTOMVAR'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "JWT_ALGORITHM=HS256"
+assert old in t, "env block not found"
+p.write_text(t.replace(old, "PHANTOM_SETTING=1\nJWT_ALGORITHM=HS256", 1))
+PHANTOMVAR
+expect_red "SURF-002" "tools/checks/surfaces.sh" "RULE-SURF-002"
+
 # --- RULE-DOC-001 — the contract claims something untrue --------------------
 printf '\nThe entry point is `tools/checks/does-not-exist.sh`.\n' >>"$SANDBOX/AGENTS.md"
 expect_red "DOC-001" "tools/checks/contract.sh" "RULE-DOC-001"

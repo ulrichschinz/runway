@@ -1,0 +1,133 @@
+{
+  "count": 32,
+  "tools": [
+    {
+      "name": "annotate_task_tasks__uuid__annotate_post",
+      "summary": "Annotate a task"
+    },
+    {
+      "name": "change_password_auth_password_put",
+      "summary": "Change password"
+    },
+    {
+      "name": "complete_task_tasks__uuid__done_post",
+      "summary": "Complete a task"
+    },
+    {
+      "name": "create_project_projects_post",
+      "summary": "Create Project"
+    },
+    {
+      "name": "create_task_tasks_post",
+      "summary": "Create a task"
+    },
+    {
+      "name": "delete_task_tasks__uuid__delete",
+      "summary": "Delete a task"
+    },
+    {
+      "name": "get_apikey_auth_apikey_get",
+      "summary": "Get Apikey"
+    },
+    {
+      "name": "get_plan_projects_plans__name__get",
+      "summary": "Get Plan"
+    },
+    {
+      "name": "get_settings_admin_settings_get",
+      "summary": "Get site settings (admin only)"
+    },
+    {
+      "name": "get_task_tasks__uuid__get",
+      "summary": "Get a task"
+    },
+    {
+      "name": "health_health_get",
+      "summary": "Health check"
+    },
+    {
+      "name": "inbox_gtd_inbox_get",
+      "summary": "GTD inbox"
+    },
+    {
+      "name": "list_tasks_tasks_get",
+      "summary": "List tasks"
+    },
+    {
+      "name": "list_users_admin_users_get",
+      "summary": "List all users (admin only)"
+    },
+    {
+      "name": "login_auth_login_post",
+      "summary": "Login"
+    },
+    {
+      "name": "me_auth_me_get",
+      "summary": "Get current user profile"
+    },
+    {
+      "name": "modify_task_tasks__uuid__put",
+      "summary": "Modify a task"
+    },
+    {
+      "name": "next_actions_gtd_next_get",
+      "summary": "Next actions"
+    },
+    {
+      "name": "project_tasks_gtd_projects__name__get",
+      "summary": "Project tasks"
+    },
+    {
+      "name": "projects_gtd_projects_get",
+      "summary": "List projects"
+    },
+    {
+      "name": "regenerate_apikey_auth_apikey_regenerate_post",
+      "summary": "Regenerate Apikey"
+    },
+    {
+      "name": "register_auth_register_post",
+      "summary": "Register"
+    },
+    {
+      "name": "registration_status_auth_registration_status_get",
+      "summary": "Whether this instance currently accepts new registrations (public)"
+    },
+    {
+      "name": "set_user_role_admin_users__target__role_put",
+      "summary": "Promote or demote a user (admin only)"
+    },
+    {
+      "name": "someday_gtd_someday_get",
+      "summary": "Someday / maybe"
+    },
+    {
+      "name": "start_task_tasks__uuid__start_post",
+      "summary": "Start a task"
+    },
+    {
+      "name": "stop_task_tasks__uuid__stop_post",
+      "summary": "Pause a task"
+    },
+    {
+      "name": "update_profile_auth_me_put",
+      "summary": "Update profile (name, email)"
+    },
+    {
+      "name": "update_settings_admin_settings_put",
+      "summary": "Update site settings (admin only)"
+    },
+    {
+      "name": "upsert_plan_projects_plans__name__put",
+      "summary": "Upsert Plan"
+    },
+    {
+      "name": "waiting_gtd_waiting_get",
+      "summary": "Waiting for"
+    },
+    {
+      "name": "webhook_inbox_inbox_post",
+      "summary": "Add to inbox via API key"
+    }
+  ]
+}
