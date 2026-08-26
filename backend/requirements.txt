@@ -18,7 +18,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.12
 pydantic-settings==2.6.1
-aiosqlite==0.20.0
+aiosqlite==0.22.1
 fastapi-mcp==0.3.3
 # fastapi-mcp 0.3.3 requires mcp>=1.6.0 with no upper bound. mcp 2.0.0 changed
 # Server.__init__ and makes `import app.main` raise TypeError, so a fresh build
