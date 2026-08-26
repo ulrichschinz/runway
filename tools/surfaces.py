@@ -56,7 +56,7 @@ def _booted_app():
     sys.path.insert(0, str(ROOT / "backend"))
     from app.config import settings
 
-    settings.jwt_secret = "surface-capture-secret-long-enough-to-boot"
+    settings.jwt_secret = "surface-capture-secret-long-enough-to-boot"  # noqa: S105  # secret-scan: allow — throwaway, lets startup_checks pass
     from app.main import app, mcp
 
     return app, mcp

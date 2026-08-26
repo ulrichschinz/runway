@@ -1,11 +1,28 @@
-FROM archlinux:latest AS task-builder
-# The Arch container image ships `NoExtract = usr/share/doc/*` in pacman.conf to stay small,
-# and Taskwarrior keeps its theme files under /usr/share/doc/task/rc. Installing `task`
-# without dropping that rule silently produces a package with no themes — `pacman -Ql task`
-# still lists them, because it reports what the package declares, not what was extracted.
-RUN sed -i '/^NoExtract/d' /etc/pacman.conf && pacman -Sy --noconfirm task
+FROM archlinux@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309 AS task-builder
+# Reproducible, which is the whole point of this stage (finding SEC-9).
+#
+# Three things were wrong before, and only the first is obvious:
+#
+#   archlinux:latest   a floating tag — the base moved whenever Arch rebuilt it
+#   pacman -Sy         sync without upgrade: the classic partial-upgrade pattern, and it
+#                      installed whatever `task` Arch published that day
+#   NoExtract          the Arch image drops /usr/share/doc, where Taskwarrior 3.5.0 keeps
+#                      the theme files it refuses to start without (incident 2026-08-25)
+#
+# The digest pins the base. The Arch Linux Archive pins the *package repository* to a dated
+# snapshot, which is what actually pins the binary: a digest alone would not, because pacman
+# resolves against live mirrors at build time. `task` is the engine of this product, and its
+# version was previously a function of the calendar.
+#
+# Bumping the snapshot date is a deliberate act. It is the supply-chain equivalent of
+# updating a lockfile, and the container tier is what proves the new binary still behaves.
+RUN printf 'Server=https://archive.archlinux.org/repos/2026/08/25/$repo/os/$arch\n' \
+      > /etc/pacman.d/mirrorlist \
+ && sed -i '/^NoExtract/d' /etc/pacman.conf \
+ && pacman -Syu --noconfirm task \
+ && task --version
 
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17
 
 COPY --from=task-builder /usr/bin/task /usr/local/bin/task
 # Taskwarrior 3.5.0 refuses to run without its theme files: every invocation fails with
@@ -20,8 +37,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# The lock, not the range. requirements.txt names nine direct dependencies; the lock names
+# every transitive one with its hash, and --require-hashes makes pip refuse anything whose
+# artefact does not match. On 2026-08-04 an unpinned transitive (mcp 2.0.0) shipped an image
+# whose backend could not start, through a green deploy (ADR 0004). This is that class closed.
+COPY requirements.txt requirements.lock ./
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY taskrc_template.txt .
 COPY app/ ./app/

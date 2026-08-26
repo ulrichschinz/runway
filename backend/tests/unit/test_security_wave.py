@@ -13,7 +13,7 @@ from app.config import cors_origin_list, settings
 from app.startup_checks import UnsafeConfiguration
 
 # Not a credential: the string exists precisely so that it is never the right one.
-WRONG_PASSWORD = "not-the-password"
+WRONG_PASSWORD = "not-the-password"  # secret-scan: allow — a value chosen to never be correct
 
 
 class TestRefusesToBootOnAnUnsafeSecret:
