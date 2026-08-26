@@ -17,7 +17,7 @@ passlib[bcrypt]==1.7.4
 # replacing passlib first.
 bcrypt==4.0.1
 python-multipart==0.0.12
-pydantic-settings==2.6.1
+pydantic-settings==2.15.0
 aiosqlite==0.20.0
 fastapi-mcp==0.3.3
 # fastapi-mcp 0.3.3 requires mcp>=1.6.0 with no upper bound. mcp 2.0.0 changed
