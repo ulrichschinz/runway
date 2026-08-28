@@ -893,11 +893,14 @@ residual_risks:
       value written outside the application — by hand on the host, or by a future migration
       — is not rejected. Every in-application writer validates against VALID_ROLES, and an
       unrecognised value is not equal to 'admin', so the failure is closed rather than open.
-      A CHECK constraint would need a table rebuild, and migrations currently swallow every
-      exception (WAIVER-OPS-001), which makes a silent half-applied rebuild the more likely
-      failure of the two.
+      A CHECK constraint cannot be added by ALTER TABLE at all; it needs the table copied,
+      which is a different shape of migration from the additive loop init_db runs. Half of
+      this risk's re-open trigger fired on 2026-08-28: WAIVER-OPS-001 is resolved and a failed
+      migration now reports itself (docs/adr/0025-narrowing-the-migration-except.md), so a
+      half-applied rebuild would at least be loud. It would still be half-applied, and the
+      rebuild has no home until there is a migrations/ directory with a version table.
     owner: maintainer
-    re_open_trigger: "WAIVER-OPS-001 is resolved and migrations report their failures, or a third role is introduced"
+    re_open_trigger: "a migrations/ directory with a version table exists, or a third role is introduced"
     decision_record: docs/security.md
 
   - id: RISK-TEST-001

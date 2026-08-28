@@ -1,6 +1,11 @@
+import logging
+import sqlite3
+
 import aiosqlite
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 CREATE_USERS = """
 CREATE TABLE IF NOT EXISTS users (
@@ -49,6 +54,33 @@ CREATE TABLE IF NOT EXISTS site_settings (
     value TEXT NOT NULL
 )
 """
+
+# The additive schema migrations, applied on every start. There is no migrations/ directory
+# and no version table: with four statements against two shapes of database, re-running an
+# idempotent list is cheaper than a framework, and the point at which that stops being true
+# is written down in docs/adr/0025-narrowing-the-migration-except.md.
+MIGRATIONS = (
+    "ALTER TABLE users ADD COLUMN api_key TEXT",
+    "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
+    "ALTER TABLE users ADD COLUMN full_name TEXT DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''",
+)
+
+# SQLite's own words for "this column is already there", observed rather than guessed: on
+# sqlite3 3.53.4 through aiosqlite 0.20.0, re-adding a column raises
+# `sqlite3.OperationalError('duplicate column name: api_key')`. There is no error code to
+# key on — `sqlite_errorname` is the generic `SQLITE_ERROR` for this and for `no such table`
+# alike — so the message is the only thing that separates the expected case from a failure.
+#
+# Matching a message string is a real dependency on SQLite's wording, and the failure mode if
+# that wording ever changes is deliberately the safe one: an unrecognised duplicate stops
+# being silent and starts being logged on every boot. Noisy and visible, not quiet and wrong.
+DUPLICATE_COLUMN = "duplicate column name"
+
+
+def _is_already_applied(failure: sqlite3.Error) -> bool:
+    """True when the statement failed only because its column already exists."""
+    return isinstance(failure, sqlite3.OperationalError) and DUPLICATE_COLUMN in str(failure)
 
 
 async def get_db():
@@ -124,17 +156,25 @@ async def init_db():
         db.row_factory = aiosqlite.Row
         await db.execute(CREATE_USERS)
         # migrations: add new columns to existing databases
-        for col_sql in [
-            "ALTER TABLE users ADD COLUMN api_key TEXT",
-            "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
-            "ALTER TABLE users ADD COLUMN full_name TEXT DEFAULT ''",
-            "ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''",
-        ]:
+        #
+        # "Already applied" is the ordinary case — this loop runs on every start — and it is
+        # the ONLY case that passes silently. Anything else the driver raises is logged and
+        # the loop continues: a failure here must be visible, but it must not take the
+        # service down at deploy time. The statements are additive and init_db runs on every
+        # start, so a transient failure retries on the next boot; refusing to serve would
+        # convert a retryable error into an outage. Recorded as
+        # docs/adr/0025-narrowing-the-migration-except.md.
+        for statement in MIGRATIONS:
             try:
-                await db.execute(col_sql)
+                await db.execute(statement)
                 await db.commit()
-            except Exception:  # noqa: S110  # WAIVER-OPS-001 — Step 15 adds logging
-                pass
+            except sqlite3.Error as failure:
+                if _is_already_applied(failure):
+                    continue
+                logger.error(
+                    "schema migration failed",
+                    extra={"statement": statement, "sqlite_error": str(failure)},
+                )
         # generate api_key for users that don't have one
         async with db.execute("SELECT username FROM users WHERE api_key IS NULL") as cur:
             rows = await cur.fetchall()

@@ -21,35 +21,6 @@
 version: 1
 
 waivers:
-  - id: WAIVER-OPS-001
-    class: scheduled_remediation
-    rule: "ruff S110 — try/except/pass swallows the exception"
-    scope: backend/app/database.py
-    finding: SEC-10
-    reason: >
-      The schema migration loop catches every exception and passes, which is how
-      "column already exists" is tolerated on re-run. It also silently swallows genuine
-      migration failures, leaving the database in an unknown state with no signal.
-    alternatives_evaluated: >
-      Narrowing the except to the specific sqlite "duplicate column" error was
-      considered and is the eventual fix, but it needs logging to report the failures it
-      would then stop swallowing, and this repository has no logging at all yet.
-    risk: >
-      Medium. A failed migration is indistinguishable from a successful one; later code
-      then reads columns that may not exist.
-    mitigation: >
-      Migrations are additive ALTER TABLE statements only, and init_db runs on every
-      start, so a transient failure retries.
-    owner: maintainer
-    approver: maintainer
-    approved_on: 2026-08-04
-    approval_reference: "docs/plan/phase-0-2.md Step 15"
-    expires: 2026-11-04
-    re_open_trigger: "Step 15 lands, or a third table changes shape, or the expiry passes"
-    resolution: >
-      Step 15 — structured logging, then narrow the except clause and report what it
-      catches. A migrations/ directory becomes due when a third table changes shape.
-
   - id: WAIVER-TYPE-001
     class: scheduled_remediation
     rule: "mypy index — Value of type 'Row | None' is not indexable"
@@ -90,6 +61,29 @@ waivers:
 # a truthful historical document fail the gate, and editing the document to match would
 # falsify the history it exists to preserve.
 resolved:
+  - id: WAIVER-OPS-001
+    finding: SEC-10
+    was: >
+      The schema migration loop in init_db wrapped four additive ALTER TABLE statements in
+      `except Exception: pass`. That is how "column already exists" was tolerated on re-run,
+      and it is also how a genuine migration failure became indistinguishable from a
+      successful one: the database was left in an unknown state, later code read columns that
+      may not exist, and nothing anywhere said so. The fix was blocked on there being
+      somewhere to report the failures it would stop swallowing; this repository had no
+      logging at all until Step 15a.
+    resolved_on: 2026-08-28
+    resolved_by: >
+      Step 15b. The clause now catches sqlite3.Error, and only a
+      `sqlite3.OperationalError` whose message contains "duplicate column name" passes
+      silently — the exact type and wording observed against aiosqlite 0.20.0 on SQLite
+      3.53.4, and pinned by a test rather than assumed. Every other database error is logged
+      at ERROR on the JSON stream Step 15a built, naming the statement and SQLite's own words
+      for what was wrong, and the loop continues: migrations are additive and init_db runs on
+      every start, so a transient failure retries, and refusing to serve would convert a
+      retryable error into a deploy-time outage (decision 3). The `# noqa: S110` is gone and
+      ruff passes without it.
+    evidence: docs/briefs/0019-narrowing-the-migration-except.md
+
   - id: WAIVER-SEC-002
     finding: SEC-3
     was: >
