@@ -690,6 +690,33 @@ rules:
       because repository tooling already runs inside the gate's own runtime budget
       (RULE-GATE-001). It checks declaration, not sufficiency — see RISK-OPS-003.
 
+  - id: RULE-OPS-002
+    statement: >
+      No credential may reach a log line: the serving application MUST NOT pass a
+      credential-bearing expression — a secret, password or password hash, token, API key or
+      bearer credential — to a logging call, in the message, in an interpolation, or in the
+      structured fields.
+    class: executable
+    check: tools/checks/log-secrets.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/operations.md#no-secrets-in-logs
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A credential in the database is a credential under a control; the same credential in a
+      log line is one in a file, a backup and someone's scrollback, kept for as long as the
+      retention policy says. Nothing raises and nothing errors, so the disclosure is invisible
+      until somebody reads the file — and by then rotation, not deletion, is the only remedy,
+      exactly as for RULE-DEP-003. The application has no logging at all today, so the property
+      holds for free and stops holding in the first commit that adds a logger; the rule lands
+      before the logging module rather than after it, because the reviewer who would catch
+      logger.info(f"login {body.password}") is the same reviewer reading a hundred new lines of
+      logging plumbing. Scoped to backend/app/, the only code whose output reaches a production
+      log. The check reads source, not emitted output, so it holds whichever transport Step 15a
+      settles on. It matches credential-bearing names, so it cannot see a credential arriving
+      under a neutral name — see RISK-OPS-004.
+
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.
 residual_risks:
@@ -716,6 +743,23 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a second egress client is introduced, a timeout is observed firing in production, or a reverse-proxy read timeout is set below an application timeout"
     decision_record: docs/adr/0022-timeouts-are-declared.md
+
+  - id: RISK-OPS-004
+    statement: >
+      RULE-OPS-002 is a name-based static scan, and it is bounded on both sides in the same
+      way RISK-DEP-002 records for secret_scan.py. It sees a credential that is *called* one —
+      body.password, settings.jwt_secret, x_api_key, credentials.credentials, new_key — and it
+      is blind to the same value under a neutral name: logging `body`, `row`, `value` or a
+      request object discloses the password with nothing to match on, and so does a credential
+      assembled at runtime or returned by a function whose name does not say so. It reads only
+      backend/app/, so a credential logged by a library, by uvicorn's own access logger, or by
+      an exception traceback that happens to carry one is outside it entirely. And it recognises
+      loggers by import, by assignment from getLogger, and by a receiver named like a logger:
+      a logger reached some other way is a hole. The per-line `log-secrets: allow` marker is
+      deliberately greppable so the standing exemptions stay reviewable.
+    owner: maintainer
+    re_open_trigger: "a credential is found in a production log that the scan did not report, an exemption marker is used more than twice, or a logging library is introduced that this scan does not recognise"
+    decision_record: docs/adr/0023-no-secrets-in-logs.md
 
   - id: RISK-OPS-002
     statement: >

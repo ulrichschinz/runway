@@ -174,8 +174,8 @@ justified_suppressions:
 
   - rule: "ruff S404 — import of the subprocess module"
     scope: >
-      tools/checks/pinning.py, tools/checks/secret_scan.py, tools/checks/timeouts.py,
-      tools/index/boundaries.py
+      tools/checks/log_secrets.py, tools/checks/pinning.py, tools/checks/secret_scan.py,
+      tools/checks/timeouts.py, tools/index/boundaries.py
     reason: >
       These are repository tooling, not the application. Each imports subprocess for exactly
       one thing — running `git ls-files` to get the tracked-file list — with a literal argv and

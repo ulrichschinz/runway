@@ -579,6 +579,57 @@ p.write_text(
 ADDEGRESS
 expect_red "OPS-001-egress" "tools/checks/timeouts.sh" "RULE-OPS-001"
 
+# --- RULE-OPS-002 — the resolved JWT secret is written to a logger ----------
+# The application has no logging at all, so this rule can only be proven by introducing the
+# first logger the way someone actually will. Startup is where it lands first — a boot check
+# that reports what it decided — and startup_checks already holds the resolved secret in a
+# local. One `%s` and every restart writes the signing key to the container log.
+python3 - "$SANDBOX/backend/app/startup_checks.py" <<'LOGSECRET'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = '    secret = (settings.jwt_secret or "").strip()\n'
+assert old in t, "the resolved secret is not where the fixture expects it"
+t = t.replace("from app.config import settings", "import logging\n\nfrom app.config import settings", 1)
+t = t.replace(old, old + '    logging.getLogger(__name__).info("jwt secret is %s", secret)\n', 1)
+p.write_text(t)
+LOGSECRET
+expect_red "OPS-002-secret" "tools/checks/log-secrets.sh" "RULE-OPS-002"
+
+# --- RULE-OPS-002 — a password and an API key go into an f-string -----------
+# The second arm, and the likelier one: request-scoped logging added to the handlers that
+# hold the credential. Both lines are written the way such a line is actually first written —
+# an f-string, everything in scope interpolated because it was all right there. The import is
+# aliased and the logger renamed, because a rule a rename defeats is advice.
+python3 - "$SANDBOX/backend/app/routers/auth.py" <<'LOGCREDS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+login = "    rate_limit.clear(body.username)\n"
+rotate = "    await db.commit()\n    return ApiKeyInfo(api_key=new_key)\n"
+assert login in t, "the login success path is not where the fixture expects it"
+assert rotate in t, "regenerate_apikey is not where the fixture expects it"
+t = "import logging as lg\n\n" + t
+t = t.replace(
+    login,
+    login + '    lg.getLogger("audit").info(f"login ok: {body.username} / {body.password}")\n',
+    1,
+)
+t = t.replace(
+    rotate,
+    '    _audit = lg.getLogger("audit")\n'
+    + '    _audit.info("rotated key for %s: %s", username, new_key)\n'
+    + rotate,
+    1,
+)
+p.write_text(t)
+LOGCREDS
+expect_red "OPS-002-fstring" "tools/checks/log-secrets.sh" "RULE-OPS-002"
+
 # --- RULE-GATE-001 — the profile blows its runtime budget -------------------
 #
 # A budget of 0 alone proves nothing: the suite finishes inside a second and 0 > 0 is

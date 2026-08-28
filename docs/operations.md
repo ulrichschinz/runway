@@ -153,6 +153,57 @@ standing exceptions without adding a control.
 **What it does not check.** That the value is *sensible*. A `timeout=86400` satisfies this rule and helps
 nobody. Declaration is mechanically checkable and sufficiency is not — recorded as `RISK-OPS-003`.
 
+## No secrets in logs
+
+`RULE-OPS-002` forbids the serving application from passing a credential-bearing expression to a logging
+call — a secret, a password or its hash, a token, an API key, a bearer credential — whether it goes into the
+message, into an interpolation, or into the structured fields.
+
+**If the gate just sent you here,** you wrote a log line that names a credential. The fix is almost always
+to log the *identity* instead of the *proof of identity*: the username, the key's owner, the token's `sub`
+claim, a truncated key id — anything that lets someone follow the request without handing them the
+credential. If the expression genuinely is not a credential (a variable that only *looks* like one), append
+`# log-secrets: allow` to the logging statement with a reason. That marker is one `grep` away from review,
+which is the point: an exemption is a decision somebody has to be able to find.
+
+A credential in the database is a credential under a control. The same credential in a log line is a
+credential in a file, in a backup, and in whoever's terminal scrollback — kept for as long as the retention
+policy says, which is longer than anyone remembers. Nothing raises and nothing errors, so the disclosure is
+invisible until somebody reads the file, and by then the remedy is rotation, not deletion — the same remedy
+`RULE-DEP-003` exists for.
+
+**Why the rule is here before the logging is.** The application has no logging at all today: no
+`import logging`, no `getLogger`, no `print()` anywhere under `backend/app/`. So the property holds for
+free, and it stops holding in the first commit that adds a logger. Landing the rule afterwards would mean
+relying on the reviewer of a large new logging module to notice one interpolated field — which is the review
+that never happens.
+
+**What the check reads.** [`tools/checks/log_secrets.py`](../tools/checks/log_secrets.py) parses every
+tracked Python file under `backend/app/`. It resolves import aliases, so `import logging as lg` and
+`from logging import getLogger as gl` are not holes, and it treats as a logging call: the `logging.*`
+module functions, any name assigned from `getLogger`/`getChild`, a `getLogger(...)` call used inline
+without ever being bound to a name at all, any receiver named like a logger
+(`logger`, `log`, `self.logger`, `audit_log`), and `print()` — because in a container, stdout *is* the log.
+Inside such a call it flags:
+
+- a credential-bearing name passed directly, in an f-string, or through `%` or `.format()`
+- a credential-bearing key or value in the `extra={...}` dict, which is where structured fields go
+- `extra=locals()` and its relatives — a payload that cannot be read at the call site cannot be reviewed
+  there, and in a request handler the locals are exactly where the password is
+
+The names it knows are the ones this repository actually uses — `password`, `current_password`,
+`new_password`, `hashed`, `jwt_secret`, `token`, `access_token`, `credentials`, `api_key`, `x_api_key`,
+`new_key` — not a generic word list.
+
+**Transport-independent by construction.** It reads source, not emitted output, so it holds whichever way
+structured logging is wired up: a replaced uvicorn access logger, a JSON application logger alongside it, or
+both. A rule that inspected emitted lines would need rewriting the day the transport changed.
+
+**What it does not check.** That a credential arriving under a *neutral* name stays out — logging `body`,
+`row` or a request object discloses the password with nothing to match on. Nor does it see anything outside
+`backend/app/`: a credential logged by a library, by uvicorn itself, or in an exception traceback is beyond
+it. Recorded as `RISK-OPS-004`.
+
 ## The deploy host's topology
 
 **Read directly from the host on 2026-08-24 and checked in as** [`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml).
