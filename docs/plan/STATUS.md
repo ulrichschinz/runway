@@ -135,9 +135,17 @@ Also closed; also not for re-litigating.
 Two things are now true in this repository and **not yet true in production**. Both need hands
 on the host; nothing here can reach it (`RISK-OPS-002`).
 
-- **Log rotation is checked in but not applied.** The running deployment still uses Docker's
-  default `json-file` driver with no size limit, so production logs are not rotating today.
-  A driver change only takes effect on container recreation.
+- **Log rotation is checked in but not applied.** Re-verified on 2026-08-28: the host's
+  `docker-compose.yml` is still 3087 bytes, last modified 25 August, with no `logging:` block
+  on either service. An attempt to apply it that day silently did nothing — the file is owned
+  by `root`, and `cp`/`scp` as the login user fail without stopping a chained command. Apply it
+  by staging through `/tmp` and `sudo cp` into place; a driver change only takes effect on
+  container recreation.
+
+- **Two unbounded writers will land on one partition.** `audit.db` writes a row per
+  authenticated request and nothing prunes it (`RISK-OPS-006`), and container logs are not
+  rotating. Both sit on the disk that holds `users.db`. Either alone is slow; together they are
+  the same outage twice. Rotation should be applied *before* the audit log deploys, not after.
 - **The next deploy changes what the log stream looks like.** `docker compose logs -f backend`
   will emit JSON rather than uvicorn's plain text. Nothing breaks; it will look different.
 
@@ -179,8 +187,8 @@ Five sub-changes. The first two are prerequisites for everything after them.
 |---|---|---|
 | ~~**15d**~~ | **Done 2026-08-28**, on branch `step-15d-timeout-rule`. `RULE-OPS-001`, the OPS family, and the [`Timeouts`](../operations.md#timeouts) anchor the rest of Step 15 points at. Both arms proven — the subprocess arm by deleting the real `timeout=10`, the egress arm by introducing the first HTTP client. The gate now proves **42** rules able to fail, up from 40. See [brief 0017](../briefs/0017-timeouts-are-declared.md) and [ADR 0022](../adr/0022-timeouts-are-declared.md). | No |
 | ~~**15a**~~ | **Done 2026-08-28**, on branch `step-15a-structured-logging`, in two commits. First the rule: `RULE-OPS-002`, an AST scan refusing a credential-bearing expression at a logging call, landed while there was still no logging to break it ([ADR 0023](../adr/0023-no-secrets-in-logs.md)). Then the logging: one JSON stream with uvicorn's own loggers folded into it via `--log-config`, a runtime redaction filter that matches by value shape as well as by field name, `LOG_LEVEL` as the only knob, a per-request correlation id in a `ContextVar` and on `X-Request-Id`, and `json-file` rotation in both compose files ([ADR 0024](../adr/0024-structured-logging.md)). No new rule in the second commit — the conformance suite still proves **44**. Rotation is checked in but **not yet applied on the deploy host**; see [brief 0018](../briefs/0018-structured-logging.md). | Yes — it creates an output surface that did not exist |
-| **15b** | Narrow the migration `except` per decision 3; resolve `WAIVER-OPS-001`. | Yes — runs at boot against the production database |
-| **15c** | The audit log, including the credential-shape discriminator that `SHIM-SEC-006` needs. | Yes — new persisted data |
+| ~~**15b**~~ | **Done 2026-08-28.** One silence kept — `sqlite3.OperationalError` carrying `duplicate column name`, a string measured against the pinned driver rather than recalled — and everything else logged. Catch boundary is `sqlite3.Error`, deliberately wider than `OperationalError` so a corrupt file or a malformed statement is reported rather than refusing the boot. `WAIVER-OPS-001` resolved. See [brief 0019](../briefs/0019-narrowing-the-migration-except.md) and [ADR 0025](../adr/0025-narrowing-the-migration-except.md). | Yes — runs at boot against the production database |
+| ~~**15c**~~ | **Done 2026-08-28.** `audit.db` in its own file under `DATA_ROOT` — the only bind-mounted directory, so it survives a deploy without a compose change. Twelve event types, four outcomes, and the three credential shapes finally distinguishable: `api-key-header`, `bearer-jwt`, `bearer-api-key`. Same request id as the log lines. No read endpoint, no route count moved, no credential in any row. See [brief 0020](../briefs/0020-the-audit-log.md) and [ADR 0026](../adr/0026-the-audit-log.md). | Yes — new persisted data |
 | **15e/f** | The shim evidence runbook, `docs/threat-model.md`, the SEC-5 waiver, and the residual risks this step's own blind spots create. | No |
 
 Two things worth knowing before starting 15c: the admin bootstrap **already returns a reason
@@ -305,13 +313,13 @@ Say *"where are we and how do we go on"*. The answer should be: read this file a
 commands, then **start Step 15** — it is next in plan order, entirely local, and its four
 open design decisions were closed on 2026-08-27 (§3).
 
-**15d and 15a are done** (2026-08-28), both on `step-15a-structured-logging`, neither merged.
-Next is **15b** — narrow the migration `except` clause and resolve `WAIVER-OPS-001` — which was
-blocked on logging existing and no longer is. Decision 3 settles how it behaves: a genuine
-migration failure logs and continues, it does not refuse to start.
+**15d, 15a, 15b and 15c are all done** (2026-08-28), on `step-15a-structured-logging`, none
+merged and no PR opened. What remains of Step 15 is **15e/f**: `docs/threat-model.md` (which
+does not exist), the SEC-5 waiver that gives the last open High finding an owner, and the
+residual risks this step's own blind spots created. The shim evidence runbook that 15e was to
+deliver already landed inside 15c.
 
-Then **15c**, the audit log, which is the largest remaining piece and the one that makes the
-Bearer-shape question answerable.
+Read the two host items below before deploying any of it.
 
 Do not try to remove `SHIM-SEC-006` in this step, and do not fold the SEC-5 fix into the audit
 log — §3 records why for both.
