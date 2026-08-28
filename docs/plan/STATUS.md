@@ -112,6 +112,39 @@ These four were open and are now closed. They do not need re-litigating.
    short, runnable *on the host*, so "is production configured?" becomes a question tooling
    answers rather than one someone remembers to ask.
 
+### Decisions taken 2026-08-28 (Step 15a)
+
+Also closed; also not for re-litigating.
+
+5. **One JSON stream, uvicorn included.** Its loggers are folded in via `--log-config`, so
+   access lines, application lines and tracebacks all pass through the same formatter and the
+   same redaction filter. Two formats in one stream is worse than either, and a line that
+   bypasses redaction is the one that leaks.
+
+6. **`LOG_LEVEL` is the only knob, default `INFO`.** JSON is unconditional. There must be no
+   configuration in which structure or redaction can be switched off.
+
+7. **`json-file` rotation in both compose files.** See the outstanding host action below.
+
+8. **A per-request correlation id**, minted locally in a `ContextVar`, echoed on `X-Request-Id`.
+   Step 15c's audit rows carry the same id, which is why it landed now rather than after —
+   retrofitting it once audit rows exist is materially harder.
+
+### Outstanding on the deploy host — not closed by Step 15a
+
+Two things are now true in this repository and **not yet true in production**. Both need hands
+on the host; nothing here can reach it (`RISK-OPS-002`).
+
+- **Log rotation is checked in but not applied.** The running deployment still uses Docker's
+  default `json-file` driver with no size limit, so production logs are not rotating today.
+  A driver change only takes effect on container recreation.
+- **The next deploy changes what the log stream looks like.** `docker compose logs -f backend`
+  will emit JSON rather than uvicorn's plain text. Nothing breaks; it will look different.
+
+Stated this way deliberately. This repository has twice made claims about production that were
+false when checked — the healthchecks and the rollback runbook — so Step 15a records the intent
+and not the state.
+
 ### SEC-5 is the last open High finding, and until 2026-08-27 nothing owned it
 
 API keys are stored in plaintext in `users.db`, are permanent, unscoped and un-expiring, and
@@ -272,9 +305,13 @@ Say *"where are we and how do we go on"*. The answer should be: read this file a
 commands, then **start Step 15** — it is next in plan order, entirely local, and its four
 open design decisions were closed on 2026-08-27 (§3).
 
-**15d is done** (2026-08-28). Next is **15a**, structured logging, which both **15b** and
-**15c** depend on. Its rule joins the OPS family 15d established and points at the same
-[`Timeouts`](../operations.md#timeouts) neighbourhood in `docs/operations.md`.
+**15d and 15a are done** (2026-08-28), both on `step-15a-structured-logging`, neither merged.
+Next is **15b** — narrow the migration `except` clause and resolve `WAIVER-OPS-001` — which was
+blocked on logging existing and no longer is. Decision 3 settles how it behaves: a genuine
+migration failure logs and continues, it does not refuse to start.
+
+Then **15c**, the audit log, which is the largest remaining piece and the one that makes the
+Bearer-shape question answerable.
 
 Do not try to remove `SHIM-SEC-006` in this step, and do not fold the SEC-5 fix into the audit
 log — §3 records why for both.
