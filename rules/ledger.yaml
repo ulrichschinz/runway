@@ -781,6 +781,25 @@ residual_risks:
     re_open_trigger: "a credential is found in a log line that both RULE-OPS-002 and the filter passed, a new credential format is introduced, or the api-key shape is observed redacting something an operator needed"
     decision_record: docs/adr/0024-structured-logging.md
 
+  - id: RISK-SURF-001
+    statement: >
+      A fresh database and a migrated one do not have the same schema, and the snapshot that
+      is supposed to be the truth about the schema only ever describes the fresh one.
+      CREATE_USERS declares `api_key TEXT UNIQUE`; the migration that back-fills that column
+      into an existing database declares plain `TEXT`, because SQLite cannot add a UNIQUE
+      column by ALTER TABLE at all. So an instance created after the column existed enforces
+      uniqueness and an instance migrated into it does not — and production is the second
+      kind. tools/surfaces.py captures the schema by running init_db() against an empty
+      temporary file, which is the fresh path, so ops/surfaces/db-schema.sql records the
+      UNIQUE constraint that production does not have. RULE-SURF-001 compares that snapshot
+      against itself and passes: the mechanism cannot see this class of drift, because both
+      sides of the comparison are generated the same way. The practical exposure is small —
+      api_key is secrets.token_urlsafe(32), so a collision is not a real event — but the
+      snapshot is relied on as a description of production and on this point it is wrong.
+    owner: maintainer
+    re_open_trigger: "a migrations/ directory with a version table exists, or a second column diverges between the created and migrated schemas, or a uniqueness assumption is written against api_key"
+    decision_record: docs/adr/0025-narrowing-the-migration-except.md
+
   - id: RISK-OPS-002
     statement: >
       The deploy host's compose file is checked in as ops/deploy/docker-compose.yml, but
