@@ -545,6 +545,40 @@ printf 'chatty-fixture       check           Prints to stdout regardless of JSON
 	>>"$SANDBOX/tools/checks/profiles.conf"
 expect_red "TI-003" "tools/checks/json-output.sh" "RULE-TI-003"
 
+# --- RULE-OPS-001 — the one subprocess call loses its timeout ---------------
+# The real failure mode, and the reason the rule exists: `timeout=10` is one keyword argument
+# that nothing but this check is holding in place. Delete it and require the gate to say so.
+python3 - "$SANDBOX/backend/app/services/task_runner.py" <<'DROPTIMEOUT'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "        timeout=10,\n"
+assert old in t, "the task_runner timeout is not where the fixture expects it"
+p.write_text(t.replace(old, "", 1))
+DROPTIMEOUT
+expect_red "OPS-001" "tools/checks/timeouts.sh" "RULE-OPS-001"
+
+# --- RULE-OPS-001 — an egress call arrives with no timeout ------------------
+# The application makes no network calls today, so the egress half of this rule would
+# otherwise be entirely unproven — a check that has only ever been observed on subprocess.
+# Introduce the first HTTP client the way someone actually would, and require the gate to
+# catch it before it reaches a worker.
+python3 - "$SANDBOX/backend/app/services/task_service.py" <<'ADDEGRESS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+p.write_text(
+    "import httpx\n"
+    + t
+    + '\n\ndef _notify(url: str) -> None:\n    httpx.post(url, json={"ok": True})\n'
+)
+ADDEGRESS
+expect_red "OPS-001-egress" "tools/checks/timeouts.sh" "RULE-OPS-001"
+
 # --- RULE-GATE-001 — the profile blows its runtime budget -------------------
 #
 # A budget of 0 alone proves nothing: the suite finishes inside a second and 0 > 0 is

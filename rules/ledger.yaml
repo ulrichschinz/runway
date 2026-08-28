@@ -668,6 +668,28 @@ rules:
       call nobody has tested, and it is worse than nothing because it is believed. This
       rule is why every other rule in this ledger can be trusted.
 
+  - id: RULE-OPS-001
+    statement: >
+      Every blocking outward call the serving application makes — process execution and
+      network egress — MUST declare a timeout at the call site.
+    class: executable
+    check: tools/checks/timeouts.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/operations.md#timeouts
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A call with no timeout does not fail, it waits, and the worker serving the request
+      waits with it. There is one Taskwarrior binary behind every list this application
+      renders, so a `task` invocation that never returns is not a slow page — it is a worker
+      that never comes back, and enough of them is an outage with nothing in any log to
+      explain it. The application makes exactly one such call today and it already declares
+      `timeout=10`; the rule costs nothing now and exists so that stays true when the second
+      one is added, most likely by someone who never read this file. Scoped to backend/app/
+      because repository tooling already runs inside the gate's own runtime budget
+      (RULE-GATE-001). It checks declaration, not sufficiency — see RISK-OPS-003.
+
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.
 residual_risks:
@@ -680,6 +702,20 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a change lands that the index would have flagged, and nobody queried it"
     decision_record: AGENTS.md
+
+  - id: RISK-OPS-003
+    statement: >
+      RULE-OPS-001 checks that a timeout is declared, not that it is sensible. A call
+      written with timeout=86400 satisfies the rule and helps nobody; so does one whose
+      timeout is longer than the reverse proxy's own read timeout, which turns a bounded
+      wait into a 504 with a worker still blocked behind it. Declaration is mechanically
+      checkable and sufficiency is not — the right value depends on what the callee does,
+      what the caller promised, and what sits in front of both. The check also knows only
+      the process and HTTP-client shapes it lists: a blocking call through a library it has
+      not been taught is invisible to it.
+    owner: maintainer
+    re_open_trigger: "a second egress client is introduced, a timeout is observed firing in production, or a reverse-proxy read timeout is set below an application timeout"
+    decision_record: docs/adr/0022-timeouts-are-declared.md
 
   - id: RISK-OPS-002
     statement: >

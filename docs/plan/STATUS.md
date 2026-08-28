@@ -1,6 +1,6 @@
 # Session handoff — where we are, and how to go on
 
-**Snapshot taken 2026-08-23 at the head of `step-10-briefs`.** This file is a *dated handoff*, not a source of
+**Snapshot taken 2026-08-27 at the head of `main` (`31326de`), after a session crash.** This file is a *dated handoff*, not a source of
 truth. Everything in it can drift; §1 tells you how to re-establish the real state in about
 twenty seconds. When they disagree, the commands win.
 
@@ -28,7 +28,8 @@ non-obvious decisions), `rules/ledger.yaml` (every enforced rule and every resid
 Making this repository agent-ready, following `docs/plan/phase-0-2.md`. **MODE C (tune)** —
 the structure was already sound; what was missing was enforcement and knowledge.
 
-**Ten changes merged to `main`, all green.** Plan step → PR:
+**Seventeen changes merged to `main`, all green.** `verify` re-run 2026-08-27: **GREEN in 53s,
+40 rules proven able to fail, 0 not.** Plan step → PR:
 
 | Plan step | Landed | What it gave us |
 |---|---|---|
@@ -47,73 +48,117 @@ the structure was already sound; what was missing was enforcement and knowledge.
 | 10 | PR #17 | `./run brief` generation; `RULE-DOC-004` resolves references in records and briefs |
 | — | PR #15 | Deploy host read; compose checked in; two false production claims corrected; healthchecks and rollback fixed on the host |
 | 11 (partial) | PR #16 | SEC-2 closed: zero-admin bootstrap, last-admin guard, `RULE-SEC-001` route guards |
+| 11 | PR #18 | SEC-1/4/6/8 closed: boot refusal, closed CORS, one auth path, throttled login |
+| 12 | PR #19 | Taskwarrior argv boundary: free text after `--`, override refusal, `RULE-ARCH-004` |
+| 13 | PR #20 | Public-surface snapshots; every README MCP tool name was wrong, `PORT` unread |
+| 14 | PR #21 | Supply chain: digest-pinned images, hash-pinned locks, 305 licences classified |
 
 **All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**40 rules, 40
 proven able to fail on every run**), index (built, qualified, deterministic, queryable).
 
-`check` ~5s · `verify` ~40s local. Unimplemented commands are now `rebuild-verify` (5),
-`scaffold` (16) and `decay-review` (16); `brief` is implemented.
+`check` ~5s · `verify` ~53s local. Unimplemented commands are `rebuild-verify` (5),
+`scaffold` (16b) and `decay-review` (16c); `brief`, `surfaces`, `lock` and `grant-admin` are implemented.
 
 ---
 
-## 3. What to do next — Step 11, and it needs the human
+## 3. What to do next — Step 15, and four decisions are already taken
 
-Step 10 is done and Step 12 onward is all local work, but **Step 11 is next in plan order**
-and it is the security wave that touches the running production instance. It is blocked on
-two preconditions that cannot be cleared from a dev machine. Both were recorded as hard
-blockers when decision **F3** was frozen.
+Steps 11–14 are all complete; see §4 for what each one closed. **Step 15 (operability and
+the minimal threat model) is next**, and unlike Step 11 it is entirely local work — nothing
+in it is blocked on the deploy host.
 
-### ~~Blocker A — is production running on the default JWT secret?~~ **CLEARED 2026-08-24**
+### Step 15 is larger than earlier versions of this file claimed
 
-Checked on the host: `JWT_SECRET` resolves to a **non-default 64-character value** (42 distinct
-characters, no dictionary words). Production was never on the publicly known default, so no
-rotation was performed — it would have cost a round of logouts for no security benefit.
+Until 2026-08-27 this section summarised Step 15 as "structured logging, audit log,
+`WAIVER-OPS-001`". That dropped two whole plan items. The authoritative text is
+[`phase-0-2.md`](phase-0-2.md) §"Step 15 — Operability and the minimal threat model":
 
-`WAIVER-SEC-001`'s mitigation clause is satisfied: Step 11's boot-refusal will be a no-op for
-this deployment rather than a deploy that takes the site down.
-
-### ~~Blocker B — the admin bootstrap~~ **CLEARED 2026-08-24**
-
-`init_db()` no longer promotes `uli`. `bootstrap_admin()` promotes `BOOTSTRAP_ADMIN` only when
-the database contains **no admin at all**, which makes it self-limiting: it cannot contradict
-a role set through the API and cannot lock anyone out. Paired with a 409 that refuses to
-demote the last admin, so the two compose — the guard makes zero admins unreachable through
-the API, the bootstrap recovers an instance that reaches zero some other way.
-
-Proven against the production shape: the deploy host's database holds **one admin and one
-user**, so the bootstrap returns on its first branch and the change is a no-op there.
-
-See `docs/briefs/0012-admin-bootstrap-and-route-guards.md` and ADR 0017.
-
-### Also outstanding from the last exchange
-
-An offer the human had not yet answered: build a **preflight check** that reports whether a
-resolved `JWT_SECRET` is a known default or too short — runnable *on the host* against
-`docker compose config`, so "is production configured?" becomes something tooling answers
-rather than something someone remembers to check.
-
-### ~~Step 11~~ **COMPLETE 2026-08-25**
-
-| Finding | State |
+| Plan item | State on 2026-08-27 |
 |---|---|
-| **SEC-1** default JWT secret | **Done.** `startup_checks` refuses every published default, an empty secret, and anything under 32 characters. No effect on production, which holds a real 64-character secret. `WAIVER-SEC-001` resolved. |
-| **SEC-2** hard-coded `uli` promotion | **Done.** Zero-admin bootstrap, last-admin guard, `RULE-SEC-001` route guards. |
-| **SEC-4** CORS wildcard | **Done.** `CORS_ORIGINS` defaults to empty and the middleware is not mounted at all — no browser path needs it, in production or development. |
-| **SEC-6** `/inbox` auth divergence | **Done.** Unified onto `get_current_user`; the Bearer-as-API-key shape survives as `SHIM-SEC-006`, expiring 2026-11-25, enforced by the new `RULE-SEC-002`. |
-| **SEC-8** login rate limiting | **Done.** 10 failures per username per 5 minutes, then 429. Keyed on username, not IP — `RISK-SEC-003` records what that costs. |
+| Structured logging + executable no-secrets-in-logs rule | **Not started.** The backend has *zero* logging — no `import logging`, no `getLogger`, no `print()` anywhere under `backend/app/`. What production emits today is uvicorn's plain-text default. |
+| Audit log for role changes, key regeneration, task deletion | **Not started.** No audit table, file or trail of any kind. |
+| Executable rule: every subprocess and egress call declares a timeout | **Not started, and previously unrecorded here.** One timeout exists in the whole application and no rule holds it there. |
+| `docs/threat-model.md` | **Does not exist, and was previously unrecorded here.** The largest silent omission. |
+| Healthchecks in compose | **Already landed** (PR #15). Step 15 records this rather than redoing it. |
+| SHA tags + one-line rollback | **Already landed** (PR #4/#15). Same — record, do not redo. |
+| Scaling recorded as deliberately out of scope | Per **F1**. Mostly already stated in [`AGENTS.md`](../../AGENTS.md). |
 
-See `docs/briefs/0013-security-wave-2.md` and ADR 0018.
+`WAIVER-OPS-001` resolution belongs to this step too, though the plan text does not name it:
+the link runs the other way, from the waiver's own `resolution:` field.
 
-**Next unblocked step is 15** — operability: structured logging with a no-secrets rule, an
-audit log, `WAIVER-OPS-001` resolution. It is also where `SHIM-SEC-006` finally becomes
-removable, because the audit log is what makes "is anyone still sending the Bearer shape?" a
-question the deployment can answer.
+### Decisions taken 2026-08-27
 
-**`SHIM-SEC-006` did not get removed in Step 13**, though that was its scheduled step. Removal
-was always conditional on callers having moved, and nothing here can see what callers send;
-removal moved to Step 15 where the audit log answers it. The expiry did **not** move.
+These four were open and are now closed. They do not need re-litigating.
 
----
+1. **The audit log lives in its own SQLite file**, not in `users.db` and not as a stdout
+   stream. A table in `users.db` would move the `RULE-SURF-001`-protected schema surface
+   and would trip [`waivers.yaml`](../../rules/waivers.yaml)'s "a `migrations/` directory
+   becomes due when a third table changes shape" clause, expanding the step by a whole
+   piece of infrastructure. A stdout stream can be lost to log rotation, which would make
+   the `SHIM-SEC-006` removal evidence unreliable — the one thing the audit log exists to
+   make trustworthy. The writer still lives in the module that owns database access, because
+   the contract allows no other module to open a connection.
+
+2. **SEC-5 gets an owner and an expiry now; the fix is its own step.** See below.
+
+3. **A genuine migration failure logs and continues; it does not refuse to start.**
+   Migrations are additive and the migration routine runs on every start, so a transient
+   failure retries — which is the waiver's own recorded mitigation. Extending the
+   refuse-to-serve posture to migrations would risk taking production down at deploy time on
+   a transient error, the exact class of blocker **F3** made explicit for Step 11.
+
+4. **The JWT preflight check gets built** — the offer that had been outstanding since
+   2026-08-24. It reports whether a resolved `JWT_SECRET` is a published default or too
+   short, runnable *on the host*, so "is production configured?" becomes a question tooling
+   answers rather than one someone remembers to ask.
+
+### SEC-5 is the last open High finding, and until 2026-08-27 nothing owned it
+
+API keys are stored in plaintext in `users.db`, are permanent, unscoped and un-expiring, and
+are retrievable in cleartext from the key endpoint. `users.db` is a bind-mounted file on the
+deploy host and in backups. Severity **High**.
+
+It appears in exactly two places in this repository: the Phase 0 finding table, and one
+incidental citation inside Step 15's redaction clause. **No waiver, no rule, no step, no
+expiry.** Every other High or Critical finding was closed in Steps 11–12; this one stayed
+invisible precisely because no artefact tracked it. Step 15 will redact keys *from logs*,
+which does nothing about keys sitting in cleartext in the database and the backups.
+
+The decision: record it in [`waivers.yaml`](../../rules/waivers.yaml) with an owner and an
+expiry as part of Step 15, so it stops being ownerless. The real fix — store a hash, show the
+key once on regeneration — changes the key endpoint's response contract, so under **F2** it is
+a public-surface migration and gets its own step rather than being buried inside the audit-log
+change.
+
+### `SHIM-SEC-006` cannot be removed in Step 15
+
+The audit log is the *instrument* that makes "is anyone still sending the Bearer-as-API-key
+shape?" answerable. It is not the answer. Answering needs the instrument deployed to
+production and a soak period, and nothing local can produce that. So Step 15 lands the
+instrument and the query, and records the soak start date; **removal is a follow-up change
+before the expiry**, which has not moved.
+
+### Suggested order
+
+Five sub-changes. The first two are prerequisites for everything after them.
+
+| | Delivers | Behaviour-changing |
+|---|---|---|
+| ~~**15d**~~ | **Done 2026-08-28**, on branch `step-15d-timeout-rule`. `RULE-OPS-001`, the OPS family, and the [`Timeouts`](../operations.md#timeouts) anchor the rest of Step 15 points at. Both arms proven — the subprocess arm by deleting the real `timeout=10`, the egress arm by introducing the first HTTP client. The gate now proves **42** rules able to fail, up from 40. See [brief 0017](../briefs/0017-timeouts-are-declared.md) and [ADR 0022](../adr/0022-timeouts-are-declared.md). | No |
+| **15a** | Structured logging with the redaction filter, plus the executable no-secrets rule and the redaction test the plan mandates. | Yes — it creates an output surface that did not exist |
+| **15b** | Narrow the migration `except` per decision 3; resolve `WAIVER-OPS-001`. | Yes — runs at boot against the production database |
+| **15c** | The audit log, including the credential-shape discriminator that `SHIM-SEC-006` needs. | Yes — new persisted data |
+| **15e/f** | The shim evidence runbook, `docs/threat-model.md`, the SEC-5 waiver, and the residual risks this step's own blind spots create. | No |
+
+Two things worth knowing before starting 15c: the admin bootstrap **already returns a reason
+string naming which branch it took, and the caller throws it away** — that return value was
+written for this audit log. And there is **no logout endpoint** (auth is stateless; the
+frontend simply drops the token), so do not scope logout auditing.
+
+### Still open, and not decided
+
+**The F4 branch-protection question** (§7) was put to the human again on 2026-08-27 and again
+went unanswered. It is not blocking anything; it just keeps reappearing.
 
 ## 4. Remaining plan steps
 
@@ -124,7 +169,7 @@ removal moved to Step 15 where the audit log answers it. The expiry did **not** 
 | ~~12~~ | ~~Security wave 2 — Taskwarrior argv hardening~~ | **Done.** Free text after `--`, override refusal at the choke point, `RULE-ARCH-004` keeps `subprocess` there. `WAIVER-SEC-002` resolved. See `docs/briefs/0014-taskwarrior-boundary.md` and ADR 0019. |
 | ~~13~~ | ~~Public-surface protection~~ | **Done.** Five snapshots under `ops/surfaces/`, env vars cross-checked against README. `BLIND-MCP-001` resolved. Found: every MCP tool name in the README was wrong, and `PORT` was documented but unread. See `docs/briefs/0015-public-surface-protection.md` and ADR 0020. |
 | ~~14~~ | ~~Supply chain~~ | **Done.** Four images digest-pinned, Arch packages pinned to a dated archive snapshot, hash-pinned Python locks, 305 licences classified, secret scanning, Dependabot. `python-jose` 3.3.0→3.5.0. See `docs/briefs/0016-supply-chain.md` and ADR 0021. |
-| **15** | Operability: structured logging with a no-secrets rule, audit log, healthchecks already landed, `WAIVER-OPS-001` resolution | |
+| **15** | Operability and the minimal threat model | **Next.** Scoped in full in §3 — it is larger than this row once claimed. |
 | **16** | `make scaffold`, `make decay-review`, Phase 4 audit, **Cold-Agent Index and Change Tests** | 16a already landed early. |
 
 Unimplemented commands (each exits `3` naming its step): `rebuild-verify` (5),
@@ -223,17 +268,13 @@ direct pushes but would let a red pull request merge.
 
 ## 8. How to resume
 
-Say *"where are we and how do we go on"*. The answer should be: read this file and §1's
-commands, then either
+Say *"where are we and how do we go on"*. The answer should be: read this file and run §1's
+commands, then **start Step 15** — it is next in plan order, entirely local, and its four
+open design decisions were closed on 2026-08-27 (§3).
 
-- **clear Blocker A** by running `docker compose config | grep JWT_SECRET` on the deploy
-  host and reporting what it says — that unblocks Step 11 and is the highest-value next
-  action; or
-- **build the JWT preflight check** (§3), which is local, needs nothing from the human, and
-  turns Blocker A from something someone remembers to check into something tooling answers;
-  or
-- **start Step 12** (Taskwarrior argv hardening at the `_run` choke point), the next
-  unblocked plan step. It is behaviour-changing, so it wants the Security-or-Operability
-  pattern: failure scenario, control, adversarial proof.
+**15d is done** (2026-08-28). Next is **15a**, structured logging, which both **15b** and
+**15c** depend on. Its rule joins the OPS family 15d established and points at the same
+[`Timeouts`](../operations.md#timeouts) neighbourhood in `docs/operations.md`.
 
-Step 10 is done — see §4.
+Do not try to remove `SHIM-SEC-006` in this step, and do not fold the SEC-5 fix into the audit
+log — §3 records why for both.

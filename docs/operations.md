@@ -120,6 +120,39 @@ client.
 > waits for *started*, not *healthy*. The defect the healthchecks were added to prevent is therefore still
 > live on the deploy host. Copying the two `healthcheck` blocks into the host's compose file closes it.
 
+## Timeouts
+
+`RULE-OPS-001` requires every blocking outward call the serving application makes — process execution and
+network egress — to declare a timeout at the call site.
+
+A call with no timeout does not fail. It waits, and the worker serving the request waits with it. There is
+one Taskwarrior binary behind every list this application renders, so a `task` invocation that never returns
+is not a slow page: it is a worker that never comes back. Enough of them is an outage, and it is an outage
+with nothing in any log to explain it, because nothing errored.
+
+The application makes exactly one such call today —
+[`task_runner._run`](../backend/app/services/task_runner.py) — and it already declares `timeout=10`. The rule
+therefore costs nothing to satisfy right now. That is the point: it exists so the property survives the
+second such call, which will be written by someone who never read this page.
+
+**What the check reads.** [`tools/checks/timeouts.py`](../tools/checks/timeouts.py) parses every tracked
+Python file under `backend/app/`, resolves import aliases so a rename cannot hide a call, and requires a
+`timeout=` keyword on the process and HTTP client calls it knows. Three shapes are refused:
+
+- **no `timeout=`** — the ordinary case
+- **`timeout=None`** — the absence of a timeout, spelled out; deliberate enough to be worth a review
+- **keywords arriving through `**kwargs`** — a bound that cannot be read at the call site cannot be reviewed
+  at the call site
+- **`subprocess.Popen`** — it takes no timeout argument at all; the waiting happens later, in
+  `.communicate()`, which is exactly the indirection this rule refuses
+
+**Scope.** `backend/app/` only. Repository tooling under `tools/` also shells out, but it runs inside the
+gate's own runtime budget (`RULE-GATE-001`), which bounds it already; extending the rule there would add
+standing exceptions without adding a control.
+
+**What it does not check.** That the value is *sensible*. A `timeout=86400` satisfies this rule and helps
+nobody. Declaration is mechanically checkable and sufficiency is not — recorded as `RISK-OPS-003`.
+
 ## The deploy host's topology
 
 **Read directly from the host on 2026-08-24 and checked in as** [`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml).
