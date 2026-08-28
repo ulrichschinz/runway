@@ -80,6 +80,11 @@ LOGIN_RATE_WINDOW_SECONDS=300
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_HOURS=24
 
+# How much of the log stream is emitted: DEBUG, INFO, WARNING, ERROR or CRITICAL. An
+# unrecognised value falls back to INFO rather than refusing to start. The *format* is not
+# configurable — logs are always JSON and always pass through the redaction filter.
+LOG_LEVEL=INFO
+
 # Container paths. Change these only alongside the compose bind mounts.
 DATA_ROOT=/app/data
 DB_PATH=/app/users.db
@@ -222,9 +227,19 @@ Use `./run <command>` instead of `make` when the exit code matters — `make` re
 docker compose build backend && docker compose up -d backend
 docker compose build frontend && docker compose up -d frontend
 
-# View logs
+# View logs — one JSON object per line, application and uvicorn access lines together
 docker compose logs -f backend
+
+# Readable, if you have jq
+docker compose logs -f --no-log-prefix backend | jq -r \
+  '"\(.timestamp) \(.level) \(.request_id // "-") \(.message)"'
 ```
+
+Every line carries a `request_id`, echoed to the caller in the `X-Request-Id` response
+header, so a reported problem can be traced to the lines that produced it. Credentials are
+stripped from the stream before it is written — by field name and by value shape — and that
+cannot be switched off. Set `LOG_LEVEL=DEBUG` for more; see
+[`docs/operations.md`](docs/operations.md#the-log-stream).
 
 The backend runs on uvicorn (port 8000). The frontend is built with Vite and served by nginx on port 4000, with `/api/` proxied to the backend.
 

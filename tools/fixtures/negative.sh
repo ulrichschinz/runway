@@ -580,10 +580,10 @@ ADDEGRESS
 expect_red "OPS-001-egress" "tools/checks/timeouts.sh" "RULE-OPS-001"
 
 # --- RULE-OPS-002 — the resolved JWT secret is written to a logger ----------
-# The application has no logging at all, so this rule can only be proven by introducing the
-# first logger the way someone actually will. Startup is where it lands first — a boot check
-# that reports what it decided — and startup_checks already holds the resolved secret in a
-# local. One `%s` and every restart writes the signing key to the container log.
+# Startup is where a boot-time diagnostic lands, and startup_checks already holds the resolved
+# secret in a local. One `%s` and every restart writes the signing key to the container log.
+# The runtime redaction filter would catch this one on the way out — that is the point of
+# having both — but the gate must refuse it at the call site, before it is ever emitted.
 python3 - "$SANDBOX/backend/app/startup_checks.py" <<'LOGSECRET'
 import pathlib
 import sys
@@ -610,7 +610,9 @@ import sys
 p = pathlib.Path(sys.argv[1])
 t = p.read_text()
 login = "    rate_limit.clear(body.username)\n"
-rotate = "    await db.commit()\n    return ApiKeyInfo(api_key=new_key)\n"
+# Anchored on the return alone: the handler now carries a legitimate log line of its own,
+# and an anchor that spans it would break every time that line is reworded.
+rotate = "    return ApiKeyInfo(api_key=new_key)\n"
 assert login in t, "the login success path is not where the fixture expects it"
 assert rotate in t, "regenerate_apikey is not where the fixture expects it"
 t = "import logging as lg\n\n" + t

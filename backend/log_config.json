@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "runway-json": {
+      "()": "app.logging_setup.JsonFormatter"
+    }
+  },
+  "filters": {
+    "runway-redaction": {
+      "()": "app.logging_setup.RedactionFilter"
+    }
+  },
+  "handlers": {
+    "stdout": {
+      "class": "logging.StreamHandler",
+      "stream": "ext://sys.stdout",
+      "formatter": "runway-json",
+      "filters": [
+        "runway-redaction"
+      ]
+    }
+  },
+  "root": {
+    "handlers": [
+      "stdout"
+    ],
+    "level": "INFO"
+  },
+  "loggers": {
+    "uvicorn": {
+      "handlers": [],
+      "level": "INFO",
+      "propagate": true
+    },
+    "uvicorn.error": {
+      "handlers": [],
+      "level": "INFO",
+      "propagate": true
+    },
+    "uvicorn.access": {
+      "handlers": [],
+      "level": "INFO",
+      "propagate": true
+    }
+  }
+}

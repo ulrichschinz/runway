@@ -1,3 +1,5 @@
+import logging
+
 from aiosqlite import Connection
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -18,6 +20,10 @@ from app.models import (
 from app.services.user_service import init_user_data
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# The identity, never the proof of identity: a username says which account, and it is already
+# in the database in the clear. RULE-OPS-002 refuses the alternative at the call site.
+logger = logging.getLogger(__name__)
 
 
 @router.get(
@@ -45,6 +51,7 @@ async def register(body: UserCreate, db: Connection = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=400, detail="Username already taken") from e
     init_user_data(body.username)
+    logger.info("account registered", extra={"username": body.username})
     return UserInfo(username=body.username)
 
 
@@ -54,6 +61,7 @@ async def login(body: UserLogin, db: Connection = Depends(get_db)):
     # attacker the bcrypt work as a lever (finding SEC-8).
     wait = rate_limit.seconds_until_retry(body.username)
     if wait:
+        logger.warning("login throttled", extra={"username": body.username, "retry_after": wait})
         raise HTTPException(
             status_code=429,
             detail="Too many failed login attempts. Try again later.",
@@ -68,9 +76,14 @@ async def login(body: UserLogin, db: Connection = Depends(get_db)):
         # An unknown username counts too. Skipping it would turn the limiter into a user
         # enumeration oracle: throttled means "this account exists".
         rate_limit.record_failure(body.username)
+        # Deliberately does not distinguish "no such account" from "wrong password". The
+        # response does not, and a log line that did would be the user-enumeration oracle the
+        # limiter above was written to avoid, moved from the API to the log file.
+        logger.warning("login rejected", extra={"username": body.username})
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     rate_limit.clear(body.username)
+    logger.info("login succeeded", extra={"username": body.username})
     return Token(access_token=create_access_token(body.username))
 
 
@@ -149,4 +162,7 @@ async def regenerate_apikey(
     new_key = generate_api_key()
     await db.execute("UPDATE users SET api_key=? WHERE username=?", (new_key, username))
     await db.commit()
+    # That it happened, and to whom. The key itself is returned to the caller and goes
+    # nowhere else; Step 15c gives this event a durable row rather than a log line.
+    logger.info("api key regenerated", extra={"username": username})
     return ApiKeyInfo(api_key=new_key)

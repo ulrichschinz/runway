@@ -51,6 +51,7 @@ paths = [
   "backend/Dockerfile", "backend/Dockerfile.test", "backend/requirements.txt",
   "backend/requirements-dev.txt", "backend/requirements.lock",
   "backend/requirements-dev.lock", "policy/**", "backend/pyproject.toml", "backend/taskrc_template.txt",
+  "backend/log_config.json",
   "frontend/Dockerfile", "frontend/nginx.conf", "frontend/package.json",
   "frontend/package-lock.json", "frontend/vite.config.js", "frontend/eslint.config.js",
   "frontend/postcss.config.js", "frontend/tailwind.config.js", "frontend/index.html",
@@ -140,7 +141,16 @@ paths = [
   "backend/app/auth.py",
   "backend/app/startup_checks.py",
   "backend/app/rate_limit.py",
+  "backend/app/logging_setup.py",
+  "backend/app/middleware.py",
 ]
+note = """
+Leaves depend on nothing above them, which is what lets anything reach them. logging_setup
+is here for exactly that reason: a router, a dependency and the database adapter all need to
+be able to log, and a logging module owned by any higher layer would make one of those an
+upward edge. middleware.py sits beside it because the correlation id it assigns is only
+useful through the ContextVar the formatter reads.
+"""
 
 [[units]]
 id = "fe/app"

@@ -11,8 +11,18 @@ services:
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
       - DATA_ROOT=/app/data
       - DB_PATH=/app/users.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     network_mode: host
     restart: unless-stopped
+    # The backend now writes a JSON line per request. Docker's default json-file driver has
+    # no size limit at all, so an unbounded log is a disk that fills — and on this host the
+    # same disk holds users.db and the Taskwarrior data. 10m x 5 caps each service at 50 MB,
+    # which is days of traffic at this scale and small enough that nothing else notices.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # A container that crash-loops on startup used to be indistinguishable from a healthy
     # one: `docker compose up -d` returns success either way. On 2026-08-04 that gap kept a
     # dead backend in production through two green deploys (ADR 0004). Python is used
@@ -37,6 +47,11 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:4000/"]
       interval: 30s

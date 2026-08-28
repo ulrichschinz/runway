@@ -9,13 +9,17 @@ same password in a log line is a credential in a filesystem, a backup, and a ter
 scrollback. Nothing raises, nothing errors, and the disclosure is invisible until someone
 reads the file.
 
-**The property this holds is currently true.** The serving application has no logging at all
-today — no `import logging`, no `getLogger`, no `print()` anywhere under `backend/app/` — so
-what production emits is uvicorn's own output and nothing this repository wrote. That is
-precisely why the rule lands now: the property is free to hold while there is nothing to
-break, and it becomes losable in the first commit that adds a logger. The reviewer who would
-have caught `logger.info(f"login for {username} with {body.password}")` is the same reviewer
-who is reading a hundred other lines of a new logging module.
+**This rule was written before there was any logging to break it.** When it landed the serving
+application had no `import logging`, no `getLogger` and no `print()` anywhere under
+`backend/app/`, so the property held for free; the structured logging module arrived hours
+later into a repository that already refused the mistake. The reviewer who would have caught
+`logger.info(f"login for {username} with {body.password}")` is the same reviewer who is
+reading a hundred other lines of a new logging module.
+
+**It is the static half of a two-part control.** `app/logging_setup.py` carries the runtime
+half: a redaction filter that removes a credential by the *shape* of its value, whatever it is
+called, which is what covers the neutral-name gap this scan is blind to. Neither half is
+sufficient alone — see `RISK-OPS-004` and `RISK-OPS-005`.
 
 **Scoped to `backend/app/`** — the serving application, the only code whose output reaches a
 production log. Repository tooling under `tools/` prints to a developer's terminal inside the

@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # Login attempts allowed per username per window before /auth/login answers 429.
     login_rate_limit: int = 10
     login_rate_window_seconds: int = 300
+    # How much of the JSON log stream is emitted. The *format* is not configurable and
+    # neither is the redaction filter: a setting that turns a control off is the setting
+    # that gets turned off at 3am. An unrecognised value falls back to INFO rather than
+    # refusing to boot — see logging_setup.resolve_level.
+    log_level: str = "INFO"
 
     class Config:
         env_file = ".env"

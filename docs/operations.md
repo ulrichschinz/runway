@@ -153,6 +153,104 @@ standing exceptions without adding a control.
 **What it does not check.** That the value is *sensible*. A `timeout=86400` satisfies this rule and helps
 nobody. Declaration is mechanically checkable and sufficiency is not — recorded as `RISK-OPS-003`.
 
+## The log stream
+
+Everything this deployment emits is **one JSON object per line, on stdout, from one handler**.
+Application lines, uvicorn's access lines and any traceback are the same shape and pass through the same
+redaction filter. Before 2026-08-28 the serving application logged nothing at all and what production wrote
+was uvicorn's plain-text default; see [ADR 0024](adr/0024-structured-logging.md).
+
+```json
+{"timestamp": "2026-08-28T08:31:12.404Z", "level": "INFO", "logger": "app.routers.auth", "message": "login succeeded", "request_id": "1e4c7a90b2d5", "username": "alice"}
+```
+
+`timestamp` is UTC to the millisecond, `logger` is the module that spoke, and everything after `message` is
+whatever that call passed as structured fields.
+
+```sh
+docker compose logs -f backend
+docker compose logs --no-log-prefix backend | jq -r 'select(.level != "INFO")'
+docker compose logs --no-log-prefix backend | jq -r 'select(.request_id == "1e4c7a90b2d5")'
+```
+
+**One stream, not two.** uvicorn's `uvicorn`, `uvicorn.error` and `uvicorn.access` loggers are stripped of
+their own handlers and propagate to the same one, through
+[`backend/log_config.json`](../backend/log_config.json) on the image's `uvicorn --log-config` command line.
+That file is generated from [`app.logging_setup.dict_config`](../backend/app/logging_setup.py) and a unit
+test holds the two together; edit the module and regenerate, never the file by hand. The reason it is a
+file and not just a call inside the application is timing: uvicorn installs its own plain-text handlers
+before it imports the app, and those lines would otherwise reach stdout unredacted.
+
+### `LOG_LEVEL`
+
+The only logging knob. `DEBUG`, `INFO` (the default), `WARNING`, `ERROR` or `CRITICAL`; an unrecognised
+value falls back to `INFO` rather than refusing to boot, because the cost of a typo in a verbosity setting
+should not be an outage.
+
+**There is deliberately no `LOG_FORMAT`.** The format is JSON unconditionally and the redaction filter is
+not optional, because a switch that turns a control off is the switch that gets turned off at 3am by the
+person who is already having a bad night.
+
+### The correlation id
+
+Every request is assigned a 12-hex-character id by `RequestIdMiddleware`
+([`backend/app/middleware.py`](../backend/app/middleware.py)). It appears as `request_id` on every line
+logged while that request runs — the access line included — and is returned to the caller in the
+**`X-Request-Id`** response header, so a user reporting a problem can quote it and the whole request can be
+pulled out of the log with one `jq`. A line logged outside a request has no `request_id` field at all
+rather than an empty one.
+
+The id is always minted here and never read from the request. An inbound `X-Request-Id` would be
+attacker-controlled text copied verbatim into every line of that request, which is how a log injection
+starts.
+
+It is carried in a `contextvars.ContextVar`, not a module global: this process serves requests
+concurrently, and a correlation id that correlates the wrong lines is worse than none.
+
+### Redaction at runtime
+
+`RULE-OPS-002` refuses a credential-bearing *name* in the source. The filter here removes a credential-bearing
+*value* from the output. Neither is sufficient alone and the two are not alternatives:
+
+| | catches | misses |
+|---|---|---|
+| `RULE-OPS-002` (static) | anything named `password`, `token`, `api_key`, `jwt_secret`, … at a logging call in `backend/app/` | the same value under a neutral name; uvicorn, libraries, tracebacks |
+| the redaction filter (runtime) | a JWT, a bcrypt hash, a 43-character API key and the resolved `JWT_SECRET` **anywhere in the line**, whatever it is called, plus any field whose name says credential | a value with no recognised shape under a name that does not say credential — a plain password, for one |
+
+What remains after both is recorded as `RISK-OPS-005`.
+
+The clearest case for keeping both is a line neither this repository nor `RULE-OPS-002` can reach — uvicorn's
+own access log, where the credential is in the URL:
+
+```json
+{"timestamp": "…", "level": "INFO", "logger": "uvicorn.access", "message": "127.0.0.1:55982 - \"GET /auth/me?api_key=[redacted] HTTP/1.1\" 401", "request_id": "2af2784bea6e"}
+{"timestamp": "…", "level": "INFO", "logger": "uvicorn.access", "message": "127.0.0.1:55983 - \"GET /nope/[redacted] HTTP/1.1\" 404", "request_id": "75f85290942b"}
+```
+
+Observed on 2026-08-28 against a locally run `uvicorn app.main:app --log-config log_config.json` — the same
+command the image starts with, not the image itself — with a real API key and a real JWT put in the path.
+No source scan could have prevented either line; nobody in this repository wrote it.
+
+Redaction replaces with the literal marker `[redacted]` rather than deleting: a line saying a token was
+there and has been removed is still evidence, a line with a hole in it is a puzzle.
+
+### Rotation
+
+Both compose files declare the `json-file` driver with `max-size: 10m` and `max-file: 5` — 50 MB per
+service, which is a long time at this scale. Docker's default is **no limit at all**, and on this host the
+partition that holds the container logs also holds `users.db` and `data/`, so an unbounded log is a full
+disk that takes the database down with it. That mattered less when the application logged nothing; it
+writes a line per request now.
+
+> **Rotation is not yet active in production.** [`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml)
+> is a checked-in *copy* of the host's file and editing it does not change the host (`RISK-OPS-002`). The
+> `logging:` blocks and the `LOG_LEVEL` line were added to the copy on 2026-08-28 and are reviewable here;
+> the deployment at `/opt/services/runway` is still running with Docker's unlimited default. **Outstanding
+> action:** apply the file to the host with the procedure in [Changing it](#changing-it) below, then
+> `docker compose up -d` — a logging driver change takes effect when the container is recreated, not on
+> reload. Until that is done, this repository states the intent and not the state, which is the same
+> distinction the *Health* section above draws about the healthchecks.
+
 ## No secrets in logs
 
 `RULE-OPS-002` forbids the serving application from passing a credential-bearing expression to a logging
@@ -172,11 +270,12 @@ policy says, which is longer than anyone remembers. Nothing raises and nothing e
 invisible until somebody reads the file, and by then the remedy is rotation, not deletion — the same remedy
 `RULE-DEP-003` exists for.
 
-**Why the rule is here before the logging is.** The application has no logging at all today: no
-`import logging`, no `getLogger`, no `print()` anywhere under `backend/app/`. So the property holds for
-free, and it stops holding in the first commit that adds a logger. Landing the rule afterwards would mean
-relying on the reviewer of a large new logging module to notice one interpolated field — which is the review
-that never happens.
+**Why the rule landed before the logging did.** When it was written the application had no logging at all —
+no `import logging`, no `getLogger`, no `print()` anywhere under `backend/app/` — so the property held for
+free and would stop holding in the first commit that added a logger. That commit landed hours later and is
+[described above](#the-log-stream); the rule was already there to meet it. Landing it afterwards would have
+meant relying on the reviewer of a large new logging module to notice one interpolated field, which is the
+review that never happens.
 
 **What the check reads.** [`tools/checks/log_secrets.py`](../tools/checks/log_secrets.py) parses every
 tracked Python file under `backend/app/`. It resolves import aliases, so `import logging as lg` and
@@ -195,14 +294,16 @@ The names it knows are the ones this repository actually uses — `password`, `c
 `new_password`, `hashed`, `jwt_secret`, `token`, `access_token`, `credentials`, `api_key`, `x_api_key`,
 `new_key` — not a generic word list.
 
-**Transport-independent by construction.** It reads source, not emitted output, so it holds whichever way
-structured logging is wired up: a replaced uvicorn access logger, a JSON application logger alongside it, or
-both. A rule that inspected emitted lines would need rewriting the day the transport changed.
+**Transport-independent by construction.** It reads source, not emitted output, so it survived the
+transport decision it was written before: the uvicorn access logger *was* replaced, and this rule did not
+change a line.
 
 **What it does not check.** That a credential arriving under a *neutral* name stays out — logging `body`,
 `row` or a request object discloses the password with nothing to match on. Nor does it see anything outside
 `backend/app/`: a credential logged by a library, by uvicorn itself, or in an exception traceback is beyond
-it. Recorded as `RISK-OPS-004`.
+it. Recorded as `RISK-OPS-004`. The [runtime redaction filter](#redaction-at-runtime) covers most of that
+second column by reading values instead of names — it is the other half of this control, not a replacement
+for it, and what neither half reaches is `RISK-OPS-005`.
 
 ## The deploy host's topology
 

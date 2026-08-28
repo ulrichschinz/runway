@@ -761,6 +761,26 @@ residual_risks:
     re_open_trigger: "a credential is found in a production log that the scan did not report, an exemption marker is used more than twice, or a logging library is introduced that this scan does not recognise"
     decision_record: docs/adr/0023-no-secrets-in-logs.md
 
+  - id: RISK-OPS-005
+    statement: >
+      The runtime redaction filter in backend/app/logging_setup.py is the second half of a
+      two-part control and it is bounded in the mirror image of the first. It removes a value
+      by the field name it arrives under, and by the shapes it has been taught — a JWT, a
+      bcrypt hash, the 43-character token_urlsafe(32) an API key is, and the resolved
+      JWT_SECRET matched literally. It is therefore blind to a credential that has neither: a
+      user's password is an arbitrary string under an arbitrary name, so `logger.info("got",
+      extra={"detail": password})` survives the filter and is caught only by RULE-OPS-002 at
+      the call site — and only while the name says what it is. A credential minted by some
+      future scheme with a different shape is invisible until the shape is added here. The
+      api-key shape is also a false-positive risk in the other direction: any unbroken
+      43-character run of the URL-safe alphabet is redacted, which costs a log line its
+      usefulness rather than costing a disclosure, and that is the trade this takes
+      deliberately. Finally, the filter covers only what passes through this process's
+      handler: anything written before configure_logging runs, or by a sidecar, is outside it.
+    owner: maintainer
+    re_open_trigger: "a credential is found in a log line that both RULE-OPS-002 and the filter passed, a new credential format is introduced, or the api-key shape is observed redacting something an operator needed"
+    decision_record: docs/adr/0024-structured-logging.md
+
   - id: RISK-OPS-002
     statement: >
       The deploy host's compose file is checked in as ops/deploy/docker-compose.yml, but

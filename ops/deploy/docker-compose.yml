@@ -26,8 +26,24 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - DATA_ROOT=/app/data
       - DB_PATH=/app/users.db
+      # Unset resolves to INFO, which is what the application defaults to anyway — so this
+      # line changes nothing until someone raises it to debug a live problem. It is here so
+      # the knob is visible where the deployment is described rather than only in README.
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     networks:
       - traefik-public
+    # NOT YET APPLIED ON THE HOST. Checked in on 2026-08-28; the running deployment still
+    # uses Docker's default json-file driver with no size limit, so production logs are not
+    # rotating today. Applying it is the outstanding action in docs/operations.md#the-log-stream.
+    #
+    # 10m x 5 caps each service at 50 MB. The backend now writes a JSON line per request and
+    # the same disk holds users.db and data/, so an unbounded log is a full disk that takes
+    # the database down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # A container that crash-loops on startup is otherwise indistinguishable from a healthy
     # one: `docker compose up -d` returns success either way. On 2026-08-04 that gap kept a
     # dead backend in production through two green deploys (ADR 0004). Python rather than
@@ -56,6 +72,12 @@ services:
         condition: service_healthy
     networks:
       - traefik-public
+    # NOT YET APPLIED ON THE HOST — see the backend service above.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:4000/"]
       interval: 30s
