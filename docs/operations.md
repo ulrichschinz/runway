@@ -69,11 +69,17 @@ build.
 
 To roll back, pin the last good SHA on the deploy host:
 
-> **This does not work as written today.** The host's compose file pins `:latest` literally, with no
-> variable to substitute — see *The deploy host's topology* below. `export RUNWAY_SHA=...` has no effect,
-> and `docker compose pull` will fetch `:latest`, which is the broken build you are trying to escape.
+> **This works, as of a host read on 2026-08-28.** Both services on the host are declared
+> `image: ghcr.io/ulrichschinz/runway-{backend,frontend}:${RUNWAY_SHA:-latest}`, so the variable below has
+> something to substitute into. The warning that stood here until 2026-08-28 — that the host pinned
+> `:latest` literally and `export RUNWAY_SHA=...` had no effect — was true when it was written and is not
+> true now; the parameterisation was applied to the host in PR #15 and nothing recorded that it had landed.
+>
+> Read on one date, by one command. Nothing continuously compares the host against the checked-in copy
+> (`RISK-OPS-002`), so this is a verified observation and not a standing guarantee.
 
-**Rolling back today** means editing the tag on the host by hand:
+**Rolling back by hand** — no longer required, kept because it is what to do if the variable is ever
+removed from the host file:
 
 ```sh
 # on the deploy host
@@ -506,7 +512,8 @@ That is the development file, where seeding a fresh database with registration o
 - **No ports are published.** Traffic arrives through Traefik on the external `traefik-public` network, TLS
   terminated by Let's Encrypt, routed to the frontend on port 4000. The backend is not reachable from
   outside the compose network except through the frontend.
-- **The rollback runbook does not work as written** — the tag is a literal `:latest`. See *Rolling back*.
+- **The rollback runbook works**, as of a host read on 2026-08-28: both images are declared with
+  `${RUNWAY_SHA:-latest}`, so pinning a SHA takes effect. See *Rolling back*.
 - **The healthchecks do run**, as of a host read on 2026-08-28. The transcript above is the file as it
   stood on 2026-08-24, before they were applied. See *Health*.
 - **The checked-in `docker-compose.yml` is a development artefact**, not a description of production. It

@@ -189,7 +189,7 @@ Five sub-changes. The first two are prerequisites for everything after them.
 | ~~**15a**~~ | **Done 2026-08-28**, on branch `step-15a-structured-logging`, in two commits. First the rule: `RULE-OPS-002`, an AST scan refusing a credential-bearing expression at a logging call, landed while there was still no logging to break it ([ADR 0023](../adr/0023-no-secrets-in-logs.md)). Then the logging: one JSON stream with uvicorn's own loggers folded into it via `--log-config`, a runtime redaction filter that matches by value shape as well as by field name, `LOG_LEVEL` as the only knob, a per-request correlation id in a `ContextVar` and on `X-Request-Id`, and `json-file` rotation in both compose files ([ADR 0024](../adr/0024-structured-logging.md)). No new rule in the second commit — the conformance suite still proves **44**. Rotation is checked in but **not yet applied on the deploy host**; see [brief 0018](../briefs/0018-structured-logging.md). | Yes — it creates an output surface that did not exist |
 | ~~**15b**~~ | **Done 2026-08-28.** One silence kept — `sqlite3.OperationalError` carrying `duplicate column name`, a string measured against the pinned driver rather than recalled — and everything else logged. Catch boundary is `sqlite3.Error`, deliberately wider than `OperationalError` so a corrupt file or a malformed statement is reported rather than refusing the boot. `WAIVER-OPS-001` resolved. See [brief 0019](../briefs/0019-narrowing-the-migration-except.md) and [ADR 0025](../adr/0025-narrowing-the-migration-except.md). | Yes — runs at boot against the production database |
 | ~~**15c**~~ | **Done 2026-08-28.** `audit.db` in its own file under `DATA_ROOT` — the only bind-mounted directory, so it survives a deploy without a compose change. Twelve event types, four outcomes, and the three credential shapes finally distinguishable: `api-key-header`, `bearer-jwt`, `bearer-api-key`. Same request id as the log lines. No read endpoint, no route count moved, no credential in any row. See [brief 0020](../briefs/0020-the-audit-log.md) and [ADR 0026](../adr/0026-the-audit-log.md). | Yes — new persisted data |
-| **15e/f** | The shim evidence runbook, `docs/threat-model.md`, the SEC-5 waiver, and the residual risks this step's own blind spots create. | No |
+| ~~**15e/f**~~ | **Done 2026-08-28.** [`docs/threat-model.md`](../threat-model.md) in eight sections, each ending with what is *enforced* by a named rule and what is only *asserted* and carries a risk id. No new rule: 22 existing ones are cited. SEC-5 finally has an owner as `WAIVER-SEC-003`, expiring 2027-01-31. Three stale claims about production corrected against a host read. See [brief 0021](../briefs/0021-threat-model-and-sec-5.md) and [ADR 0027](../adr/0027-the-threat-model.md). | No |
 
 Two things worth knowing before starting 15c: the admin bootstrap **already returns a reason
 string naming which branch it took, and the caller throws it away** — that return value was
@@ -313,13 +313,14 @@ Say *"where are we and how do we go on"*. The answer should be: read this file a
 commands, then **start Step 15** — it is next in plan order, entirely local, and its four
 open design decisions were closed on 2026-08-27 (§3).
 
-**15d, 15a, 15b and 15c are all done** (2026-08-28), on `step-15a-structured-logging`, none
-merged and no PR opened. What remains of Step 15 is **15e/f**: `docs/threat-model.md` (which
-does not exist), the SEC-5 waiver that gives the last open High finding an owner, and the
-residual risks this step's own blind spots created. The shim evidence runbook that 15e was to
-deliver already landed inside 15c.
+**Step 15 is complete** (2026-08-28) — all five sub-changes, on `step-15a-structured-logging`,
+none merged and no PR opened. Nine commits. The gate proves **44** rules able to fail, up from
+40 at the start of the step.
 
-Read the two host items below before deploying any of it.
+**Next is Step 16**, the last plan step: `scaffold`, `decay-review`, the Phase 4 audit and the
+Cold-Agent tests. Before any of it, read the two host items below — one of them is a
+precondition for deploying Step 15 at all, and there is an open proposal to stop hand-editing
+the host, recorded under *The deploy mechanism* below.
 
 Do not try to remove `SHIM-SEC-006` in this step, and do not fold the SEC-5 fix into the audit
 log — §3 records why for both.
