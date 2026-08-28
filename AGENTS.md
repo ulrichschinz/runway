@@ -52,7 +52,8 @@ If an answer says `STALE`, run `make fix`. The answer was not trustworthy.
 |---|---|
 | A task operation, or anything touching Taskwarrior | `backend/app/services/task_service.py`. **Only `be/adapters/task` may run the subprocess** — routers reach it through the service, which is where validation lives. |
 | A new REST endpoint | a router in `backend/app/routers/`. It automatically becomes an MCP tool named after the handler function — see §5. |
-| Anything reading or writing the users database | `backend/app/database.py`. It is the only module that opens a connection. |
+| Anything reading or writing a database | `backend/app/database.py`. It is the only module that opens a connection — the users database and the audit log alike. |
+| An audit event | `backend/app/audit.py` — the vocabulary and the writer. It lives in `be/adapters/db` because the line above leaves it nowhere else to live. Reading the log is an operator activity; there is no route for it. |
 | A frontend rule about tags, filtering or sorting | `frontend/src/shared/`. These are pure and tested; components are not. |
 | Frontend feature UI | the owning feature unit — `fe/tasks`, `fe/projects`, `fe/identity`. Features never import each other. |
 | A gate rule | a script in `tools/checks/`, a line in `tools/checks/profiles.conf`, an entry in `rules/ledger.yaml`, and a fixture in `tools/fixtures/negative.sh`. All four, or it is not a rule. |

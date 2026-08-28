@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP
 
-from app import startup_checks
+from app import audit, startup_checks
 from app.config import cors_origin_list, settings
 from app.database import init_db
 from app.logging_setup import configure_logging, resolve_level
@@ -26,7 +26,20 @@ async def lifespan(app: FastAPI):
     # reachable, and a container that refuses to start is a louder signal than one that
     # serves forgeable tokens quietly (finding SEC-1).
     startup_checks.run_all()
-    await init_db()
+    # Before init_db, because init_db can promote an administrator and that promotion is the
+    # first thing there would otherwise be nowhere to write.
+    audit.init_store()
+    bootstrap_reason = await init_db()
+    # bootstrap_admin has always returned a string naming the branch it took, and the caller
+    # has always thrown it away. It is recorded here because a role change that happens at
+    # boot, with no request and no acting principal, is the one role change that leaves no
+    # other trace — and "noop: an admin already exists" is worth a row too: it is the
+    # evidence that the recovery path did NOT fire on this start.
+    audit.record(
+        audit.ADMIN_BOOTSTRAP,
+        outcome=audit.NOOP if bootstrap_reason.startswith("noop:") else audit.SUCCESS,
+        detail=bootstrap_reason,
+    )
     logger.info(
         "startup complete",
         extra={"log_level": resolve_level(), "registration_seed": settings.allow_registration},

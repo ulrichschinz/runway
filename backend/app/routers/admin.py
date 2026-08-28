@@ -1,6 +1,7 @@
 from aiosqlite import Connection
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app import audit
 from app.database import get_allow_registration, get_db
 from app.dependencies import get_current_admin
 from app.models import VALID_ROLES, RoleUpdate, SiteSettings, UserInfo
@@ -17,13 +18,25 @@ async def get_settings(
 
 @router.put("/settings", response_model=SiteSettings, summary="Update site settings (admin only)")
 async def update_settings(
-    body: SiteSettings, username: str = Depends(get_current_admin), db: Connection = Depends(get_db)
+    request: Request,
+    body: SiteSettings,
+    username: str = Depends(get_current_admin),
+    db: Connection = Depends(get_db),
 ):
     await db.execute(
         "INSERT OR REPLACE INTO site_settings (key, value) VALUES ('allow_registration', ?)",
         ("true" if body.allow_registration else "false",),
     )
     await db.commit()
+    # Who opened the instance to the public, and when. This is the one admin setting that
+    # changes who can obtain an account at all, so it is the one whose history matters.
+    audit.record(
+        audit.REGISTRATION_TOGGLED,
+        outcome=audit.SUCCESS,
+        actor=username,
+        route=audit.route_of(request),
+        detail="registration enabled" if body.allow_registration else "registration disabled",
+    )
     return SiteSettings(allow_registration=body.allow_registration)
 
 
@@ -48,16 +61,34 @@ async def list_users(username: str = Depends(get_current_admin), db: Connection 
     "/users/{target}/role", response_model=UserInfo, summary="Promote or demote a user (admin only)"
 )
 async def set_user_role(
+    request: Request,
     target: str,
     body: RoleUpdate,
     username: str = Depends(get_current_admin),
     db: Connection = Depends(get_db),
 ):
+    route = audit.route_of(request)
     if body.role not in VALID_ROLES:
+        audit.record(
+            audit.ROLE_CHANGED,
+            outcome=audit.FAILURE,
+            actor=username,
+            subject=target,
+            route=route,
+            detail="the requested role is not one this instance has",
+        )
         raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
     async with db.execute("SELECT username, role FROM users WHERE username=?", (target,)) as cur:
         row = await cur.fetchone()
     if not row:
+        audit.record(
+            audit.ROLE_CHANGED,
+            outcome=audit.FAILURE,
+            actor=username,
+            subject=target,
+            route=route,
+            detail="no such user",
+        )
         raise HTTPException(status_code=404, detail="User not found")
 
     # Refuse to remove the last administrator. Without this an admin can demote themselves
@@ -70,6 +101,18 @@ async def set_user_role(
         async with db.execute("SELECT COUNT(*) AS n FROM users WHERE role='admin'") as cur:
             admins = await cur.fetchone()
         if admins and admins["n"] <= 1:
+            # A refusal is an event. This one in particular: it is the control standing
+            # between the instance and a state nobody can administer, so an operator asking
+            # "did someone try to demote the last admin" should not have to hope the log
+            # file from that week still exists.
+            audit.record(
+                audit.ROLE_CHANGED,
+                outcome=audit.REFUSED,
+                actor=username,
+                subject=target,
+                route=route,
+                detail="refused: this is the last admin",
+            )
             raise HTTPException(
                 status_code=409,
                 detail="Refusing to demote the last admin — promote another user first",
@@ -77,6 +120,14 @@ async def set_user_role(
 
     await db.execute("UPDATE users SET role=? WHERE username=?", (body.role, target))
     await db.commit()
+    audit.record(
+        audit.ROLE_CHANGED,
+        outcome=audit.SUCCESS,
+        actor=username,
+        subject=target,
+        route=route,
+        detail=f"role {row['role'] or 'user'} -> {body.role}",
+    )
     async with db.execute(
         "SELECT username, role, full_name, email FROM users WHERE username=?", (target,)
     ) as cur:

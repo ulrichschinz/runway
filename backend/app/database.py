@@ -1,5 +1,8 @@
 import logging
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 
 import aiosqlite
 
@@ -89,6 +92,49 @@ async def get_db():
         yield db
 
 
+# --- the audit database -------------------------------------------------------------------
+#
+# A SECOND file, deliberately, and the reasoning is in docs/adr/0026-the-audit-log.md. The
+# connection lives here and not in app/audit.py because AGENTS.md states that this module is
+# the only one permitted to open a database connection, and "the audit log needed its own
+# file" is not a reason to make that rule mean something narrower than it says.
+#
+# It sits under data_root rather than beside users.db because data_root is the only directory
+# either compose file bind-mounts. A path the container writes to but nothing persists would
+# lose the log on the next `docker compose up -d`, which is precisely the failure mode
+# (evidence that can silently disappear) that ruled out a stdout stream in the first place.
+
+AUDIT_DB_NAME = "audit.db"
+
+# The lock wait, not a query timeout: SQLite serialises writers, and this bounds how long an
+# audit insert waits for another one to commit before giving up. It gives up rather than
+# blocking a request indefinitely — an audit row is never worth a hung request.
+AUDIT_LOCK_TIMEOUT_SECONDS = 5.0
+
+
+def audit_db_path() -> Path:
+    return Path(settings.data_root) / AUDIT_DB_NAME
+
+
+@contextmanager
+def audit_connection() -> Iterator[sqlite3.Connection]:
+    """Open the audit database, hand it over, and always close it.
+
+    Synchronous `sqlite3`, not `aiosqlite`, because the callers are both kinds: a FastAPI
+    dependency that is `async`, and `delete_task`, which is an ordinary `def` running in the
+    threadpool and cannot await anything. One writer interface that works from both is worth
+    more than saving a few hundred microseconds of event loop on a local file write.
+    """
+    path = audit_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path, timeout=AUDIT_LOCK_TIMEOUT_SECONDS)
+    try:
+        connection.row_factory = sqlite3.Row
+        yield connection
+    finally:
+        connection.close()
+
+
 def generate_api_key() -> str:
     """Public: routers issue keys at registration and on rotation.
 
@@ -151,7 +197,14 @@ async def bootstrap_admin(db) -> str:
     return f"promoted {wanted!r} to admin (database had no admin)"
 
 
-async def init_db():
+async def init_db() -> str:
+    """Create and migrate the users database. Returns the admin-bootstrap reason.
+
+    The reason string was written for the audit log and thrown away until Step 15c: a
+    promotion that happens at boot, with no request and no acting principal behind it, is
+    exactly the event that leaves no other trace. The caller (`app.main`'s lifespan) records
+    it; this module does not import `app.audit`, because `app.audit` imports this one.
+    """
     async with aiosqlite.connect(settings.db_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute(CREATE_USERS)
@@ -183,7 +236,7 @@ async def init_db():
                 "UPDATE users SET api_key=? WHERE username=?",
                 (generate_api_key(), row["username"]),
             )
-        await bootstrap_admin(db)
+        bootstrap_reason = await bootstrap_admin(db)
         await db.execute(CREATE_PROJECT_PLANS)
         await db.execute(CREATE_PROJECTS)
         await db.execute(CREATE_SITE_SETTINGS)
@@ -198,3 +251,4 @@ async def init_db():
             FROM project_plans
         """)
         await db.commit()
+    return bootstrap_reason

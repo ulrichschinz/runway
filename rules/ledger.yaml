@@ -996,6 +996,28 @@ residual_risks:
     re_open_trigger: "an index query returns an mcp_tool name that does not appear in ops/surfaces/mcp-tools.json, or the extractor is changed to read the snapshot"
     decision_record: docs/adr/0020-runtime-observed-surfaces.md
 
+  - id: RISK-OPS-006
+    statement: >
+      NOTHING PRUNES THE AUDIT DATABASE. `data/audit.db` grows for the lifetime of the
+      deployment and no retention period, no vacuum and no archival step exists — that is a
+      deliberate omission, not an oversight: a first cut that deletes rows is a first cut
+      that can delete the evidence `SHIM-SEC-006` is waiting on, and choosing what may be
+      forgotten is a decision with a legal and an operational half that has not been taken.
+      The growth is dominated by one row per SUCCESSFULLY authenticated request, roughly
+      150 bytes each, so a deployment serving ten thousand requests a day accumulates on the
+      order of half a gigabyte a year on the same partition that holds `users.db` and the
+      Taskwarrior data — the same partition whose exhaustion the container log rotation added
+      in Step 15a was written to prevent, now with a second unbounded writer on it that
+      Docker's log driver does not bound. There is a second, smaller
+      amplification: a login failure writes a row and the rate limiter is per-username, so a
+      caller cycling usernames can append faster than a legitimate one. Rejected credentials
+      deliberately write nothing at all, which is what keeps that bounded by the login route
+      rather than open to any unauthenticated request. Nothing measures the file, nothing
+      alerts on it, and the disk it shares is the one that takes the database down with it.
+    owner: maintainer
+    re_open_trigger: "audit.db exceeds 100 MB, a retention period is agreed, disk pressure is observed on the deploy host, or the SHIM-SEC-006 soak completes and the evidence is no longer needed live"
+    decision_record: docs/adr/0026-the-audit-log.md
+
   - id: RISK-OPS-001
     statement: >
       `platforms: linux/amd64` in deploy.yml is a declaration, not an enforced invariant.

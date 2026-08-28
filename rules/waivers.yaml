@@ -148,6 +148,21 @@ justified_suppressions:
     reviewed_by: maintainer
     reviewed_on: 2026-08-25
 
+  - rule: "ruff S105 — hardcoded password assigned to PASSWORD_CHANGED"
+    scope: backend/app/audit.py
+    reason: >
+      `PASSWORD_CHANGED = "auth.password.changed"` is the name of an audit event, not a
+      credential: the value is a vocabulary term that appears in the `event` column of every
+      row recording a password change, and it is the string an operator types into a query.
+      S105 matches on the identifier containing "password", which here describes the subject
+      of the event rather than its content. The alternatives were both worse — abbreviating
+      the constant would make the vocabulary less readable than the thing it names, and
+      assembling the literal at runtime to dodge the scan would hide it from `grep`, which is
+      how these names are actually found. Exactly the same reading as the `token_type` entry
+      below.
+    reviewed_by: maintainer
+    reviewed_on: 2026-08-28
+
   - rule: "ruff S105 — hardcoded password assigned to token_type"
     scope: backend/app/models.py
     reason: >

@@ -1,9 +1,9 @@
 import logging
 
 from aiosqlite import Connection
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from app import rate_limit
+from app import audit, rate_limit
 from app.auth import create_access_token, hash_password, verify_password
 from app.database import generate_api_key, get_allow_registration, get_db
 from app.dependencies import get_current_user
@@ -39,8 +39,16 @@ async def registration_status(db: Connection = Depends(get_db)):
 
 
 @router.post("/register", response_model=UserInfo, status_code=status.HTTP_201_CREATED)
-async def register(body: UserCreate, db: Connection = Depends(get_db)):
+async def register(request: Request, body: UserCreate, db: Connection = Depends(get_db)):
+    route = audit.route_of(request)
     if not await get_allow_registration(db):
+        audit.record(
+            audit.REGISTERED,
+            outcome=audit.REFUSED,
+            actor=body.username,
+            route=route,
+            detail="registration is disabled on this instance",
+        )
         raise HTTPException(status_code=403, detail="Registration is disabled")
     try:
         await db.execute(
@@ -49,19 +57,35 @@ async def register(body: UserCreate, db: Connection = Depends(get_db)):
         )
         await db.commit()
     except Exception as e:
+        audit.record(
+            audit.REGISTERED,
+            outcome=audit.FAILURE,
+            actor=body.username,
+            route=route,
+            detail="username already taken",
+        )
         raise HTTPException(status_code=400, detail="Username already taken") from e
     init_user_data(body.username)
     logger.info("account registered", extra={"username": body.username})
+    audit.record(audit.REGISTERED, outcome=audit.SUCCESS, actor=body.username, route=route)
     return UserInfo(username=body.username)
 
 
 @router.post("/login", response_model=Token)
-async def login(body: UserLogin, db: Connection = Depends(get_db)):
+async def login(request: Request, body: UserLogin, db: Connection = Depends(get_db)):
     # Checked before the password is verified: a locked-out username must not buy an
     # attacker the bcrypt work as a lever (finding SEC-8).
+    route = audit.route_of(request)
     wait = rate_limit.seconds_until_retry(body.username)
     if wait:
         logger.warning("login throttled", extra={"username": body.username, "retry_after": wait})
+        audit.record(
+            audit.LOGIN_THROTTLED,
+            outcome=audit.REFUSED,
+            actor=body.username,
+            route=route,
+            detail=f"locked out, retry in {wait}s",
+        )
         raise HTTPException(
             status_code=429,
             detail="Too many failed login attempts. Try again later.",
@@ -80,10 +104,15 @@ async def login(body: UserLogin, db: Connection = Depends(get_db)):
         # response does not, and a log line that did would be the user-enumeration oracle the
         # limiter above was written to avoid, moved from the API to the log file.
         logger.warning("login rejected", extra={"username": body.username})
+        # Same reasoning as the log line above: the row does not distinguish "no such
+        # account" from "wrong password", because a record that did would be the user
+        # enumeration oracle the rate limiter exists to prevent, moved into a file.
+        audit.record(audit.LOGIN_FAILED, outcome=audit.FAILURE, actor=body.username, route=route)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     rate_limit.clear(body.username)
     logger.info("login succeeded", extra={"username": body.username})
+    audit.record(audit.LOGIN_SUCCEEDED, outcome=audit.SUCCESS, actor=body.username, route=route)
     return Token(access_token=create_access_token(body.username))
 
 
@@ -132,37 +161,71 @@ async def update_profile(
 
 @router.put("/password", summary="Change password")
 async def change_password(
+    request: Request,
     body: PasswordChange,
     username: str = Depends(get_current_user),
     db: Connection = Depends(get_db),
 ):
+    route = audit.route_of(request)
     async with db.execute("SELECT hashed_password FROM users WHERE username=?", (username,)) as cur:
         row = await cur.fetchone()
     if not row or not verify_password(body.current_password, row["hashed_password"]):
+        audit.record(
+            audit.PASSWORD_CHANGED,
+            outcome=audit.FAILURE,
+            actor=username,
+            route=route,
+            detail="the current password did not verify",
+        )
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     await db.execute(
         "UPDATE users SET hashed_password=? WHERE username=?",
         (hash_password(body.new_password), username),
     )
     await db.commit()
+    audit.record(audit.PASSWORD_CHANGED, outcome=audit.SUCCESS, actor=username, route=route)
     return {"detail": "Password updated"}
 
 
 @router.get("/apikey", response_model=ApiKeyInfo)
-async def get_apikey(username: str = Depends(get_current_user), db: Connection = Depends(get_db)):
+async def get_apikey(
+    request: Request,
+    username: str = Depends(get_current_user),
+    db: Connection = Depends(get_db),
+):
     async with db.execute("SELECT api_key FROM users WHERE username=?", (username,)) as cur:
         row = await cur.fetchone()
+    # This route hands back a permanent, unscoped credential in cleartext, which is finding
+    # SEC-5 and is not fixed here — the fix changes this response contract and is therefore a
+    # public-surface migration of its own. What this row buys meanwhile is the ability to
+    # answer "when was this key last disclosed, and to whom" after the fact.
+    audit.record(
+        audit.APIKEY_DISCLOSED,
+        outcome=audit.SUCCESS,
+        actor=username,
+        route=audit.route_of(request),
+        detail="the API key was returned in cleartext (finding SEC-5)",
+    )
     return ApiKeyInfo(api_key=row["api_key"] if row else "")
 
 
 @router.post("/apikey/regenerate", response_model=ApiKeyInfo)
 async def regenerate_apikey(
-    username: str = Depends(get_current_user), db: Connection = Depends(get_db)
+    request: Request,
+    username: str = Depends(get_current_user),
+    db: Connection = Depends(get_db),
 ):
     new_key = generate_api_key()
     await db.execute("UPDATE users SET api_key=? WHERE username=?", (new_key, username))
     await db.commit()
     # That it happened, and to whom. The key itself is returned to the caller and goes
-    # nowhere else; Step 15c gives this event a durable row rather than a log line.
+    # nowhere else — the row below records the rotation, never the value.
     logger.info("api key regenerated", extra={"username": username})
+    audit.record(
+        audit.APIKEY_REGENERATED,
+        outcome=audit.SUCCESS,
+        actor=username,
+        route=audit.route_of(request),
+        detail="the previous key stopped working at this moment",
+    )
     return ApiKeyInfo(api_key=new_key)

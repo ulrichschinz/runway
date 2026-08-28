@@ -305,6 +305,127 @@ it. Recorded as `RISK-OPS-004`. The [runtime redaction filter](#redaction-at-run
 second column by reading values instead of names — it is the other half of this control, not a replacement
 for it, and what neither half reaches is `RISK-OPS-005`.
 
+## The audit log
+
+**A second SQLite file, `data/audit.db`, holding what was done to accounts and data — not what the process
+was doing.** The log stream above answers "what happened during that request"; this answers "who changed
+that role, when was that key rotated, and which credential shape let them in". It is a separate file and not
+a table in `users.db` on purpose, and not a stdout stream on purpose: the reasoning for both is in
+[ADR 0026](adr/0026-the-audit-log.md).
+
+It lives under `DATA_ROOT`, which is the only directory either compose file bind-mounts, so **it survives a
+container recreation and it is inside whatever backs up `data/`**. There is no HTTP endpoint that reads it.
+Reading the audit log is an operator activity, performed on the host:
+
+```sh
+# on the deploy host
+cd /opt/services/runway
+sqlite3 -header -column data/audit.db 'SELECT * FROM audit_events ORDER BY id DESC LIMIT 20;'
+```
+
+One row per event, ten columns:
+
+| column | what it holds |
+|---|---|
+| `recorded_at` | UTC to the millisecond, the same stamp shape the JSON log lines carry |
+| `event` | the event name, dotted — `auth.login.failed`, `admin.role.changed`, `task.deleted` |
+| `actor` | the acting principal, or `NULL` where there is none (a boot-time promotion has no actor) |
+| `subject` | what was acted upon, where it differs from the actor — the target of a role change, the uuid of a deleted task |
+| `outcome` | `success`, `failure` (the request was wrong), `refused` (a control said no) or `noop` |
+| `auth_shape` | **which credential shape authenticated the request** — see below |
+| `route` | the route *template*, `PUT /admin/users/{target}/role`, never the requested path |
+| `request_id` | the same correlation id as [the log lines](#the-correlation-id) from that request |
+| `detail` | short context in words. Never a credential |
+
+**No credential is ever in a row** — not a key, not a token, not a password, not a hash. The row says which
+*shape* was used, never the value, and every string written additionally passes through the same redaction
+the log stream uses, so a future call site that gets it wrong still cannot persist one.
+
+**No IP address and no user-agent.** That is a deliberate deferral, not an omission: it is a PII and
+retention question that has not been decided. The schema is flat and nullable so adding one column later is
+one `ALTER TABLE`.
+
+**Nothing prunes this file.** It grows for the life of the deployment, on the same partition as `users.db`
+and `data/`. Recorded as `RISK-OPS-006`, with the trigger to come back to it.
+
+### Is anyone still using the Bearer-as-API-key shape?
+
+The question `SHIM-SEC-006` has been blocked on since Step 13, and the reason this table exists. Three
+credential shapes reach `get_current_user` and until now all three left the same trace — none:
+
+| `auth_shape` | the request looked like | |
+|---|---|---|
+| `api-key-header` | `X-Api-Key: <key>` | the clean API-key path |
+| `bearer-jwt` | `Authorization: Bearer <jwt>` | the clean JWT path |
+| `bearer-api-key` | `Authorization: Bearer <key>` | **the shim** — reached only after a failed JWT decode |
+
+```sh
+# on the deploy host: who is still sending an API key in the Bearer slot, and where
+sqlite3 -header -column /opt/services/runway/data/audit.db "
+  SELECT actor,
+         route,
+         COUNT(*)         AS calls,
+         MIN(recorded_at) AS first_seen,
+         MAX(recorded_at) AS last_seen
+  FROM audit_events
+  WHERE event = 'auth.authenticated'
+    AND auth_shape = 'bearer-api-key'
+  GROUP BY actor, route
+  ORDER BY calls DESC, route;"
+```
+
+```sh
+# the same question as a one-line ratio, for a quick look
+sqlite3 -column /opt/services/runway/data/audit.db "
+  SELECT auth_shape, COUNT(*) FROM audit_events
+  WHERE event = 'auth.authenticated' GROUP BY auth_shape ORDER BY 2 DESC;"
+```
+
+**Read the result carefully, because the two answers are not symmetric.**
+
+*Rows returned* is proof: a caller still depends on the shape, and you now have their account and the exact
+endpoints to migrate. Removing the shim today would break precisely those.
+
+*No rows* is **not** proof that nothing depends on it. It is a statement about the window you observed. A
+weekly report job, a monthly reconciliation, an agent someone has switched off for a fortnight — all of them
+are invisible to a query run over four days. Removal therefore needs a soak period on the real deployment,
+longer than the slowest caller's cycle, counted from the day this audit log actually reaches production and
+not from the day it was merged. Two further blind spots: only *successful* authentication is recorded, so a
+caller sending an expired key never appears; and a client that has migrated but still carries the old code
+path is indistinguishable from one that never had it.
+
+Until that window has passed, `SHIM-SEC-006` stays, and its expiry has not moved.
+
+### Other questions this table answers
+
+```sh
+# every disclosure of an API key in cleartext (finding SEC-5), most recent first
+sqlite3 -header -column data/audit.db "
+  SELECT recorded_at, actor FROM audit_events
+  WHERE event = 'auth.apikey.disclosed' ORDER BY id DESC LIMIT 20;"
+
+# every administrative action and every refusal
+sqlite3 -header -column data/audit.db "
+  SELECT recorded_at, event, actor, subject, outcome, detail FROM audit_events
+  WHERE event LIKE 'admin.%' OR outcome = 'refused' ORDER BY id DESC;"
+
+# a login attack: failures and lockouts, by account
+sqlite3 -header -column data/audit.db "
+  SELECT actor, event, COUNT(*) AS n, MAX(recorded_at) AS last_seen FROM audit_events
+  WHERE event LIKE 'auth.login.%' AND outcome != 'success'
+  GROUP BY actor, event ORDER BY n DESC;"
+
+# everything about one request, both halves — the row, then the lines
+sqlite3 -header -column data/audit.db \
+  "SELECT * FROM audit_events WHERE request_id = '1e4c7a90b2d5';"
+docker compose logs --no-log-prefix backend | jq -r 'select(.request_id == "1e4c7a90b2d5")'
+```
+
+**A missing row is not the same as a missing event.** An audit write can never fail a request — the write is
+wrapped, and a failure is logged at `ERROR` as `the audit event could not be written` and the request is
+served anyway. So if a row seems absent, grep the log stream for that message before concluding the event
+did not happen.
+
 ## The deploy host's topology
 
 **Read directly from the host on 2026-08-24 and checked in as** [`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml).

@@ -111,11 +111,17 @@ id = "be/adapters/db"
 scope = "backend"
 layer = 3
 owner = "maintainer"
-paths = ["backend/app/database.py"]
+paths = ["backend/app/database.py", "backend/app/audit.py"]
 note = """
 Owns the database connection. get_db is a FastAPI dependency provider, so routers import
 it directly for injection — that is the framework's idiom, not a layering breach, and the
 allowed edges below permit it.
+
+audit.py is in THIS unit and not in be/leaves for one reason: it writes to a database, and
+database.py is the only module allowed to open a connection, so the writer must sit where it
+can reach it. That placement is also what makes it usable at all — be/di, be/routers,
+be/services and be/app may all depend on be/adapters/db, which is exactly the set that has
+events to record. A leaf could be reached from everywhere but could not open anything.
 """
 
 [[units]]

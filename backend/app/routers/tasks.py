@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from app import audit
 from app.dependencies import get_current_user
 from app.models import AnnotationCreate, Task, TaskCreate, TaskModify
 from app.services import task_service
@@ -77,8 +78,18 @@ def complete_task(uuid: str, username: str = Depends(get_current_user)):
     summary="Delete a task",
     description="Permanently delete a task. Use complete instead if you want to keep history.",
 )
-def delete_task(uuid: str, username: str = Depends(get_current_user)):
+def delete_task(request: Request, uuid: str, username: str = Depends(get_current_user)):
+    # Recorded AFTER the delete, so the row means "this task is gone" rather than "someone
+    # asked". Taskwarrior's own `delete` is the only destructive operation this API exposes
+    # that leaves nothing behind to inspect — completing a task keeps it.
     _handle(task_service.remove_task, username, uuid)
+    audit.record(
+        audit.TASK_DELETED,
+        outcome=audit.SUCCESS,
+        actor=username,
+        subject=uuid,
+        route=audit.route_of(request),
+    )
 
 
 @router.post(

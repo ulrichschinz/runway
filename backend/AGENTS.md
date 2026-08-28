@@ -13,7 +13,10 @@ with `be/di` providing what routers inject. Declared in `architecture.toml`, enf
 skips the validation in `be/services` — that was a real violation until Step 8, and it is
 now a gate failure.
 
-**Only `be/adapters/db` opens a database connection.**
+**Only `be/adapters/db` opens a database connection.** That unit holds two files: `database.py`,
+which owns every connection, and `audit.py`, which writes the audit log through one. `audit.py`
+is there rather than in `be/leaves` because a leaf may depend on nothing and so could not open
+anything, and `be/di` — where the credential shape is known — may only reach `be/adapters/db`.
 
 ## Tests
 
@@ -39,5 +42,10 @@ Coverage floor is a ratchet, not a target — raise it, never lower it to fit a 
   "duplicate column name" passes silently — that is the re-run path. Every other database
   error is logged at ERROR and the boot continues, so a failed migration is visible but not
   fatal; the database can still be left half-migrated (`WAIVER-OPS-001`, resolved).
+- There is a **second** SQLite file. `DATA_ROOT/audit.db` holds the audit log, under the only
+  directory either compose file bind-mounts — anywhere else in the container it would be
+  deleted by the next deploy. `users.db` alone is no longer a complete backup.
+- An audit write **never** fails a request: it catches its own error and logs at `ERROR`. So a
+  missing row is not the same as a missing event.
 - `bcrypt` runs at its minimum cost factor in tests. At the production factor the suite
   took 36 seconds; the production factor is consequently covered by no test.
