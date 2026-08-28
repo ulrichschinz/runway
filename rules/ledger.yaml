@@ -1028,3 +1028,84 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a second deployment target on a different architecture, or a build that runs anywhere other than a hosted x86_64 runner"
     decision_record: docs/adr/0015-pin-the-build-platform.md
+
+  - id: RISK-DOC-003
+    statement: >
+      docs/threat-model.md is an assertion, not a derived artefact. Every claim in it was
+      read out of the code by hand on 2026-08-28 and cited to a file and a line, and nothing
+      re-derives any of it: line numbers move on the next edit, a new router or a new
+      credential shape appears in no section until somebody adds it, and the gate stays green
+      throughout. That is the same class of decay RULE-DOC-001 exists to prevent in AGENTS.md
+      and RULE-DOC-004 in the records — and neither reaches this file, because the contract
+      check reads AGENTS.md and the reference resolver reads docs/adr/ and docs/briefs/ only.
+      Making it executable is not obviously possible: most of what a threat model asserts is
+      an absence ("no egress", "no second auth path", "no credential in a row"), and an
+      absence has no syntax to scan for. What IS mechanically held is held by the rules the
+      document names section by section, which is why it names them rather than restating
+      them; the residue is this risk. The mitigation is a convention: the document states,
+      per section, which claims are enforced and which are only asserted, so a reader can
+      see what the gate is not doing for them.
+    owner: maintainer
+    re_open_trigger: "a claim in docs/threat-model.md is found to be false, a new trust boundary or credential shape is added without a section describing it, or a decay review (Step 16c) is asked to carry this document"
+    decision_record: docs/adr/0027-the-threat-model.md
+
+  - id: RISK-OPS-007
+    statement: >
+      The application makes NO network egress, and nothing keeps it that way. Verified
+      2026-08-28: no import of httpx, requests, urllib, aiohttp, http.client, socket or
+      smtplib appears anywhere under backend/app/, so the only outward call the serving
+      process makes is the Taskwarrior subprocess. That absence is what the egress half of
+      the threat model rests on, and it is an observation about today's tree rather than an
+      invariant. Nothing forbids the first egress call and nothing announces it: httpx is
+      already installed as a transitive dependency of mcp, so adding one is an import away.
+      RULE-OPS-001 is the closest control and it is deliberately narrower — it requires a
+      timeout on an egress call once one exists, which makes the first one survivable, not
+      visible. RULE-ARCH-004 restricts subprocess to task_runner and could be extended to
+      the HTTP clients, but that would forbid egress outright rather than route it through a
+      declared boundary, and no such boundary has been designed. So the honest statement is:
+      an agent adding an outbound call would satisfy every rule in the gate, and the threat
+      model's egress section would silently become wrong.
+    owner: maintainer
+    re_open_trigger: "any module under backend/app/ imports an HTTP or socket client, an outbound integration is designed, or restricted_imports in architecture.toml is extended to cover egress"
+    decision_record: docs/adr/0027-the-threat-model.md
+
+  - id: RISK-SEC-004
+    statement: >
+      No request field declares a length limit. backend/app/models.py constrains types and
+      nothing else — no Field(max_length=...), no constr, no annotated bound on any of the
+      string fields, and TaskCreate.description, AnnotationCreate.text and InboxItem.note
+      are the ones that matter, because they travel into the Taskwarrior argv and into that
+      user's task store. Neither uvicorn nor Starlette imposes a body-size limit by default,
+      so the bound on a single task description is whatever Traefik and the kernel happen to
+      allow. Two consequences, and their severity is deliberately not overstated: a very
+      large description is storage growth in a per-user data directory on the same partition
+      as users.db and audit.db (the partition RISK-OPS-006 is already about), and an
+      argument long enough to exceed the kernel's per-argument limit makes execve fail,
+      which task_runner surfaces as a 500 rather than a 400. The second was NOT reproduced
+      here: the limit is a Linux constant and this repository's development host is macOS,
+      where a one-megabyte argument executed fine. Both are capacity questions, which
+      decision F1 puts out of scope — recorded rather than silently assumed, which is what
+      F1 asks for.
+    owner: maintainer
+    re_open_trigger: "a 500 is observed from a long description or annotation, disk usage grows from task data rather than from logs or audit rows, a body-size limit is set at the proxy, or F1's capacity exclusion is revisited"
+    decision_record: docs/adr/0027-the-threat-model.md
+
+  - id: RISK-SEC-005
+    statement: >
+      RULE-SEC-001 reads backend/app/routers/*.py and nothing else — tools/checks/route_guards.py
+      globs that one directory — so a route declared anywhere outside the routers package is
+      neither observed nor required to appear in rules/route-guards.toml. One route is outside
+      it today: GET /health, declared on the app object in backend/app/main.py, unauthenticated,
+      returning a fixed {"status": "ok"}. That route is harmless and it is also the proof of the
+      gap: the declaration file has thirty-one entries and the application serves thirty-two
+      routes, and nothing anywhere says so. The consequence is not the health check, it is the
+      next route someone adds beside it — a guard forgotten there fails exactly the way
+      RULE-SEC-001 was written to prevent, silently and for everybody, while the gate stays
+      green. The partial backstop is RULE-SURF-001: a new route changes the OpenAPI snapshot,
+      so it cannot arrive unnoticed, but regenerating that snapshot is a normal part of adding
+      a route and it demands no guard declaration. Closing this means widening the checker's
+      scope to every module that can hold a decorator, which also means deciding what an
+      infrastructure route like /health declares.
+    owner: maintainer
+    re_open_trigger: "a second route is declared outside backend/app/routers/, an authenticated or state-changing route is added to main.py, or the route-guard checker is given a wider scope"
+    decision_record: docs/adr/0027-the-threat-model.md

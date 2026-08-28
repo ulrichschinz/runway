@@ -17,10 +17,112 @@
 # fix and the rule that keeps it fixed. Calling them waivers would overstate the
 # permission granted: nothing here authorises leaving the defect in place, only landing
 # the lint gate before the fix.
+#
+# `open_security_finding` is a different class and arrived with SEC-5 on 2026-08-28. It is
+# not a suppression of anything: no linter reports it, no gate rule covers it, and there is
+# nothing inline to annotate. It is a Phase 0 security finding that stayed real after the
+# security waves closed every other one of its severity, recorded here because this file is
+# the only artefact in the repository that makes a defect carry an owner and a date. Nothing
+# else about the entry is different — the five groups and the expiry work exactly as above,
+# and RULE-RULE-002 fails the gate when the date passes.
 
 version: 1
 
 waivers:
+  - id: WAIVER-SEC-003
+    class: open_security_finding
+    rule: >
+      No gate rule. Phase 0 finding SEC-5, unowned in this repository until 2026-08-28:
+      it appeared in the finding table and in one incidental citation, with no waiver, no
+      rule, no step and no expiry, while every other High and Critical finding was closed
+      in Steps 11 and 12.
+    scope: >
+      backend/app/database.py (generate_api_key, and the api_key column of CREATE_USERS),
+      backend/app/routers/auth.py (GET /auth/apikey, POST /auth/apikey/regenerate),
+      backend/app/dependencies.py (both paths that match a presented key against the
+      column), backend/app/models.py (ApiKeyInfo), and the users.db file itself — a
+      bind-mounted file on the deploy host and in every backup taken of it.
+    finding: "SEC-5, severity High — docs/plan/phase-0-2.md, the Phase 0 finding table"
+    reason: >
+      API keys are stored in users.db as the cleartext value that authenticates. They are
+      permanent, unscoped and un-expiring, and GET /auth/apikey hands the value back in
+      cleartext on demand. Anyone who can read the database file — on the host, in a
+      backup, or in a copy taken for debugging — holds a working credential for every
+      account in it, and no rotation of JWT_SECRET touches that, because the API-key path
+      is checked before any token work.
+
+      The fix is not a patch. It is store-a-hash plus show-once-on-regeneration, which
+      changes what GET /auth/apikey can return: a hashed column cannot produce the value,
+      so the endpoint either stops returning a key or starts returning a status. That is
+      the response contract of a route the README documents and that fastapi-mcp exposes
+      as an MCP tool, so decision F2 makes it a public-surface migration —
+      expand -> migrate -> switch -> contract with a deprecation window, its own step, its
+      own brief. Folding it into Step 15's audit-log change would have buried a migration
+      of an externally consumed surface inside an observability feature.
+    alternatives_evaluated: >
+      Fixing it inside Step 15 was rejected for the reason above: it is an F2 surface
+      migration, and the step that carried it would have been three changes wearing one
+      brief. Encrypting the column at rest rather than hashing it was rejected because the
+      key would have to live beside the database on the same host, which moves the secret
+      rather than removing it, and because the endpoint would still disclose the cleartext
+      value. Deleting GET /auth/apikey outright, which would end the disclosure half
+      immediately, was rejected as the same F2 migration with a worse migration story: it
+      breaks every caller that reads its key back without offering the show-once
+      replacement that makes rotation usable. Leaving SEC-5 unrecorded — the state before
+      2026-08-28 — was rejected because that is not a decision, it is the absence of one,
+      and it is exactly how the finding survived two security waves.
+    risk: >
+      High and unchanged by this entry. A read of users.db is a full compromise of every
+      account's API access, and an API key is equivalent to a password for everything
+      except changing the password: it authenticates on every route, including the admin
+      routes when the account holds that role. The exposure is at rest rather than remote —
+      obtaining the key through the API already requires being authenticated as that user —
+      so what this finding really buys an attacker is persistence that survives a password
+      change, and a credential that reads identically in a backup taken months ago.
+    mitigation: >
+      Partial, and honestly partial. Since 2026-08-28 every disclosure through
+      GET /auth/apikey writes an `auth.apikey.disclosed` audit row naming the account, the
+      route and the request id (backend/app/routers/auth.py), and every authenticated
+      request writes a row naming which credential shape was used, so a stolen key's use is
+      visible after the fact and rotation is one POST away. That converts "undetectable and
+      unattributable" into "reconstructable from data/audit.db" — which is worth having and
+      is not a control: it observes the disclosure, it does not prevent it, and it says
+      nothing about a key lifted from the database file directly, because that read passes
+      through no code this repository owns. Alongside it: RULE-OPS-002 and the runtime
+      redaction filter keep the value out of the log stream, RULE-HYG-001 and RULE-HYG-002
+      keep users.db untracked and git-ignored, the deploy host publishes no ports and the
+      database is not reachable from outside the compose network, and keys are
+      secrets.token_urlsafe(32), so guessing one is not the threat.
+    owner: maintainer
+    approver: maintainer
+    approved_on: 2026-08-28
+    approval_reference: >
+      Decision 2 of docs/plan/STATUS.md section 3, taken 2026-08-27: record it now with an
+      owner and an expiry, and make the real fix its own step.
+    expiry_rationale: >
+      2027-01-31 is chosen and not defaulted. It is deliberately clear of the two dates
+      already standing in November — WAIVER-TYPE-001 on the 4th and SHIM-SEC-006 on the
+      25th — because three decisions landing in one month is how one of them gets renewed
+      without being read. It is after the shim decision rather than before it: both change
+      the same function's API-key path, and sequencing them means the first is not being
+      reasoned about while the second is in flight. And it leaves room for what the fix
+      actually is under F2 — a step, a deprecation window, and callers who have to move —
+      rather than a date that assumes a patch.
+    expires: 2027-01-31
+    re_open_trigger: >
+      users.db or a backup of it is copied off the deploy host, an api_key value is found
+      outside the database, an `auth.apikey.disclosed` row appears for an account whose
+      owner did not request it, a second deployment of this application is stood up, or the
+      expiry date passes
+    resolution: >
+      A step of its own. Store bcrypt (or argon2) over the key instead of the value, return
+      the cleartext exactly once from POST /auth/apikey/regenerate, and change
+      GET /auth/apikey to report presence and age rather than the secret — under the
+      public-surface migration pattern of docs/change-workflow.md, because F2 treats the
+      REST route and its MCP tool as externally consumed. The migration has to keep the
+      column readable while both shapes are accepted, since existing agents and MCP clients
+      authenticate with keys that were issued in cleartext and cannot be re-derived.
+
   - id: WAIVER-TYPE-001
     class: scheduled_remediation
     rule: "mypy index — Value of type 'Row | None' is not indexable"

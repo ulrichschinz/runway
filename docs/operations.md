@@ -115,10 +115,19 @@ from a working one: `docker compose up -d` returns success either way.
 The backend healthcheck calls `/health` with Python's `urllib`, because the runtime image ships no HTTP
 client.
 
-> **These healthchecks do not run in production.** The host uses its own compose file, which declares no
-> `healthcheck` for either service and orders `frontend` after `backend` with a plain `depends_on` — which
-> waits for *started*, not *healthy*. The defect the healthchecks were added to prevent is therefore still
-> live on the deploy host. Copying the two `healthcheck` blocks into the host's compose file closes it.
+> **These healthchecks now run in production. Read directly from the host on 2026-08-28.**
+> `/opt/services/runway/docker-compose.yml` carries a `healthcheck` block on both services and orders
+> `frontend` behind `depends_on: backend: condition: service_healthy` — *healthy*, not merely *started* —
+> exactly as the checked-in copy at [`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml)
+> declares. The defect that kept a dead backend in production through two green deploys on 2026-08-04 is
+> closed on the host, not only in this repository.
+>
+> The only drift between the host and the checked-in copy is the two `logging:` blocks and the `LOG_LEVEL`
+> line — log rotation, which is still unapplied. See *The log stream*.
+>
+> **Do not read this as a standing guarantee.** It is one read on one date, and the sentence it replaces
+> was also true when it was written. Nothing continuously compares the host against the checked-in copy
+> (`RISK-OPS-002`); CI has no host access, so this paragraph starts ageing the moment it is committed.
 
 ## Timeouts
 
@@ -498,7 +507,8 @@ That is the development file, where seeding a fresh database with registration o
   terminated by Let's Encrypt, routed to the frontend on port 4000. The backend is not reachable from
   outside the compose network except through the frontend.
 - **The rollback runbook does not work as written** — the tag is a literal `:latest`. See *Rolling back*.
-- **The healthchecks in this repository do not run.** See *Health*.
+- **The healthchecks do run**, as of a host read on 2026-08-28. The transcript above is the file as it
+  stood on 2026-08-24, before they were applied. See *Health*.
 - **The checked-in `docker-compose.yml` is a development artefact**, not a description of production. It
   declares `build:` with no `image:`, publishes ports, and has no Traefik labels. Reading it to learn how
   production is wired gives the wrong answer on every one of those points.

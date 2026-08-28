@@ -153,11 +153,14 @@ Recorded so a green gate is not mistaken for a broader guarantee:
 - **Frontend rendering, routing and gestures are untested** (`RISK-TEST-004`). The tests
   cover the pure logic where every shipped frontend defect actually was.
 - **The container test tier cannot run on arm64** (`RISK-TEST-001`); CI runs it.
-- **The deploy host's compose file is not in this repository** (`BLIND-OPS-001`). Its
-  contents are now recorded in `docs/operations.md`, but nothing detects drift once the
-  host changes (`RISK-OPS-002`), and the rollback runbook does not work as written.
+- **Nothing compares the deploy host against this repository** (`RISK-OPS-002`). Its compose
+  file is copied to `ops/deploy/docker-compose.yml` and matched on 2026-08-28; after that,
+  drift on either side is undetected. CI has no host access.
 - **Transitive dependencies are not pinned as a whole.** One incident already came from
   that; `RULE-DEP-001` makes the gap survivable, not closed.
+- **What the gate does *not* hold** is written down section by section in
+  `docs/threat-model.md`, with every asserted-only property carrying a risk id
+  (`RISK-DOC-003`). A green gate is not the threat model.
 
 Open security findings with owners and expiries: `rules/waivers.yaml`.
 Full residual-risk register: the `residual_risks` section of `rules/ledger.yaml`.
@@ -166,5 +169,7 @@ Full residual-risk register: the `residual_risks` section of `rules/ledger.yaml`
 
 *Where to go next:* `docs/task-interface.md` (commands, exit codes, every rule) ·
 `docs/change-workflow.md` (delivery patterns, briefs) · `docs/operations.md` (deploy,
-rollback, incidents) · `index/schema.md` (what the index knows) ·
+rollback, incidents) · `docs/security.md` (roles and guards) · `docs/threat-model.md`
+(actors, inputs, secrets, egress, abuse cases — enforced vs. asserted) ·
+`index/schema.md` (what the index knows) ·
 `docs/plan/phase-0-2.md` (why the repository is shaped this way).
