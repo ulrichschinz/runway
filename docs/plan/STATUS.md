@@ -57,7 +57,7 @@ the structure was already sound; what was missing was enforcement and knowledge.
 proven able to fail on every run**), index (built, qualified, deterministic, queryable).
 
 `check` ~5s · `verify` ~53s local. Unimplemented commands are `rebuild-verify` (5),
-`scaffold` (16b) and `decay-review` (16c); `brief`, `surfaces`, `lock` and `grant-admin` are implemented.
+`decay-review` (16c); `brief`, `surfaces`, `lock`, `grant-admin` and `scaffold` are implemented.
 
 ---
 
@@ -211,10 +211,10 @@ went unanswered. It is not blocking anything; it just keeps reappearing.
 | ~~13~~ | ~~Public-surface protection~~ | **Done.** Five snapshots under `ops/surfaces/`, env vars cross-checked against README. `BLIND-MCP-001` resolved. Found: every MCP tool name in the README was wrong, and `PORT` was documented but unread. See `docs/briefs/0015-public-surface-protection.md` and ADR 0020. |
 | ~~14~~ | ~~Supply chain~~ | **Done.** Four images digest-pinned, Arch packages pinned to a dated archive snapshot, hash-pinned Python locks, 305 licences classified, secret scanning, Dependabot. `python-jose` 3.3.0→3.5.0. See `docs/briefs/0016-supply-chain.md` and ADR 0021. |
 | **15** | Operability and the minimal threat model | **Next.** Scoped in full in §3 — it is larger than this row once claimed. |
-| **16** | `make scaffold`, `make decay-review`, Phase 4 audit, **Cold-Agent Index and Change Tests** | 16a already landed early. |
+| **16** | `make decay-review`, Phase 4 audit, **Cold-Agent Index and Change Tests** | 16a landed early; **16b landed 2026-08-29**. Remaining: 16c and 16d. |
 
-Unimplemented commands (each exits `3` naming its step): `rebuild-verify` (5),
-`scaffold` (16), `decay-review` (16). `grant-admin` was added in Step 11.
+Unimplemented commands (each exits `3` naming its step): `rebuild-verify` (5) and
+`decay-review` (16c). `grant-admin` was added in Step 11; `scaffold` landed in 16b.
 
 ---
 
@@ -313,14 +313,24 @@ Say *"where are we and how do we go on"*. The answer should be: read this file a
 commands, then **start Step 15** — it is next in plan order, entirely local, and its four
 open design decisions were closed on 2026-08-27 (§3).
 
-**Step 15 is complete** (2026-08-28) — all five sub-changes, on `step-15a-structured-logging`,
-none merged and no PR opened. Nine commits. The gate proves **44** rules able to fail, up from
-40 at the start of the step.
+**Step 15 is complete** (2026-08-28), and so is **16b** (2026-08-29). Everything sits on
+`step-15a-structured-logging` — twelve commits, none merged, no PR opened. The gate proves
+**46** rules able to fail, up from 40 when Step 15 began.
 
-**Next is Step 16**, the last plan step: `scaffold`, `decay-review`, the Phase 4 audit and the
-Cold-Agent tests. Before any of it, read the two host items below — one of them is a
-precondition for deploying Step 15 at all, and there is an open proposal to stop hand-editing
-the host, recorded under *The deploy mechanism* below.
+Two things landed after Step 15 and are easy to miss because they are not plan steps:
+
+- **The compose file is now deployed rather than described** (`135ab62`). The forced command
+  fetches [`ops/deploy/docker-compose.yml`](../../ops/deploy/docker-compose.yml) at the deployed
+  commit and applies it, so `RISK-OPS-002` closes by construction once the host swap is done.
+  `RULE-OPS-003` bounds what that file may ask of the host. **The swap has not been done** —
+  see the host items below; until it is, none of Step 15's compose changes reach production.
+- **`./run scaffold` works** (`50aa33a`). Verified end to end: one command, `verify` green with
+  zero manual edits, and the generated unit removes cleanly leaving the tree byte-identical.
+
+**Remaining: 16c** (`make decay-review`) **and 16d** (the Phase 4 audit and the Cold-Agent Index
+and Change Tests). 16d has a precondition no tooling can satisfy: the test session must carry no
+agent-side cache, knowledge base or session memory from this work, and that has to be arranged
+before the run, not asserted after it.
 
 Do not try to remove `SHIM-SEC-006` in this step, and do not fold the SEC-5 fix into the audit
 log — §3 records why for both.

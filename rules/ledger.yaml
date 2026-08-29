@@ -806,6 +806,23 @@ residual_risks:
     re_open_trigger: "a credential is found in a log line that both RULE-OPS-002 and the filter passed, a new credential format is introduced, or the api-key shape is observed redacting something an operator needed"
     decision_record: docs/adr/0024-structured-logging.md
 
+  - id: RISK-ARCH-001
+    statement: >
+      `./run scaffold KIND=backend-feature` raises the `RULE-ARCH-003` hub baseline for
+      backend/app/dependencies.py itself, because every guarded route imports get_current_user
+      and a generated feature is one more importer. The raise is honest — it lands in the diff
+      with a dated comment naming the command that made it, and a human still commits it — but
+      a ratchet a machine can advance no longer measures what it was built to measure. Before
+      this, a rising fan-in on the auth choke point meant somebody should look; now it means
+      either that, or that scaffold ran. Those two are indistinguishable in the number alone,
+      and the second is common while the first is rare, which is the wrong way round for a
+      signal. The alternative considered and rejected was allowlisting dependencies.py, which
+      drops the signal permanently rather than blunting it. Observed twice already: one
+      generated feature took the baseline 6 → 7, a second took it to 8.
+    owner: maintainer
+    re_open_trigger: "a third generated backend feature, or a fan-in rise on dependencies.py that no scaffold run explains"
+    decision_record: docs/adr/0029-the-scaffold-generator.md
+
   - id: RISK-SURF-001
     statement: >
       A fresh database and a migrated one do not have the same schema, and the snapshot that
