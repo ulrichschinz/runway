@@ -57,6 +57,7 @@ If an answer says `STALE`, run `make fix`. The answer was not trustworthy.
 | A frontend rule about tags, filtering or sorting | `frontend/src/shared/`. These are pure and tested; components are not. |
 | Frontend feature UI | the owning feature unit — `fe/tasks`, `fe/projects`, `fe/identity`. Features never import each other. |
 | A gate rule | a script in `tools/checks/`, a line in `tools/checks/profiles.conf`, an entry in `rules/ledger.yaml`, and a fixture in `tools/fixtures/negative.sh`. All four, or it is not a rule. |
+| A whole new feature, backend or frontend | `make scaffold KIND=backend-feature NAME=x`. It emits the unit, its registration, its guard declaration, both test tiers and the snapshots, so the unit is conformant from its first commit rather than after review. |
 | A non-obvious decision | a dated ADR in `docs/adr/`. |
 
 ## 4. Structure and dependency rules

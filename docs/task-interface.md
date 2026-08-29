@@ -115,8 +115,53 @@ Exits `4` when the index is stale, because the answer would have been unreliable
 changed against the base.
 
 ### `make scaffold`
-Creates a new unit that is conformant to the structure and the boundary rules by construction, with a
-passing smoke test and zero manual edits. *Implemented in Step 16.*
+Creates a new unit that is conformant to the structure, the boundary rules and the gate **by
+construction**: one command, then `./run verify` is green with nothing edited by hand.
+
+```sh
+./run scaffold KIND=backend-feature  NAME=reports
+./run scaffold KIND=frontend-feature NAME=reports
+```
+
+`NAME` must match `^[a-z][a-z0-9]*(_[a-z0-9]+)*$` — it becomes a Python module, a URL segment, a unit id
+and a Vue component name, and that is the set of strings that is safe in all four.
+
+**`KIND=backend-feature`** emits a router, a service, a models module and both test tiers, and registers
+the slice as a unit:
+
+| It writes | So that |
+|---|---|
+| `backend/app/routers/<name>.py` | one real `GET /<name>`, guarded by `get_current_user` |
+| `backend/app/services/<name>_service.py` | the logic is reachable without a client |
+| `backend/app/<name>_models.py` | the shapes live with the feature, not in the shared DTO kernel |
+| `backend/tests/unit/test_<name>.py` | the slice is covered — a new module with no tests moves total coverage toward the `RULE-TEST-003` floor |
+| `backend/tests/container/test_<name>.py` | the module is proven present in the shipped image |
+| a `be/feature/<name>` unit in `architecture.toml` | `RULE-ARCH-001` has an edge list to check it against — one that withholds `be/adapters/task` |
+| a line in `rules/route-guards.toml` | `RULE-SEC-001` passes; a route with no declared guard fails the gate |
+| the route counts in `AGENTS.md` | `RULE-DOC-001` checks them against the index, and a new route moves both |
+
+**`KIND=frontend-feature`** emits a view, its pure logic module and a vitest file, registers an `fe/<name>`
+unit whose edges allow `fe/shared` and `fe/layout` only, and adds the SPA route. There is no second test
+tier here: the frontend has one, by decision (ADR 0007, `RISK-TEST-004`).
+
+Both then finish the job the way a hand-written change has to: `make fix`, `./run surfaces --update` for the
+snapshots the new route moves, a `git add` of everything written — **the index reads `git ls-files`, so an
+unstaged file does not exist as far as ownership and the counted claims are concerned** — and a fan-in
+baseline raised in `ops/structure-baseline.toml` if the new unit pushed one over. That last one is a
+ratchet being raised by a generator, which is why it lands in the diff with a dated line naming the command
+that moved it. Review it.
+
+It refuses rather than overwrites: an existing unit id or an existing target file exits `2` and changes
+nothing. A missing or unknown `KIND` or `NAME` also exits `2`.
+
+**What it does not do.** It does not design the feature, it does not write the Change Impact Brief
+(`./run brief` pre-fills one; the fields that need intent stay TODO), and it does not commit.
+
+**Removing one again** is `git checkout` plus `rm`, because every edit it makes is to a tracked file and
+every addition is a new file. By hand, in a tree with other work in flight: delete the generated files,
+delete the unit block and the `allowed_edges` block between the `generated feature` markers in
+`architecture.toml`, remove the unit id from the `to` lists it was added to, undo the router mount, the
+guard line and the two counts, then `make fix` and `./run surfaces --update`.
 
 ### `make fix`
 Applies every deterministic, semantics-preserving repository-owned fix: `ruff` import order, safe lint fixes

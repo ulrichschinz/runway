@@ -49,7 +49,7 @@ case "$cmd" in
 	mcp)            exec python3 tools/index/mcp_server.py "$@" ;;
 	index)          exec python3 tools/index/build.py "$@" ;;
 	brief)          exec python3 tools/brief.py "$@" ;;
-	scaffold)       exec tools/stub.sh scaffold       16 "unit scaffold generator" ;;
+	scaffold)       exec python3 tools/scaffold.py "$@" ;;
 	fix)            exec tools/fix.sh "$@" ;;
 	grant-admin)    exec python3 tools/grant-admin.py "$@" ;;
 	surfaces)       exec backend/.venv/bin/python tools/surfaces.py "$@" ;;

@@ -41,6 +41,18 @@ rationale = "Co-change clusters around the tasks feature (store + modal + view c
 
 # --- units ------------------------------------------------------------------
 
+# Generated feature units are declared HERE, ahead of the hand-written ones, and the
+# position is load-bearing. The index takes the FIRST unit whose path patterns match a
+# file, so be/routers' `backend/app/routers/**` glob would otherwise claim a generated
+# router before the unit that owns the rest of the slice could.
+#
+# `./run scaffold` writes between the two markers below, and between the matching pair in
+# the edge section. Nothing else does. Removing a generated feature means deleting its unit
+# block, its allowed_edges block, and its id from the `to` lists it was added to — see
+# docs/task-interface.md#make-scaffold.
+# >>> generated feature units
+# <<< generated feature units
+
 [[units]]
 id = "ops"
 scope = "repository"
@@ -323,6 +335,9 @@ to = []
 from = "tests"
 to = ["be/app", "be/di", "be/routers", "be/services", "be/adapters/db", "be/adapters/task", "be/leaves", "fe/shared", "fe/tasks"]
 note = "Tests may reach anything they protect; that is what makes them tests."
+
+# >>> generated feature edges
+# <<< generated feature edges
 
 # --- cycles that exist today -------------------------------------------------
 # With an owner and a teardown path. This inventory may only shrink (Step 8 adds the ratchet).
