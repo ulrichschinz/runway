@@ -632,6 +632,38 @@ p.write_text(t)
 LOGCREDS
 expect_red "OPS-002-fstring" "tools/checks/log-secrets.sh" "RULE-OPS-002"
 
+# --- RULE-OPS-003 — the deploy compose asks the host for privilege ----------
+# Since the forced command applies this file at the deployed commit, an edit here reaches the
+# host directly. `privileged: true` is the shortest path from "merged a YAML change" to "owns
+# the machine", and it is one line in a file that reviews mostly skim.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'PRIVESC'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    restart: unless-stopped\n"
+assert anchor in t, "the compose file does not look as the fixture expects"
+p.write_text(t.replace(anchor, anchor + "    privileged: true\n", 1))
+PRIVESC
+expect_red "OPS-003-privileged" "tools/checks/deploy-compose.sh" "RULE-OPS-003"
+
+# --- RULE-OPS-003 — the deploy compose mounts the host in ------------------
+# The quieter half, and the more likely one: a bind mount whose source climbs out of the
+# service directory. Mounting the docker socket is the canonical way a container stops being
+# one, and it looks like ordinary plumbing in a diff.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'HOSTMOUNT'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "      - ./data:/app/data\n"
+assert anchor in t, "the data mount is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + "      - /var/run/docker.sock:/var/run/docker.sock\n", 1))
+HOSTMOUNT
+expect_red "OPS-003-hostmount" "tools/checks/deploy-compose.sh" "RULE-OPS-003"
+
 # --- RULE-GATE-001 — the profile blows its runtime budget -------------------
 #
 # A budget of 0 alone proves nothing: the suite finishes inside a second and 0 > 0 is

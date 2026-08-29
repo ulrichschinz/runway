@@ -16,6 +16,52 @@ push to main ──> Build and Deploy (deploy.yml)
 straight from push to build to deploy with no verification of any kind — see [the incident](#incident-2026-08-04)
 below for what that cost.
 
+## The deploy mechanism
+
+The `deploy` job connects to the host with a key that carries a **forced command**, so the `script:` in
+[`deploy.yml`](../.github/workflows/deploy.yml) is never executed as a script. It is delivered as
+`SSH_ORIGINAL_COMMAND`, and the host runs [`ops/deploy/deploy-command.sh`](../ops/deploy/deploy-command.sh)
+instead. A compromised CI run therefore gets that one script and never a shell.
+
+The script reads the commit out of the request — the only caller-controlled input the host accepts, reduced
+to 40 hex characters before it is used for anything — then fetches
+[`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml) at that commit, validates it with
+`docker compose config -q`, keeps a timestamped backup of the file it replaces, and only then pulls and
+starts. **If the commit cannot be determined or the fetched file does not validate, it deploys nothing.**
+Carrying on with the compose already on disk would silently reintroduce the drift this exists to remove,
+on exactly the days something is already wrong.
+
+### Why the compose file is deployed rather than described
+
+Until 2026-08-28 the forced command was `docker compose pull && docker compose up -d`. That shipped images
+and never the compose file, so the host's copy was maintained by hand and this repository's copy was a
+transcription of it.
+
+A transcription is accurate on the day it is taken. Three claims made here about production were each true
+when written and each drifted silently afterwards — the healthchecks did not run and then did, the rollback
+runbook was broken and then was not, and log rotation was checked in and not applied. **Every one was found
+by someone reading the host, never by anything failing.** `RISK-OPS-002` is the record of that gap.
+
+So the compose file became part of the deployed artefact. Configuration changes now travel the same path as
+code: a pull request, `verify`, a merge, a deploy. Rollback also gets more correct rather than less — pinning
+an old `RUNWAY_SHA` now restores that commit's compose too, instead of pairing an old image with today's
+configuration.
+
+### What it costs, and the boundary on it
+
+Whatever is in `ops/deploy/docker-compose.yml` on `main` now decides what runs on the host. Compose can mount
+host paths, join the host network namespace and ask for privilege — none of which application code can do
+from inside a container. Merging to `main` was container-scoped and is now host-scoped.
+
+`RULE-OPS-003` bounds that: it fails the gate on `privileged: true`, on `network_mode: host`, on `cap_add`,
+and on any bind mount whose source lies outside the service directory. `RULE-HYG-003` already fails on a
+literal secret where a `${...}` reference belongs.
+
+Neither is a sandbox, and neither is claimed to be. Whoever can merge to `main` can still change what the
+services run — they always could, through the application code. What these rules refuse is the narrow set of
+edits that convert a container-scoped change into a host-scoped one, quietly, in a file that reviews skim
+because it is mostly YAML.
+
 ## Branch protection
 
 `RULE-GOV-001`. `ops/github/ruleset.json` is **canonical**; the live GitHub configuration is compared

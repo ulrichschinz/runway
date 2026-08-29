@@ -717,6 +717,31 @@ rules:
       settles on. It matches credential-bearing names, so it cannot see a credential arriving
       under a neutral name — see RISK-OPS-004.
 
+  - id: RULE-OPS-003
+    statement: >
+      The deploy compose file MUST NOT ask the host for privilege, for its network namespace,
+      or for a bind mount whose source lies outside the service directory.
+    class: executable
+    check: tools/checks/deploy-compose.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/operations.md#the-deploy-mechanism
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Until 2026-08-28 the deploy key could only pull images and restart; the compose file was
+      maintained by hand on the host and ops/deploy/docker-compose.yml was a transcription of
+      it. A transcription is accurate on the day it is taken, and three claims this repository
+      made about production were each true when written and each drifted silently afterwards —
+      every one of them found by reading the host rather than by anything failing. So the
+      compose file became part of the deployed artefact, which removes the drift and widens what
+      a merge to main can reach: compose can mount host paths, join the host network namespace
+      and ask for privilege, none of which application code can do from inside a container. This
+      rule is the boundary on that widening. It does not sandbox the deployment and does not
+      pretend to — whoever can merge can still change what the services run. It refuses the
+      specific edits that turn a container-scoped change into a host-scoped one, in a file that
+      is easy to skim past in review because it is mostly YAML nobody reads twice.
+
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.
 residual_risks:
