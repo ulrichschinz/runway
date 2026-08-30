@@ -841,6 +841,23 @@ residual_risks:
     re_open_trigger: "a credential is found in a log line that both RULE-OPS-002 and the filter passed, a new credential format is introduced, or the api-key shape is observed redacting something an operator needed"
     decision_record: docs/adr/0024-structured-logging.md
 
+  - id: RISK-DOC-004
+    statement: >
+      Prose rots and nothing detects it. RULE-DOC-001 checks the factual claims in AGENTS.md
+      against the repository, and RULE-DOC-004 resolves identifiers named in records — but no
+      check reads an ordinary paragraph in docs/ and asks whether it is still true. Found on
+      2026-08-30: docs/task-interface.md's "Known gaps" section still claimed there was not a
+      single test in this repository and that an expired waiver could not fail the gate, both
+      fixed in Steps 3 and 9 and both false for weeks. That is the fourth stale claim found on
+      this branch; the other three were about production (RISK-OPS-002) and were caught by
+      reading the host. The common shape is a statement that was true when written, describing
+      something that later changed elsewhere, with no link between the two. The decay review
+      cannot see this either — every diagnostic it runs measures structure, and a paragraph is
+      not structure.
+    owner: maintainer
+    re_open_trigger: "a fifth stale claim is found, or a document acquires a checkable claim format worth enforcing"
+    decision_record: docs/adr/0030-the-decay-review.md
+
   - id: RISK-ARCH-001
     statement: >
       `./run scaffold KIND=backend-feature` raises the `RULE-ARCH-003` hub baseline for

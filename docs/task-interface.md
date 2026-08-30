@@ -557,18 +557,29 @@ gate stops being run at all.
 
 ## Known gaps at this step
 
+> **Rewritten 2026-08-30.** Everything below this line described the repository as it stood at Step 2, and
+> most of it had been false for weeks: it claimed there was not a single test here, and that an expired
+> waiver could not fail the gate. Both were fixed in Steps 3 and 9 and nobody came back to this section.
+> Prose does not have a checker — `RULE-DOC-001` verifies `AGENTS.md`, not this file, and no decay
+> diagnostic can see a paragraph that quietly stopped being true. Recorded as `RISK-DOC-004`.
+
 - The commands marked *implemented in Step N* exit `3` with a message naming that step. They do not pretend
-  to succeed.
+  to succeed. `rebuild-verify` is the only one left.
 - The root contract is `AGENTS.md`, and `RULE-DOC-001` checks every factual claim in it against the actual
-  repository — paths, commands, identifiers and the counted public-surface claims.
-- **`make verify` runs no tests.** There is not a single test in this repository yet. A green `verify` means
-  the repository is hygienic, its interface is coherent, and its code is formatted, lint-clean and
-  type-clean — **not that it behaves correctly.** Steps 3 and 4 add the safety net; Steps 5–8 add the index
-  and boundary enforcement.
-- `rules/waivers.yaml` is not yet validated by a check, so an expired waiver does not currently fail the
-  gate. Four entries carry expiry dates of 2026-11-04. Step 9 adds the validator.
-- The frontend dependency tree carries 5 known vulnerabilities (1 moderate, 4 high) reported by `npm`.
-  Dependency auditing and the license policy are Step 14.
+  repository — paths, commands, identifiers and the counted public-surface claims. **This file is not
+  checked that way.**
+- **A green `verify` does not mean the application is correct.** It means 47 rules held, the backend and
+  frontend suites passed, the index is current and qualified, no boundary or public surface moved
+  unannounced, and every one of those 47 rules was separately proven able to fail on a constructed
+  violation. What it does not cover is stated in [the threat model](threat-model.md), section by section,
+  as *enforced* versus *asserted*.
+- **The container tier does not run on arm64** (`RISK-TEST-001`), so a local `verify` on Apple silicon
+  skips the only tests that exercise the real Taskwarrior binary and the cross-tenant isolation boundary.
+  CI runs them. A green local run is weaker than a green CI run, and this is the difference.
+- **Coverage is a floor, not a target** (`RULE-TEST-003`). It sits below the current figure deliberately —
+  a ratchet that tracks the exact number turns every unrelated refactor into a coverage failure.
+- Frontend dependency vulnerabilities and the licence policy are handled as of Step 14; see
+  [`policy/licenses.yaml`](../policy/licenses.yaml) and `RULE-DEP-002`.
 
 
 

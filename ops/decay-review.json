@@ -17,18 +17,17 @@
         ]
       ],
       "does_not_cover": "cycles between units only. A cycle inside a unit is invisible to architecture.toml and therefore to this count.",
-      "findings": [
-        "no trend: this is the first recorded review, so the inventory has a value and no direction. The second review is the first one that can say anything."
-      ],
+      "findings": [],
       "name": "cycles",
       "new": [],
       "resolved_still_declared": [],
       "summary": "2 declared, 0 new, 0 resolved-but-declared",
       "trend": {
         "current": 2,
-        "delta": null,
-        "previous": null,
-        "prior_reviews": 0
+        "delta": 0,
+        "previous": 2,
+        "prior_reviews": 1,
+        "since": "2026-08-30"
       }
     },
     {
@@ -91,15 +90,16 @@
       "summary": "7 baseline(s), 0 machine-raised, 5 unattributed, 0 over baseline",
       "trend": {
         "current": 40,
-        "delta": null,
-        "previous": null,
-        "prior_reviews": 0
+        "delta": 0,
+        "previous": 40,
+        "prior_reviews": 1,
+        "since": "2026-08-30"
       }
     },
     {
       "commit_cap": 15,
       "commits_considered": 32,
-      "commits_in_window": 59,
+      "commits_in_window": 60,
       "does_not_cover": "co-change is correlation over commits, and this repository's commits are plan steps. It cannot distinguish two files that belong together from two files that were edited on the same afternoon, and it says nothing at all about files that change rarely.",
       "findings": [
         "frontend/index.html and frontend/src/components/AppShell.vue changed together in 3 commits but live in ops and fe/layout"
@@ -365,7 +365,7 @@
         },
         {
           "assertion": "every answer carries an index revision and a freshness verdict",
-          "detail": "index_revision=49424032 freshness=current",
+          "detail": "index_revision=81edfbbd freshness=current",
           "passed": true
         },
         {
@@ -431,10 +431,6 @@
   ],
   "findings": [
     {
-      "check": "cycles",
-      "message": "no trend: this is the first recorded review, so the inventory has a value and no direction. The second review is the first one that can say anything."
-    },
-    {
       "check": "hubs",
       "message": "5 baseline(s) carry no comment saying who raised them or why: backend/app/database.py, frontend/src/components/TaskList.vue, frontend/src/components/TaskModal.vue, frontend/src/stores/tasks.js, frontend/src/views/_useTaskView.js"
     },
@@ -452,13 +448,13 @@
     }
   ],
   "generated_at": "2026-08-30",
-  "index_revision": "4942403204ed4a8091a6e6f6a0add6d2742be38e",
-  "index_sources_sha256": "18eeb2e78ffee49c80c3c7d3288f0868c353a69514aec5d703696fc7505bc71d",
+  "index_revision": "81edfbbd2db7b98aae382428a73a346dce4bf4da",
+  "index_sources_sha256": "21db4cd4e3ea236e44916d22e299aee8fe281dcf19f8bfc8e0447a6826a2bfaa",
   "overdue_after_days": 45,
-  "prior_reviews": 0,
-  "repo_dirty": true,
-  "repo_revision": "4942403204ed4a8091a6e6f6a0add6d2742be38e",
-  "report_sha256": "82ff74a0b761e419f510e9829e3fd1c6431560518591328ef3ebc896fcaffc15",
+  "prior_reviews": 1,
+  "repo_dirty": false,
+  "repo_revision": "81edfbbd2db7b98aae382428a73a346dce4bf4da",
+  "report_sha256": "7d67c068dc8331962c8e9f169ea01940f2cd079bd77f3bbcfa0f21b01c0d8748",
   "result": "attention",
   "review_period_days": 31,
   "schema": 1
