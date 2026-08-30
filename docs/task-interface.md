@@ -206,8 +206,21 @@ closure: every transitive dependency with its hashes, which is what the images i
 `.txt`; `RULE-DEP-004` fails if a lock is missing or unhashed.
 
 ### `make decay-review`
-Runs the recurring agent-readiness decay review and writes verifiable evidence of the run. *Implemented in
-Step 16.*
+Runs the recurring agent-readiness decay review and writes verifiable evidence of the run.
+
+```sh
+./run decay-review              # run it, write the evidence, stage it
+./run decay-review --no-write   # report only: writes nothing, stages nothing, rebuilds nothing
+./run decay-review JSON=1       # the evidence record itself, on stdout
+```
+
+Six diagnostics, described in [The decay review](#the-decay-review) below. It reports; it does not judge —
+exit `0` means the review ran, whatever it found. Exit `4` means the index was stale and nothing was
+measured, because four of the six diagnostics read it.
+
+The normal mode writes `ops/decay-review.json`, appends a line to `ops/decay-history.jsonl`, stages both and
+rebuilds the index. Staging is for the same reason `make scaffold` stages: the index reads `git ls-files`,
+so an unstaged file is invisible to it. **What to commit stays a decision.**
 
 ## Exit codes
 
@@ -477,6 +490,70 @@ changes in flight.
 
 This is the rule that makes the others trustworthy: a gate component nobody has watched fail is not a rule,
 it is a shell call, and it is worse than nothing because it is believed.
+
+## The decay review
+
+`RULE-GOV-002`. Every other rule here asks *"is this change allowed?"*. The decay review asks *"is the gate
+still worth trusting?"* — a question no individual green run can answer, because rot leaves every check
+green. A baseline that only ever rises has stopped being a ratchet. A waiver whose expiry is three weeks out
+is a decision nobody has made. An index whose extractors drifted answers confidently and wrongly.
+
+`./run decay-review` runs six diagnostics:
+
+| Diagnostic | What it measures | What it cannot see |
+|---|---|---|
+| **cycles** | the declared cycle inventory, new cycles, cycles still declared after being resolved, and the trend against the previous review | cycles *inside* a unit — `architecture.toml` declares no structure below unit level |
+| **hubs** | every fan-in baseline in `ops/structure-baseline.toml`, split by who raised it: a comment naming a repository command is machine-raised (`RISK-ARCH-001`), prose is human-raised, nothing at all is unattributed (`RISK-ARCH-002`) | allowlisted files, which have no baseline at all; and the attribution itself, which is read from a comment nothing enforces |
+| **co-change** | file pairs that change together across a unit boundary, over a 365-day window, ignoring commits touching more than 15 files. Pairs where both sides are governance artefacts are marked explained — the meta-rule *requires* them to move together | correlation is not coupling, and it says nothing about files that change rarely |
+| **expiries** | every dated exception in `rules/waivers.yaml` and `rules/shims.yaml`, with days remaining, warning at 93 days — three review periods, so a warning is seen at least twice before `RULE-RULE-002` or `RULE-SEC-002` stops the gate | an exception that was never registered. There is **no quarantine inventory** in this repository; the cycle inventory is the ratchet that occupies that role, and it carries a teardown path rather than a date |
+| **index-quality** | node, edge, file and blind-spot counts, the evidence-class histogram, edge kinds, and tracked files belonging to no unit | whether the extractors are right — every number is produced by the thing being measured |
+| **cold-agent-change-reduced** | the decision procedure of [`AGENTS.md`](../AGENTS.md) §2 run end to end for one change request, from a cold index load, with twelve assertions inside a six-query, five-second budget | the agent. See below |
+
+### The reduced Cold-Agent Change Test
+
+What is reduced is the agent, not the index. The test runs one change request — *add a field to the response
+of the task-update endpoint* — through locate-the-owner, read-the-scoped-contract, assess-the-blast-radius
+and find-the-protecting-tests, and asserts the facts a change of that shape needs: the owning unit, the
+connected public surfaces and their MCP tool names, an end-to-end path from a route to the adapter, the
+dependents of the shared kernel, that every answer carries an index revision and a freshness verdict and its
+own blind spots, and that **no authoritative edge carries a guessed evidence class**.
+
+It does **not** run a session. So it cannot show that an agent queried the index instead of grepping
+(`RISK-DOC-001`), cannot compare the answers against a `grep`/manual baseline, cannot judge whether the
+contract was read or the right Delivery Pattern chosen, and covers one request where the full test covers
+three. It also runs on this machine's toolchain rather than a cold one. All of that is Step 16d.
+
+### The evidence, and how to check it yourself
+
+`ops/decay-review.json` carries the repository revision, the index revision, the CI run id **or a recorded
+reason for its absence**, every executed check with its findings, the result, and `report_sha256` over all
+of it. `ops/decay-history.jsonl` carries one summary line per review, which is where the trend comes from.
+
+The evidence is built to be recomputed rather than trusted. Two commands do it:
+
+```sh
+# 1. the hash covers every field except itself
+python3 -c 'import hashlib,json;d=json.load(open("ops/decay-review.json"));h=d.pop("report_sha256");print(h==hashlib.sha256(json.dumps(d,sort_keys=True,separators=(",",":")).encode()).hexdigest())'
+
+# 2. the revision it claims is one this branch actually contains
+git merge-base --is-ancestor "$(python3 -c 'import json;print(json.load(open("ops/decay-review.json"))["repo_revision"])')" HEAD && echo ok
+```
+
+`tools/checks/decay-freshness.sh` runs exactly those two, plus a schema check and the date arithmetic. **It
+reads the evidence and never `AGENTS.md`**: the contract may display the date of the last review, but a
+contract that is the *source* of that date is a document asserting its own freshness, which is the failure
+the rule exists to prevent.
+
+**Period: monthly, overdue at 45 days.** `.github/workflows/decay-review.yml` runs on the 1st of each month
+and is an adapter — it checks out, bootstraps, runs the command and commits what it wrote. The 14-day slack
+between due and overdue is deliberate: `RULE-GOV-002` runs in `verify`, which gates the deploy, and a
+governance rule that turns one failed cron run into a production blocker is a rule that gets switched off.
+Red means the *schedule* is broken, not that a run was late.
+
+`RULE-GOV-002` is in the `verify` profile only. An overdue review is not something a contributor can fix in
+the tree they are working in — the fix is to run a review and commit its evidence, which is a separate act —
+and a `check` that fails on every machine for a reason unrelated to the change in front of it is how a fast
+gate stops being run at all.
 
 ## Known gaps at this step
 

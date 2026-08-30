@@ -267,6 +267,41 @@ rules:
       A protection that can be switched off in a web UI without leaving a trace is not a
       control. The checked-in file is canonical and drift away from it is detectable.
 
+  - id: RULE-GOV-002
+    statement: >
+      A decay review MUST have been run inside the review period, and its recorded
+      evidence MUST verify: the report hash recomputes, and the revision it names is an
+      ancestor of HEAD.
+    class: executable
+    check: tools/checks/decay-freshness.sh
+    fixture: >
+      tools/fixtures/negative.sh — the overdue arm: a valid, correctly hashed report is
+      backdated past its own overdue_after_days and the gate goes red. The unverifiable
+      arm (one byte changed in a field the hash covers) was constructed and observed by
+      hand on 2026-08-30 and is recorded in docs/briefs/0023-the-decay-review.md; it is
+      not automated, because the conformance suite counts fixtures and a second arm would
+      report forty-eight rules where forty-seven exist.
+    contract: docs/task-interface.md#the-decay-review
+    fix: ./run decay-review
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Every other rule here asks whether a change is allowed. This one asks whether the
+      review that watches the other rules for rot is still happening — which no individual
+      run can answer, because rot leaves every check green. A baseline that only ever rises
+      has stopped being a ratchet, a waiver whose owner has moved on is not a decision
+      anyone is making, and an index whose extractors drifted answers confidently and
+      wrongly. None of that fails verify.
+
+      The check reads ops/decay-review.json and never AGENTS.md. The contract may display
+      the date of the last review; a contract that is the SOURCE of that date is a document
+      asserting its own freshness, which is the exact failure being guarded against.
+
+      It deliberately does not read the review's findings. Judging content would make this
+      a second gate over six diagnostics with thresholds and no fixtures, and the first
+      time it blocked a merge the thresholds would be tuned until it stopped. It proves the
+      review happened; that it does not prove anyone acted on it is RISK-GOV-005.
+
   - id: RULE-ARCH-001
     statement: >
       A unit dependency that architecture.toml does not allow MUST fail the gate.
@@ -1016,6 +1051,61 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "Step 9's ledger validator requires an automated fixture for every executable rule"
     decision_record: docs/operations.md
+
+  - id: RISK-GOV-004
+    statement: >
+      A decay review run outside CI carries no run id. ops/decay-review.json records the
+      absence honestly rather than inventing one, and RULE-GOV-002 accepts the report —
+      requiring a run id would make the rule unsatisfiable on the maintainer's machine and
+      would bind a governance rule to one vendor's CI. What is therefore unattested is the
+      environment: the hash proves the file was not edited after it was written, and the
+      revision check proves it describes a commit this branch contains, but nothing proves
+      the operator ran the real command rather than producing a well-formed file by hand,
+      and nothing proves the toolchain was the declared one. A CI-produced review carries
+      the run id and the clean-clone bootstrap; a local one carries neither.
+    owner: maintainer
+    re_open_trigger: "a decay review is found whose recorded findings do not match the revision it names, or the monthly workflow is removed"
+    decision_record: docs/adr/0030-the-decay-review.md
+
+  - id: RISK-GOV-005
+    statement: >
+      RULE-GOV-002 proves that a decay review happened and that its evidence verifies. It
+      never reads the findings, so a report whose result is `attention` — an approaching
+      expiry, an unattributed ratchet raise, a failing cold-agent assertion — is as green
+      as one with nothing in it. Acting on a review is human judgment and is unenforceable
+      by the same argument as RISK-DOC-001. The mitigation is that the findings are in a
+      checked-in file that changes in a reviewable diff every month, not in a log nobody
+      keeps.
+    owner: maintainer
+    re_open_trigger: "a finding is carried unchanged across three consecutive reviews"
+    decision_record: docs/adr/0030-the-decay-review.md
+
+  - id: RISK-TI-001
+    statement: >
+      RULE-TI-003 says every command's JSON=1 output must be a single valid JSON object.
+      tools/checks/json-output.sh validates five of the twenty-one commands — check, the
+      resolved plan, doctor, help and the decay review — because the rest either mutate
+      state, need arguments, or take minutes. The rule's statement is therefore wider than
+      its check, and a command whose JSON mode is broken outside that five is caught by
+      nothing. Found by the first decay review, 2026-08-30.
+    owner: maintainer
+    re_open_trigger: "an agent reports unparseable JSON from a command the check does not cover"
+    decision_record: docs/adr/0030-the-decay-review.md
+
+  - id: RISK-ARCH-002
+    statement: >
+      Five of the seven fan-in baselines in ops/structure-baseline.toml carry no comment
+      saying who raised them or why — backend/app/database.py,
+      frontend/src/components/TaskList.vue, frontend/src/components/TaskModal.vue,
+      frontend/src/stores/tasks.js and frontend/src/views/_useTaskView.js. They were
+      recorded as observed values when RULE-ARCH-003 was introduced, so each is a ceiling
+      nobody argued for. Combined with RISK-ARCH-001 — a raise a machine can perform — the
+      inventory now contains three kinds of number that read identically: measured,
+      reasoned, and generated. The decay review reports the split every month.
+      Found by the first decay review, 2026-08-30.
+    owner: maintainer
+    re_open_trigger: "an unattributed baseline is raised, or the count of unattributed baselines rises"
+    decision_record: docs/adr/0030-the-decay-review.md
 
   - id: RISK-BOOTSTRAP-001
     statement: >

@@ -1,0 +1,465 @@
+{
+  "ci": {
+    "absent_reason": "run outside CI; GITHUB_RUN_ID is unset (see RISK-GOV-004)",
+    "run_id": null,
+    "url": null
+  },
+  "executed_checks": [
+    {
+      "declared": [
+        [
+          "fe/identity",
+          "fe/layout"
+        ],
+        [
+          "fe/layout",
+          "fe/tasks"
+        ]
+      ],
+      "does_not_cover": "cycles between units only. A cycle inside a unit is invisible to architecture.toml and therefore to this count.",
+      "findings": [
+        "no trend: this is the first recorded review, so the inventory has a value and no direction. The second review is the first one that can say anything."
+      ],
+      "name": "cycles",
+      "new": [],
+      "resolved_still_declared": [],
+      "summary": "2 declared, 0 new, 0 resolved-but-declared",
+      "trend": {
+        "current": 2,
+        "delta": null,
+        "previous": null,
+        "prior_reviews": 0
+      }
+    },
+    {
+      "allowlisted": [
+        "backend/app/models.py",
+        "backend/app/config.py",
+        "frontend/src/api/client.js",
+        "frontend/src/components/AppShell.vue"
+      ],
+      "does_not_cover": "allowlisted files have no baseline at all, so growth there is invisible by design; and attribution is read from a comment, which nothing enforces.",
+      "entries": [
+        {
+          "file": "backend/app/database.py",
+          "note": null,
+          "raised_by": "unattributed",
+          "value": 7
+        },
+        {
+          "file": "backend/app/audit.py",
+          "note": "Recorded on 2026-08-28 with the audit log. Five dependents is the shape of the thing: an audit writer is a single sink that everything with an event to record reaches \u2014 the auth dependency, three routers and the lifespan. Concentration here is the design, exactly as it is for the HTTP egress point below; what would be a real signal is a SIXTH, because that means a new class of event and a new call site to review for what it puts in a row.",
+          "raised_by": "human",
+          "value": 5
+        },
+        {
+          "file": "frontend/src/components/TaskList.vue",
+          "note": null,
+          "raised_by": "unattributed",
+          "value": 6
+        },
+        {
+          "file": "frontend/src/components/TaskModal.vue",
+          "note": null,
+          "raised_by": "unattributed",
+          "value": 6
+        },
+        {
+          "file": "backend/app/dependencies.py",
+          "note": "Raised from 5 on 2026-08-25: /inbox stopped implementing its own authentication and now depends on get_current_user like every other router (finding SEC-6). One more dependent on the auth choke point is the intended shape of that fix \u2014 the alternative was a second auth implementation, which is what was wrong.",
+          "raised_by": "human",
+          "value": 6
+        },
+        {
+          "file": "frontend/src/stores/tasks.js",
+          "note": null,
+          "raised_by": "unattributed",
+          "value": 5
+        },
+        {
+          "file": "frontend/src/views/_useTaskView.js",
+          "note": null,
+          "raised_by": "unattributed",
+          "value": 5
+        }
+      ],
+      "findings": [
+        "5 baseline(s) carry no comment saying who raised them or why: backend/app/database.py, frontend/src/components/TaskList.vue, frontend/src/components/TaskModal.vue, frontend/src/stores/tasks.js, frontend/src/views/_useTaskView.js"
+      ],
+      "name": "hubs",
+      "regressions": [],
+      "summary": "7 baseline(s), 0 machine-raised, 5 unattributed, 0 over baseline",
+      "trend": {
+        "current": 40,
+        "delta": null,
+        "previous": null,
+        "prior_reviews": 0
+      }
+    },
+    {
+      "commit_cap": 15,
+      "commits_considered": 32,
+      "commits_in_window": 59,
+      "does_not_cover": "co-change is correlation over commits, and this repository's commits are plan steps. It cannot distinguish two files that belong together from two files that were edited on the same afternoon, and it says nothing at all about files that change rarely.",
+      "findings": [
+        "frontend/index.html and frontend/src/components/AppShell.vue changed together in 3 commits but live in ops and fe/layout"
+      ],
+      "min_commits": 3,
+      "name": "co-change",
+      "pairs": [
+        {
+          "commits": 7,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/operations.md",
+            "rules/ledger.yaml"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 5,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/task-interface.md",
+            "rules/ledger.yaml"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 5,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/task-interface.md",
+            "tools/fixtures/negative.sh"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 4,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "architecture.toml",
+            "docs/task-interface.md"
+          ],
+          "units": [
+            "ops",
+            "docs"
+          ]
+        },
+        {
+          "commits": 4,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/operations.md",
+            "tools/checks/profiles.conf"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 4,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/plan/STATUS.md",
+            "rules/ledger.yaml"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 4,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/task-interface.md",
+            "tools/checks/profiles.conf"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 3,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            ".github/workflows/deploy.yml",
+            "docs/operations.md"
+          ],
+          "units": [
+            "ops",
+            "docs"
+          ]
+        },
+        {
+          "commits": 3,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "AGENTS.md",
+            "rules/ledger.yaml"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 3,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/operations.md",
+            "rules/waivers.yaml"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 3,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/operations.md",
+            "tools/fixtures/negative.sh"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 3,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/task-interface.md",
+            "run"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 3,
+          "explained_by": null,
+          "files": [
+            "frontend/index.html",
+            "frontend/src/components/AppShell.vue"
+          ],
+          "units": [
+            "ops",
+            "fe/layout"
+          ]
+        }
+      ],
+      "summary": "13 cross-unit pair(s) at >= 3 commits, 1 of them not explained by a declared coupling",
+      "window_days": 365
+    },
+    {
+      "does_not_cover": "an exception that was never written down. Nothing detects a decision that was made and not registered; that is what the registers are for.",
+      "findings": [
+        "WAIVER-TYPE-001 expires on 2026-11-04, in 66 day(s): decide now, because on that date it stops the gate",
+        "SHIM-SEC-006 expires on 2026-11-25, in 87 day(s): decide now, because on that date it stops the gate"
+      ],
+      "horizon_days": 93,
+      "inventory": [
+        {
+          "days": 66,
+          "expires": "2026-11-04",
+          "id": "WAIVER-TYPE-001",
+          "kind": "waiver",
+          "owner": "maintainer"
+        },
+        {
+          "days": 87,
+          "expires": "2026-11-25",
+          "id": "SHIM-SEC-006",
+          "kind": "shim",
+          "owner": "maintainer"
+        },
+        {
+          "days": 154,
+          "expires": "2027-01-31",
+          "id": "WAIVER-SEC-003",
+          "kind": "waiver",
+          "owner": "maintainer"
+        }
+      ],
+      "name": "expiries",
+      "quarantine": {
+        "inventory": "none",
+        "note": "The plan names a quarantine inventory alongside the waiver and shim registers. This repository never built one: the ratchet that occupies that role is the cycle inventory in architecture.toml `known_cycles`, reported above, and it carries no expiry date \u2014 only a teardown path."
+      },
+      "resolved_waivers": [
+        "WAIVER-OPS-001",
+        "WAIVER-SEC-002",
+        "WAIVER-SEC-001"
+      ],
+      "summary": "3 dated exception(s): 0 expired, 2 inside the 93-day horizon"
+    },
+    {
+      "blind_spots": [
+        "BLIND-FE-001",
+        "BLIND-FE-002",
+        "BLIND-MCP-001",
+        "BLIND-NGINX-001",
+        "BLIND-OPS-001",
+        "BLIND-TASK-001",
+        "BLIND-TEST-001"
+      ],
+      "counts": {
+        "blind_spots": 7,
+        "edges": 826,
+        "files": 244,
+        "nodes": 555
+      },
+      "does_not_cover": "whether the extractors are right. Every number here is produced by the thing being measured; RULE-IDX-003's qualification suite is what tests the extractors against known answers, and a drift both would share is invisible to both.",
+      "edge_evidence_classes": {
+        "CONFIG_CONFIRMED": 81,
+        "CONTRACT_DECLARED": 278,
+        "STATIC_CONFIRMED": 467
+      },
+      "edge_kinds": {
+        "CALLS": 145,
+        "DEFINES": 133,
+        "DEPENDS_ON": 26,
+        "DERIVES_TOOL": 32,
+        "EXPOSES": 32,
+        "GOVERNED_BY": 23,
+        "IMPORTS": 116,
+        "INJECTS": 47,
+        "OWNS": 244,
+        "RUNS": 2,
+        "TESTED_BY": 26
+      },
+      "findings": [],
+      "freshness": "current",
+      "name": "index-quality",
+      "node_evidence_classes": {
+        "CONFIG_CONFIRMED": 44,
+        "CONTRACT_DECLARED": 118,
+        "STATIC_CONFIRMED": 393
+      },
+      "schema_version": "1.0.0",
+      "summary": "555 nodes, 826 edges, 244 files, 7 blind spots, index current",
+      "unowned_tracked_files": []
+    },
+    {
+      "assertions": [
+        {
+          "assertion": "step 1 \u2014 the owner of the changed behaviour resolves to a unit",
+          "detail": "units returned: ['be/services', 'tests']",
+          "passed": true
+        },
+        {
+          "assertion": "every answer carries an index revision and a freshness verdict",
+          "detail": "index_revision=49424032 freshness=current",
+          "passed": true
+        },
+        {
+          "assertion": "step 2 \u2014 the scoped contract the owner points at exists",
+          "detail": "backend/AGENTS.md",
+          "passed": true
+        },
+        {
+          "assertion": "step 3 \u2014 the blast radius names the connected public surfaces",
+          "detail": "10 route(s)",
+          "passed": true
+        },
+        {
+          "assertion": "step 3 \u2014 every connected surface names its MCP tool",
+          "detail": "10 tool name(s)",
+          "passed": true
+        },
+        {
+          "assertion": "step 3 \u2014 the answer reports its own blind spots",
+          "detail": "2 relevant blind spot(s)",
+          "passed": true
+        },
+        {
+          "assertion": "step 3 \u2014 the protecting tests are named, and unprotected files are listed",
+          "detail": "5 test edge(s)",
+          "passed": true
+        },
+        {
+          "assertion": "step 3 \u2014 an end-to-end path exists from a REST route to the adapter",
+          "detail": "17 path(s)",
+          "passed": true
+        },
+        {
+          "assertion": "step 3 \u2014 a shared-kernel change reports its dependents",
+          "detail": "7 direct dependent(s)",
+          "passed": true
+        },
+        {
+          "assertion": "zero invented authoritative edges",
+          "detail": "0 guessed, 0 outside the declared evidence classes",
+          "passed": true
+        },
+        {
+          "assertion": "inside the query budget",
+          "detail": "4 of 6",
+          "passed": true
+        },
+        {
+          "assertion": "inside the time budget",
+          "detail": "0.085s of 5.0s",
+          "passed": true
+        }
+      ],
+      "does_not_cover": "the agent. It does not run a session, so it cannot show that an agent queried the index instead of grepping (RISK-DOC-001), cannot compare the result against a grep/manual baseline, cannot judge whether the contract was read or the Delivery Pattern chosen, and covers one change request rather than the three the plan requires. It also carries this session's toolchain rather than a cold one. All of that is 16d.",
+      "elapsed_seconds": 0.085,
+      "findings": [],
+      "name": "cold-agent-change-reduced",
+      "queries": 4,
+      "scenario": "Add a field to the response of the task-update endpoint \u2014 a public-surface change to backend/app/routers/tasks.py.",
+      "suite_version": "1.0.0",
+      "summary": "12/12 assertions, 4 queries, 0.085s"
+    }
+  ],
+  "findings": [
+    {
+      "check": "cycles",
+      "message": "no trend: this is the first recorded review, so the inventory has a value and no direction. The second review is the first one that can say anything."
+    },
+    {
+      "check": "hubs",
+      "message": "5 baseline(s) carry no comment saying who raised them or why: backend/app/database.py, frontend/src/components/TaskList.vue, frontend/src/components/TaskModal.vue, frontend/src/stores/tasks.js, frontend/src/views/_useTaskView.js"
+    },
+    {
+      "check": "co-change",
+      "message": "frontend/index.html and frontend/src/components/AppShell.vue changed together in 3 commits but live in ops and fe/layout"
+    },
+    {
+      "check": "expiries",
+      "message": "WAIVER-TYPE-001 expires on 2026-11-04, in 66 day(s): decide now, because on that date it stops the gate"
+    },
+    {
+      "check": "expiries",
+      "message": "SHIM-SEC-006 expires on 2026-11-25, in 87 day(s): decide now, because on that date it stops the gate"
+    }
+  ],
+  "generated_at": "2026-08-30",
+  "index_revision": "4942403204ed4a8091a6e6f6a0add6d2742be38e",
+  "index_sources_sha256": "18eeb2e78ffee49c80c3c7d3288f0868c353a69514aec5d703696fc7505bc71d",
+  "overdue_after_days": 45,
+  "prior_reviews": 0,
+  "repo_dirty": true,
+  "repo_revision": "4942403204ed4a8091a6e6f6a0add6d2742be38e",
+  "report_sha256": "82ff74a0b761e419f510e9829e3fd1c6431560518591328ef3ebc896fcaffc15",
+  "result": "attention",
+  "review_period_days": 31,
+  "schema": 1
+}

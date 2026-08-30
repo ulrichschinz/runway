@@ -54,7 +54,7 @@ case "$cmd" in
 	grant-admin)    exec python3 tools/grant-admin.py "$@" ;;
 	surfaces)       exec backend/.venv/bin/python tools/surfaces.py "$@" ;;
 	lock)           exec tools/lock.sh "$@" ;;
-	decay-review)   exec tools/stub.sh decay-review   16 "recurring decay review with verifiable evidence" ;;
+	decay-review)   exec backend/.venv/bin/python tools/decay_review.py "$@" ;;
 
 	*)
 		printf 'unknown command: %s\n\n' "$cmd" >&2

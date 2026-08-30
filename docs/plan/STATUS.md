@@ -56,8 +56,8 @@ the structure was already sound; what was missing was enforcement and knowledge.
 **All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**40 rules, 40
 proven able to fail on every run**), index (built, qualified, deterministic, queryable).
 
-`check` ~5s · `verify` ~53s local. Unimplemented commands are `rebuild-verify` (5),
-`decay-review` (16c); `brief`, `surfaces`, `lock`, `grant-admin` and `scaffold` are implemented.
+`check` ~6s · `verify` ~53s local. The only unimplemented command is `rebuild-verify` (5);
+`brief`, `surfaces`, `lock`, `grant-admin`, `scaffold` and `decay-review` are implemented.
 
 ---
 
@@ -211,10 +211,10 @@ went unanswered. It is not blocking anything; it just keeps reappearing.
 | ~~13~~ | ~~Public-surface protection~~ | **Done.** Five snapshots under `ops/surfaces/`, env vars cross-checked against README. `BLIND-MCP-001` resolved. Found: every MCP tool name in the README was wrong, and `PORT` was documented but unread. See `docs/briefs/0015-public-surface-protection.md` and ADR 0020. |
 | ~~14~~ | ~~Supply chain~~ | **Done.** Four images digest-pinned, Arch packages pinned to a dated archive snapshot, hash-pinned Python locks, 305 licences classified, secret scanning, Dependabot. `python-jose` 3.3.0→3.5.0. See `docs/briefs/0016-supply-chain.md` and ADR 0021. |
 | **15** | Operability and the minimal threat model | **Next.** Scoped in full in §3 — it is larger than this row once claimed. |
-| **16** | `make decay-review`, Phase 4 audit, **Cold-Agent Index and Change Tests** | 16a landed early; **16b landed 2026-08-29**. Remaining: 16c and 16d. |
+| **16** | `make decay-review`, Phase 4 audit, **Cold-Agent Index and Change Tests** | 16a landed early; **16b landed 2026-08-29**; **16c landed 2026-08-30**. Remaining: 16d. |
 
-Unimplemented commands (each exits `3` naming its step): `rebuild-verify` (5) and
-`decay-review` (16c). `grant-admin` was added in Step 11; `scaffold` landed in 16b.
+One unimplemented command remains, exiting `3` and naming its step: `rebuild-verify` (5).
+`grant-admin` was added in Step 11; `scaffold` landed in 16b, `decay-review` in 16c.
 
 ---
 
@@ -327,10 +327,21 @@ Two things landed after Step 15 and are easy to miss because they are not plan s
 - **`./run scaffold` works** (`50aa33a`). Verified end to end: one command, `verify` green with
   zero manual edits, and the generated unit removes cleanly leaving the tree byte-identical.
 
-**Remaining: 16c** (`make decay-review`) **and 16d** (the Phase 4 audit and the Cold-Agent Index
-and Change Tests). 16d has a precondition no tooling can satisfy: the test session must carry no
-agent-side cache, knowledge base or session memory from this work, and that has to be arranged
-before the run, not asserted after it.
+- **The gate now reviews itself** (16c, 2026-08-30). `./run decay-review` runs six diagnostics and
+  writes recomputable evidence to [`ops/decay-review.json`](../../ops/decay-review.json);
+  `RULE-GOV-002` fails `verify` when that evidence is overdue (45 days) or does not verify. The
+  suite proves **47** rules able to fail. The first run's findings are live and unowned:
+  `WAIVER-TYPE-001` expires in 66 days and `SHIM-SEC-006` in 87, five fan-in baselines have no
+  attribution (`RISK-ARCH-002`), and `RULE-TI-003`'s check covers five of twenty-one commands
+  (`RISK-TI-001`). See [brief 0023](../briefs/0023-the-decay-review.md) and
+  [ADR 0030](../adr/0030-the-decay-review.md).
+
+**Remaining: 16d** (the Phase 4 audit and the Cold-Agent Index and Change Tests). It has a
+precondition no tooling can satisfy: the test session must carry no agent-side cache, knowledge
+base or session memory from this work, and that has to be arranged before the run, not asserted
+after it. The reduced Cold-Agent Change Test that 16c runs monthly does **not** discharge it — it
+reduces the agent, not the index: one request instead of three, no session, no `grep` baseline,
+no judgment about whether the contract was read.
 
 Do not try to remove `SHIM-SEC-006` in this step, and do not fold the SEC-5 fix into the audit
 log — §3 records why for both.

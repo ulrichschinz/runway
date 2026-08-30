@@ -121,6 +121,13 @@ are enforced: a slow gate gets bypassed.
 watched fail is not a rule — it is a shell call, and it is worse than nothing because it
 is believed.
 
+**The gate is itself reviewed, monthly.** `make decay-review` runs six diagnostics no green
+run can produce — cycle and hub trends, co-change against the declared units, the expiry
+inventories, index quality, and a reduced Cold-Agent Change Test — and writes evidence to
+`ops/decay-review.json`. `RULE-GOV-002` fails `verify` when that evidence is overdue or
+does not verify. **It reads the evidence, never this file:** a contract that is the source
+of its own freshness date is the failure that rule exists to prevent.
+
 Exit codes are exact only through `./run`; `make` collapses every failure to `2`. Full
 reference: `docs/task-interface.md`.
 

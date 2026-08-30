@@ -664,6 +664,47 @@ p.write_text(t.replace(anchor, anchor + "      - /var/run/docker.sock:/var/run/d
 HOSTMOUNT
 expect_red "OPS-003-hostmount" "tools/checks/deploy-compose.sh" "RULE-OPS-003"
 
+# --- RULE-GOV-002 — the decay review silently stopped happening -------------
+#
+# The failure this rule exists for is not a bad review; it is no review. A scheduled
+# workflow that stops producing evidence — a runner change, an expired token, a branch
+# rename — leaves every other check green, and the only thing that ever notices is a date.
+#
+# So the fixture produces a REAL review in the sandbox first, then backdates it past its
+# own overdue limit and recomputes the hash by the documented recipe. That matters twice
+# over: a report with a stale date and a stale hash would go red for the wrong reason and
+# the fixture would pass vacuously, and recomputing the hash here rather than calling the
+# tool is an independent check that the recipe in docs/task-interface.md is the one the
+# gate actually uses.
+(cd "$SANDBOX" && python3 tools/index/build.py >/dev/null 2>&1) || true
+(cd "$SANDBOX" && backend/.venv/bin/python tools/decay_review.py >/dev/null 2>&1) || true
+python3 - "$SANDBOX/ops/decay-review.json" "$(cd "$SANDBOX" && git rev-parse HEAD)" <<'DECAYSTALE'
+import datetime
+import hashlib
+import json
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+record = json.loads(p.read_text())
+# Without this the fixture could pass vacuously on the PARENT repository's report, whose
+# revision the sandbox has never heard of — red, but for the wrong reason.
+assert record["repo_revision"] == sys.argv[2], "the review did not run in the sandbox"
+overdue = int(record["overdue_after_days"])
+record["generated_at"] = (
+    datetime.date.today() - datetime.timedelta(days=overdue + 30)
+).isoformat()
+body = {k: v for k, v in record.items() if k != "report_sha256"}
+record["report_sha256"] = hashlib.sha256(
+    json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+).hexdigest()
+p.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+DECAYSTALE
+expect_red "GOV-002-overdue" "tools/checks/decay-freshness.sh" "RULE-GOV-002"
+# The review rebuilt the sandbox index around an evidence file that reset() has just
+# removed again, so the index is now stale for whatever runs next.
+(cd "$SANDBOX" && python3 tools/index/build.py >/dev/null 2>&1) || true
+
 # --- RULE-GATE-001 — the profile blows its runtime budget -------------------
 #
 # A budget of 0 alone proves nothing: the suite finishes inside a second and 0 > 0 is
