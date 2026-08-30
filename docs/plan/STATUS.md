@@ -1,8 +1,13 @@
 # Session handoff — where we are, and how to go on
 
-**Snapshot taken 2026-08-27 at the head of `main` (`31326de`), after a session crash.** This file is a *dated handoff*, not a source of
-truth. Everything in it can drift; §1 tells you how to re-establish the real state in about
-twenty seconds. When they disagree, the commands win.
+**Snapshot taken 2026-08-30 at the head of `step-15a-structured-logging` (`ebe0c91`).** This file is a
+*dated handoff*, not a source of truth. Everything in it can drift; §1 tells you how to re-establish the
+real state in about twenty seconds. When they disagree, the commands win — this branch found four
+documents that had quietly stopped being true, and this one is not exempt.
+
+> **Fifteen commits sit on this branch and none are merged. There is no pull request.** `main` is still at
+> `31326de`. Everything below — Step 15, 16b, 16c, the Phase 4 audit, the deploy mechanism — exists only
+> here. Nothing has reached production.
 
 ---
 
@@ -28,8 +33,18 @@ non-obvious decisions), `rules/ledger.yaml` (every enforced rule and every resid
 Making this repository agent-ready, following `docs/plan/phase-0-2.md`. **MODE C (tune)** —
 the structure was already sound; what was missing was enforcement and knowledge.
 
-**Seventeen changes merged to `main`, all green.** `verify` re-run 2026-08-27: **GREEN in 53s,
-40 rules proven able to fail, 0 not.** Plan step → PR:
+**Seventeen changes merged to `main`; fifteen more sit unmerged on this branch.** `verify` re-run
+2026-08-30 at `ebe0c91`: **GREEN in 61s, 48 fixture arms passed, 42 of 45 executable rules proven able to
+fail, 3 declaring no automated fixture.**
+
+> **Read that number carefully — it was wrong until 2026-08-30.** The suite printed "N rules proven able to
+> fail" while counting *fixture arms*, which are not the same thing: several rules have two arms and three
+> have none. Every progress report on this branch quoted the inflated figure, and `rules/ledger.yaml` had
+> already used the false equality to *decline* automating a fixture, on the grounds that adding one "would
+> report forty-eight rules where forty-seven exist". A metric nobody had audited was making decisions. The
+> suite now records which rule id each arm proved and fails when an executable rule is unexercised.
+
+Plan step → PR:
 
 | Plan step | Landed | What it gave us |
 |---|---|---|
@@ -53,11 +68,12 @@ the structure was already sound; what was missing was enforcement and knowledge.
 | 13 | PR #20 | Public-surface snapshots; every README MCP tool name was wrong, `PORT` unread |
 | 14 | PR #21 | Supply chain: digest-pinned images, hash-pinned locks, 305 licences classified |
 
-**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**40 rules, 40
-proven able to fail on every run**), index (built, qualified, deterministic, queryable).
+**All three pillars exist:** contract (`AGENTS.md`, self-checked), gate (**45 executable rules, 42 proven
+able to fail on every run, 3 declaring why they cannot be**), index (built, qualified, deterministic,
+queryable).
 
-`check` ~6s · `verify` ~53s local. The only unimplemented command is `rebuild-verify` (5);
-`brief`, `surfaces`, `lock`, `grant-admin`, `scaffold` and `decay-review` are implemented.
+`check` ~7s · `verify` ~61s local, against a 600s budget. The only unimplemented command is
+`rebuild-verify` (5); `brief`, `surfaces`, `lock`, `grant-admin`, `scaffold` and `decay-review` all work.
 
 ---
 
@@ -309,9 +325,29 @@ direct pushes but would let a red pull request merge.
 
 ## 8. How to resume
 
-Say *"where are we and how do we go on"*. The answer should be: read this file and run §1's
-commands, then **start Step 15** — it is next in plan order, entirely local, and its four
-open design decisions were closed on 2026-08-27 (§3).
+Say *"where are we and how do we go on"*. The answer should be: read this file, run §1's commands, and then
+pick up at **16d's second half** — the Cold-Agent tests — which is the only implementation work left in the
+plan. Everything before it has landed on this branch.
+
+### If you are the cold session, stop reading here
+
+The Cold-Agent test measures whether an agent that has never seen this work can answer real change requests
+from the repository's own contract and index. **This file is a summary of the answers.** So is
+[`ops/cold-agent/criteria.md`](../../ops/cold-agent/criteria.md), which is the scoring key.
+
+Two roles, and they must not be the same session:
+
+- **The subject** is handed only the three request prompts and the repository. It reads
+  [`AGENTS.md`](../../AGENTS.md) and queries the index — that is precisely what is being measured — and
+  never this file, never the criteria, never `docs/briefs/`. Its transcript, queries and wall time are
+  captured.
+- **The scorer** reads that transcript afterwards and scores it against the criteria.
+
+The criteria's §2 makes the precondition measurable rather than asserted: a negative control is asked
+before any repository access, and an answer that names a rule id, a unit id, a count or the decay review
+**voids** the run. Void is not the same as fail — it means the session was contaminated and the result says
+nothing. A run that quietly skips this proves nothing at all, which is worse than not running it, because
+the register would then carry a pass nobody can trust.
 
 **Step 15 is complete** (2026-08-28), and so is **16b** (2026-08-29). Everything sits on
 `step-15a-structured-logging` — twelve commits, none merged, no PR opened. The gate proves
