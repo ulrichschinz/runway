@@ -211,7 +211,7 @@ went unanswered. It is not blocking anything; it just keeps reappearing.
 | ~~13~~ | ~~Public-surface protection~~ | **Done.** Five snapshots under `ops/surfaces/`, env vars cross-checked against README. `BLIND-MCP-001` resolved. Found: every MCP tool name in the README was wrong, and `PORT` was documented but unread. See `docs/briefs/0015-public-surface-protection.md` and ADR 0020. |
 | ~~14~~ | ~~Supply chain~~ | **Done.** Four images digest-pinned, Arch packages pinned to a dated archive snapshot, hash-pinned Python locks, 305 licences classified, secret scanning, Dependabot. `python-jose` 3.3.0→3.5.0. See `docs/briefs/0016-supply-chain.md` and ADR 0021. |
 | **15** | Operability and the minimal threat model | **Next.** Scoped in full in §3 — it is larger than this row once claimed. |
-| **16** | `make decay-review`, Phase 4 audit, **Cold-Agent Index and Change Tests** | 16a landed early; **16b landed 2026-08-29**; **16c landed 2026-08-30**. Remaining: 16d. |
+| **16** | `make decay-review`, Phase 4 audit, **Cold-Agent Index and Change Tests** | 16a landed early; **16b landed 2026-08-29**; **16c landed 2026-08-30**. **16d's first half landed 2026-08-30** — the Phase 4 audit and the versioned Cold-Agent criteria. Remaining: *running* the Cold-Agent Index and Change Tests, which needs a session with no memory of this work. |
 
 One unimplemented command remains, exiting `3` and naming its step: `rebuild-verify` (5).
 `grant-admin` was added in Step 11; `scaffold` landed in 16b, `decay-review` in 16c.
@@ -228,7 +228,7 @@ until each is resolved or deliberately re-approved:
 | `WAIVER-OPS-001` | migrations swallow every exception | Step 15 |
 | `WAIVER-TYPE-001` | unchecked `Row \| None` in two handlers — a reachable 500 on `/auth/me` | its own step |
 
-Twenty residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
+Thirty-nine residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
 
 - **`RISK-DEP-003`** — `passlib` 1.7.4 is the *latest* release and it is from 2020-10-08. It
   is the only thing hashing passwords here, and `bcrypt` is frozen at 4.0.1 because passlib
@@ -336,12 +336,36 @@ Two things landed after Step 15 and are easy to miss because they are not plan s
   (`RISK-TI-001`). See [brief 0023](../briefs/0023-the-decay-review.md) and
   [ADR 0030](../adr/0030-the-decay-review.md).
 
-**Remaining: 16d** (the Phase 4 audit and the Cold-Agent Index and Change Tests). It has a
-precondition no tooling can satisfy: the test session must carry no agent-side cache, knowledge
-base or session memory from this work, and that has to be arranged before the run, not asserted
-after it. The reduced Cold-Agent Change Test that 16c runs monthly does **not** discharge it — it
-reduces the agent, not the index: one request instead of three, no session, no `grep` baseline,
-no judgment about whether the contract was read.
+- **The gate has now been audited against its own claims** (16d first half, 2026-08-30). Six
+  findings, none of them a rule going red: the conformance suite was counting fixture *arms* and
+  every document read the number as rules (47 arms, 44 rules, 41 proven); `RULE-GATE-002` itself
+  had no declared exemption for being unprovable (`RISK-GATE-001`); the stale-index message named
+  neither its rule nor its contract section; three re-open triggers named a plan step that had
+  already landed, so they could never fire; `index/manifest.toml` and the index disagreed about
+  how many blind spots exist (`RISK-IDX-002`); and the gate's own Python is outside ruff and mypy
+  (`RISK-GATE-002`). `RULE-DOC-005` was added — every rule's `contract:` pointer must resolve.
+  The suite now proves **42 of 45** rules able to fail over 48 arms. See
+  [brief 0024](../briefs/0024-the-phase-4-audit.md) and [ADR 0031](../adr/0031-the-phase-4-audit.md).
+
+**Remaining: 16d's second half — running the Cold-Agent Index and Change Tests.** The versioned
+pass criteria exist at [`ops/cold-agent/criteria.md`](../../ops/cold-agent/criteria.md) and were
+written before any run, which is the whole point of them; the harness is
+[`tools/cold_agent_score.py`](../../tools/cold_agent_score.py) and
+[`ops/cold-agent/run-template.json`](../../ops/cold-agent/run-template.json), and
+[`ops/cold-agent/runs/`](../../ops/cold-agent/runs) is empty and must stay so until a real run
+fills it. The precondition no tooling can satisfy stands: the test session must carry no
+agent-side cache, knowledge base or session memory from this work, arranged before the run rather
+than asserted after it — and §2 of the criteria makes that measurable with a negative control
+rather than a tick-box. The reduced Cold-Agent Change Test that 16c runs monthly does **not**
+discharge it: it reduces the agent, not the index — one request instead of three, no session, no
+`grep` baseline, no judgment about whether the contract was read.
+
+**Also outstanding, and it needs your hands:** nothing has ever observed branch protection *block*
+a merge (`RISK-GOV-006`). The live ruleset was confirmed active and correct on 2026-08-30 and all
+twenty merged pull requests had a green `verify`, but the blocking behaviour is only observable by
+attempting a merge. The five-minute procedure — open a deliberately red pull request, observe
+`mergeStateStatus` is `BLOCKED`, close it without merging — is written out in
+[ADR 0031](../adr/0031-the-phase-4-audit.md).
 
 Do not try to remove `SHIM-SEC-006` in this step, and do not fold the SEC-5 fix into the audit
 log — §3 records why for both.

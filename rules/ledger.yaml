@@ -180,7 +180,7 @@ rules:
     check: tools/checks/index-fresh.sh
     fixture: tools/fixtures/negative.sh
     contract: docs/task-interface.md#the-index
-    fix: make fix   (or make index)
+    fix: make fix
     owner: maintainer
     non_waivable: false
     rationale: >
@@ -278,9 +278,14 @@ rules:
       tools/fixtures/negative.sh — the overdue arm: a valid, correctly hashed report is
       backdated past its own overdue_after_days and the gate goes red. The unverifiable
       arm (one byte changed in a field the hash covers) was constructed and observed by
-      hand on 2026-08-30 and is recorded in docs/briefs/0023-the-decay-review.md; it is
-      not automated, because the conformance suite counts fixtures and a second arm would
-      report forty-eight rules where forty-seven exist.
+      hand on 2026-08-30 and is recorded in docs/briefs/0023-the-decay-review.md. It was
+      left unautomated on the ground that a second arm would overstate the rule count —
+      which was wrong twice over, and Step 16d's audit is where that surfaced: the suite
+      was counting arms rather than rules, so the two numbers were never equal, and the
+      arm would have added no rule to the coverage set in any case. The reason it stays
+      unautomated is now the honest one: the overdue arm already proves the check reads
+      the evidence and can go red, and a second arm re-runs a two-second report to assert
+      a hash comparison one line away from the first.
     contract: docs/task-interface.md#the-decay-review
     fix: ./run decay-review
     owner: maintainer
@@ -588,6 +593,29 @@ rules:
       a world that has moved on, and editing them to keep a gate green falsifies the
       history they exist to preserve.
 
+  - id: RULE-DOC-005
+    statement: >
+      Every rule's contract: pointer MUST resolve — the file exists, and where an #anchor
+      is given, the file carries a heading that produces it.
+    class: executable
+    check: tools/checks/contract.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#adding-a-check
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      The contract: field is not documentation about a rule; it is the text a gate failure
+      prints. fail_rule in tools/lib.sh reads it and emits it as the why: line, so it is
+      the one moment a rule gets to teach the reader the part of the contract they just
+      violated. A pointer at a renamed heading still prints, still looks authoritative,
+      and sends the reader to the top of a document instead of to the paragraph that
+      explains the failure — and nothing anywhere would have said so. All forty-four
+      pointers were audited by hand in Step 16d and all forty-four resolved; this rule is
+      the ratchet that keeps them there, not a repair of something broken. It is deliberately
+      narrower than RISK-DOC-002's rejected path-in-prose check: a contract: value is a
+      structured field with exactly one meaning, so there is no prose to disambiguate.
+
   - id: RULE-RULE-001
     statement: >
       Every rule in the ledger MUST declare a statement, class, check, contract, owner and
@@ -693,7 +721,12 @@ rules:
       violation makes the gate fail.
     class: executable
     check: tools/checks/gate-conformance.sh
-    fixture: tools/fixtures/negative.sh (self-proving — it is the fixture suite)
+    fixture: >
+      self-proving, and therefore unautomated: this rule IS tools/fixtures/negative.sh.
+      An arm that made gate-conformance.sh go red would have to make the suite fail from
+      inside itself, running every other arm a second time to do it. What is left
+      unobserved is the wrapper — that a failing suite really does turn into a red gate —
+      and that is recorded as RISK-GATE-001.
     contract: docs/task-interface.md#gate-conformance
     fix: none
     owner: maintainer
@@ -1031,7 +1064,7 @@ residual_risks:
       neither Docker nor an x86_64 host, so the container tier cannot be made to fail
       there on demand.
     owner: maintainer
-    re_open_trigger: "Step 9's ledger validator requires an automated fixture for every executable rule"
+    re_open_trigger: "the fixture sandbox gains Docker and an x86_64 host, or a regression is found that the container tier would have caught and the prose fixture let through"
     decision_record: docs/adr/0006-two-tier-backend-tests.md
 
   - id: RISK-TEST-003
@@ -1055,9 +1088,13 @@ residual_risks:
     statement: >
       tools/checks/branch-protection.sh needs network and an authenticated gh. Where it
       cannot reach GitHub it reports that and does not fail, so a run on an offline
-      machine proves nothing about the live governance state.
+      machine proves nothing about the live governance state. The trigger here used to
+      name Step 16c as the thing that would close this. Step 16c landed on 2026-08-30 and
+      did not: none of its six diagnostics touches the rulesets API, so the trigger named
+      an event that had already passed without occurring and could never fire. Corrected
+      by the Step 16d audit.
     owner: maintainer
-    re_open_trigger: "the scheduled decay review (Step 16c) begins carrying this evidence"
+    re_open_trigger: "a decay-review diagnostic reads the live rulesets API and records the result in ops/decay-review.json, or a protection change is found on GitHub that no local run reported"
     decision_record: docs/adr/0005-gate-the-deploy.md
 
   - id: RISK-GOV-003
@@ -1066,7 +1103,7 @@ residual_risks:
       observed by hand against the live API because the offline fixture sandbox has no
       GitHub to drift from.
     owner: maintainer
-    re_open_trigger: "Step 9's ledger validator requires an automated fixture for every executable rule"
+    re_open_trigger: "a recorded or stubbed rulesets response makes the three drift arms runnable offline, or a live drift is found that no local run had reported"
     decision_record: docs/operations.md
 
   - id: RISK-GOV-004
@@ -1258,3 +1295,74 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a second route is declared outside backend/app/routers/, an authenticated or state-changing route is added to main.py, or the route-guard checker is given a wider scope"
     decision_record: docs/adr/0027-the-threat-model.md
+
+  # --- found by the Phase 4 audit, Step 16d (docs/adr/0031-the-phase-4-audit.md) ------
+
+  - id: RISK-GATE-001
+    statement: >
+      RULE-GATE-002 is the rule that makes every other rule trustworthy, and it is the one
+      rule nobody has watched fail. tools/checks/gate-conformance.sh runs the fixture suite
+      and turns a non-zero exit into a gate failure; that wrapper — the three lines between
+      a failing fixture and a red gate — has never been exercised, because the only way to
+      exercise it is to make the suite fail from inside itself, which means running every
+      other arm a second time inside the sandbox and roughly doubling the runtime of verify.
+      The exposure is narrow and it is real: if the wrapper's condition were inverted, or if
+      it swallowed the exit code, every conformance run since Step 2 would have reported the
+      same green and meant nothing. What holds it today is that the suite is invoked by
+      tools/run-profile.sh, which classifies any non-zero exit, and that the fixtures'
+      sandbox aborts when the pristine tree is not green.
+    owner: maintainer
+    re_open_trigger: "gate-conformance.sh grows a second execution path, a fixture failure is observed reaching a green verify, or the fixture suite gains a mode cheap enough to nest"
+    decision_record: docs/adr/0031-the-phase-4-audit.md
+
+  - id: RISK-GATE-002
+    statement: >
+      The gate's own Python is not linted, formatted or type-checked. ruff runs over
+      backend/app, backend/tests and tools/index; mypy's files list is backend/app alone. That
+      leaves fifteen modules and about 4,300 lines outside every one of them — the ten check
+      implementations under tools/checks/ and the five command implementations tools/brief.py,
+      tools/decay_review.py, tools/grant-admin.py, tools/scaffold.py and tools/surfaces.py.
+      These are the programs that decide whether a change is mergeable and the programs an
+      agent is told to trust over its own reading of the tree, and they are held to a lower
+      standard than the application they judge. Widening the scope is not free — it would land
+      a pile of findings in one commit, which is why RULE-LINT-001 was deliberately introduced
+      narrow — but the asymmetry was never a decision anyone recorded, and until Step 16d it
+      was not written down anywhere.
+    owner: maintainer
+    re_open_trigger: "a defect in a check script reaches main, ruff or mypy scope is widened for any other reason, or a sixth command implementation is added under tools/"
+    decision_record: docs/adr/0031-the-phase-4-audit.md
+
+  - id: RISK-IDX-002
+    statement: >
+      index/manifest.toml's [unsupported] list and the index's actual blind spots are two
+      hand-kept copies of one fact and they had drifted. The manifest listed six mechanisms;
+      the graph carries seven, because BLIND-TEST-001 — import-derived test protection, which
+      sees no TESTED_BY edge for anything exercised through the FastAPI TestClient — was added
+      to tools/index/build.py and never to the manifest. The manifest also still lists
+      BLIND-MCP-001 as unsupported, which the graph records as resolved by runtime observation
+      in Step 13. Nothing reads [unsupported]: the blind spots a query reports come from
+      _declare_global_blind_spots in the builder, so the manifest is prose about the index
+      rather than input to it. Both copies are corrected as of 2026-08-30 and nothing keeps
+      them together. This matters beyond tidiness because the manifest is what a reader is
+      pointed at to learn what the index cannot see, and a benchmark that scores an agent on
+      flagging the declared blind spots has to be scored against the right number.
+    owner: maintainer
+    re_open_trigger: "an eighth blind spot is declared, a blind spot is resolved, or the two lists are found to disagree again"
+    decision_record: docs/adr/0031-the-phase-4-audit.md
+
+  - id: RISK-GOV-006
+    statement: >
+      Nothing in this repository has ever observed branch protection BLOCK a merge. RULE-GOV-001
+      compares the live ruleset against ops/github/ruleset.json, which establishes that the
+      configuration is what was intended — a different and weaker claim than that a red VERIFY
+      stops a merge button. Step 16d confirmed against the live API on 2026-08-30 that the
+      main-protection ruleset is active on the default branch with verify as a required status
+      check and an empty bypass_actors list, and that is the end of what a read-only,
+      pull-request-free check can establish: GitHub evaluates a required status check when a
+      merge is attempted, so the enforcing behaviour is only observable by attempting one. The
+      blocking half is therefore asserted from configuration, exactly the posture the plan calls
+      advice rather than a rule. The procedure that would settle it in about five minutes,
+      without merging anything, is written out in docs/adr/0031-the-phase-4-audit.md.
+    owner: maintainer
+    re_open_trigger: "the blocking test in ADR 0031 is performed and its result recorded, a merge is observed completing over a red verify, or bypass_actors becomes non-empty"
+    decision_record: docs/adr/0031-the-phase-4-audit.md

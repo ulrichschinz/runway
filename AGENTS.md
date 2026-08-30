@@ -117,9 +117,11 @@ never weakened by a selection heuristic. Budgets live in `tools/checks/budgets.c
 are enforced: a slow gate gets bypassed.
 
 **Every rule in `rules/ledger.yaml` has a negative fixture proving it can fail**
-(`tools/fixtures/negative.sh`, run by `RULE-GATE-002`). A gate component nobody has
-watched fail is not a rule — it is a shell call, and it is worse than nothing because it
-is believed.
+(`tools/fixtures/negative.sh`, run by `RULE-GATE-002`), and three of them are prose rather
+than an arm — each saying in the ledger why it cannot be automated, and each carrying a
+risk id. A gate component nobody has watched fail is not a rule — it is a shell call, and
+it is worse than nothing because it is believed. The suite reports arms and rule coverage
+as two separate numbers, because they are two separate claims.
 
 **The gate is itself reviewed, monthly.** `make decay-review` runs six diagnostics no green
 run can produce — cycle and hub trends, co-change against the declared units, the expiry
@@ -180,4 +182,5 @@ Full residual-risk register: the `residual_risks` section of `rules/ledger.yaml`
 rollback, incidents) · `docs/security.md` (roles and guards) · `docs/threat-model.md`
 (actors, inputs, secrets, egress, abuse cases — enforced vs. asserted) ·
 `index/schema.md` (what the index knows) ·
-`docs/plan/phase-0-2.md` (why the repository is shaped this way).
+`docs/plan/phase-0-2.md` (why the repository is shaped this way) ·
+`docs/migration-log.md` (what the agent-readiness programme changed, step by step).

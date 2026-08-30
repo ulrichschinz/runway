@@ -284,10 +284,22 @@ One file and one line:
 1. write `tools/checks/<name>.sh` — source `tools/lib.sh`, call `fail_rule <RULE-ID> "<message>"` for each
    violation, exit `1` if any fired;
 2. add `<name>` with its profiles to `tools/checks/profiles.conf`;
-3. add the rule to `rules/ledger.yaml` with its class, its check, and its negative fixture.
+3. add the rule to `rules/ledger.yaml` with its class, its check, its negative fixture and its `contract:`
+   pointer;
+4. add an arm to `tools/fixtures/negative.sh` that constructs a real violation and watches the gate go red.
 
-Step 3 is not optional. A rule without a fixture proving that a real violation turns the gate red is a rule
-nobody has confirmed works.
+Steps 3 and 4 are not optional, and `RULE-GATE-002` now checks that they were both done: the ledger says
+which rules name `tools/fixtures/negative.sh` as their fixture, and every one of them has to be observed
+failing in the same run. A rule that quietly stops being exercised is the untested shell call the whole
+conformance suite exists to prevent.
+
+The `contract:` pointer is not documentation about the rule. `fail_rule` reads it and prints it as the
+`why:` line of the failure, so it is the one moment a rule gets to teach the reader the part of the contract
+they just violated — which makes a pointer at a heading that has since been renamed worse than none, because
+it still prints and still looks authoritative. `RULE-DOC-005` resolves every one of them: the file must
+exist, and where an `#anchor` is given, the file must carry a heading that produces it. Where the rule has a
+deterministic repository-owned repair, `fix:` names the exact command, and `make fix` is that command for
+everything the tools own — formatting, safe lint fixes and the index.
 
 ## Repository hygiene
 
@@ -488,6 +500,25 @@ Each fixture executes inside a throwaway copy of the **current working tree**, w
 rather than copied, so it never mutates the tree you are working in and is safe to run with uncommitted
 changes in flight.
 
+It reports two numbers, and they are not the same number:
+
+```
+  48 fixture arm(s) passed, 0 failed
+  42 of 45 executable rules proven able to fail; 3 declare no automated fixture (…)
+```
+
+Several rules have more than one arm — `RULE-OPS-001` is proven twice, once for the subprocess and once for
+an egress call — so the arm count runs ahead of the rule count. Until Step 16d only the arm count was
+printed, and every document downstream read it as the rule count; the difference had already been used as an
+argument against adding an arm. The second line is the claim this rule actually makes, and the suite fails
+when a rule that declares an automated fixture is not observed failing.
+
+**Three rules declare no automated fixture, and say so in the ledger rather than being silently absent:**
+`RULE-TEST-002` needs Docker and an x86_64 host the offline sandbox does not have (`RISK-TEST-002`);
+`RULE-GOV-001` needs a live GitHub to drift from, and its three drift scenarios were constructed by hand
+(`RISK-GOV-003`); and `RULE-GATE-002` is the suite itself, so an arm for it would have to make the suite
+fail from inside itself (`RISK-GATE-001`).
+
 This is the rule that makes the others trustworthy: a gate component nobody has watched fail is not a rule,
 it is a shell call, and it is worse than nothing because it is believed.
 
@@ -568,11 +599,18 @@ gate stops being run at all.
 - The root contract is `AGENTS.md`, and `RULE-DOC-001` checks every factual claim in it against the actual
   repository — paths, commands, identifiers and the counted public-surface claims. **This file is not
   checked that way.**
-- **A green `verify` does not mean the application is correct.** It means 47 rules held, the backend and
+- **A green `verify` does not mean the application is correct.** It means 45 rules held, the backend and
   frontend suites passed, the index is current and qualified, no boundary or public surface moved
-  unannounced, and every one of those 47 rules was separately proven able to fail on a constructed
-  violation. What it does not cover is stated in [the threat model](threat-model.md), section by section,
-  as *enforced* versus *asserted*.
+  unannounced, and that 42 of those 45 rules were separately proven able to fail on a constructed
+  violation while the other three declared, in the ledger, why they cannot be. This paragraph said 47 until
+  the Step 16d audit, because it was quoting the fixture *arm* count as a rule count. What a green run does
+  not cover is stated in [the threat model](threat-model.md), section by section, as *enforced* versus
+  *asserted*.
+- **The gate's own Python is not linted, formatted or type-checked** (`RISK-GATE-002`). ruff covers
+  `backend/app`, `backend/tests` and `tools/index`; mypy covers `backend/app` alone. The ten check
+  implementations under `tools/checks/` and the five command implementations under `tools/` are outside
+  both — the programs that decide whether a change is mergeable are held to a lower standard than the
+  application they judge.
 - **The container tier does not run on arm64** (`RISK-TEST-001`), so a local `verify` on Apple silicon
   skips the only tests that exercise the real Taskwarrior binary and the cross-tenant isolation boundary.
   CI runs them. A green local run is weaker than a green CI run, and this is the difference.

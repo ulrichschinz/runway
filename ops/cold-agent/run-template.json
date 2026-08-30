@@ -1,0 +1,172 @@
+{
+  "_comment": [
+    "Template for one Cold-Agent benchmark run. Copy to",
+    "ops/cold-agent/runs/<YYYY-MM-DD>-<label>.json, fill it in, and score it with",
+    "",
+    "    backend/.venv/bin/python tools/cold_agent_score.py ops/cold-agent/runs/<file>.json",
+    "",
+    "Every field is required unless its comment says otherwise. The scorer refuses an",
+    "incomplete record with exit 2 rather than scoring around the gap: a run with an",
+    "unmarked criterion has not been scored, and reporting it as a pass is the failure",
+    "this whole benchmark exists to catch.",
+    "",
+    "The criteria are ops/cold-agent/criteria.md. criteria_version below MUST name the",
+    "version the run was scored against; the scorer refuses a version it does not know."
+  ],
+
+  "criteria_version": "1.0.0",
+  "run_id": "YYYY-MM-DD-label",
+  "operator": "who ran it",
+  "started_at": "ISO-8601",
+  "finished_at": "ISO-8601",
+
+  "repository_revision": "git rev-parse HEAD, at the start of the session",
+  "index_revision": "index/state.json revision, at the start of the session",
+  "index_sources_sha256": "index/state.json sources_sha256",
+  "gate_green_before": true,
+
+  "agent": {
+    "tool": "the client, e.g. its name and version",
+    "model": "the model identifier",
+    "adapter": "cli | mcp | both — how the index was reached"
+  },
+
+  "precondition": {
+    "_comment": "criteria.md section 2. A false verdict VOIDS the run: it is not scored.",
+    "p1_purge_command": "ctx purge  (or: context-mode disabled — say which)",
+    "p1_purge_output": "verbatim output, including an empty one",
+    "p2_launch_command": "verbatim command line that started the session",
+    "p2_resume_flags_used": false,
+    "p3_cache_paths_checked": [
+      { "path": "…", "result": "verbatim ls output, including 'no such file or directory'" }
+    ],
+    "p4_negative_control": {
+      "prompt": "the verbatim prompt from criteria.md section 2",
+      "answer": "the verbatim answer",
+      "banned_tokens_found": [],
+      "verdict": "cold | contaminated"
+    },
+    "p5_check_output": "the last two lines of ./run check",
+    "verdict": "cold | contaminated"
+  },
+
+  "transcript_path": "ops/cold-agent/runs/<YYYY-MM-DD>-<label>.transcript.md",
+
+  "authoritative_claims": [
+    {
+      "_comment": "criteria.md section 4. One entry per authoritative fact the session stated.",
+      "claim": "as stated, verbatim",
+      "cited_query": "./run impact backend/app/models.py  — or null if none was cited",
+      "verified": true,
+      "invented_by_rule": null
+    }
+  ],
+
+  "index_test": {
+    "queries": 0,
+    "manual_reads": 0,
+    "wall_seconds": 0,
+    "criteria": [
+      { "id": "IT-01", "result": "pass | fail", "evidence": "what was said, briefly" },
+      { "id": "IT-02", "result": "pass | fail", "evidence": "" },
+      { "id": "IT-03", "result": "pass | fail", "evidence": "" },
+      { "id": "IT-04", "result": "pass | fail", "evidence": "" },
+      { "id": "IT-05", "result": "pass | fail", "evidence": "" },
+      { "id": "IT-06", "result": "pass | fail", "evidence": "" },
+      { "id": "IT-07", "result": "pass | fail", "evidence": "" },
+      { "id": "IT-08", "result": "pass | fail", "evidence": "" },
+      { "id": "IT-09", "result": "pass | fail", "evidence": "" },
+      { "id": "IT-10", "result": "pass | fail", "evidence": "" },
+      { "id": "IT-11", "result": "pass | fail", "evidence": "" },
+      { "id": "IT-12", "result": "pass | fail", "evidence": "" }
+    ],
+    "blind_spots_flagged": []
+  },
+
+  "change_test": [
+    {
+      "request": "R1",
+      "queries": 0,
+      "manual_reads": 0,
+      "manual_reads_before_first_query": 0,
+      "wall_seconds": 0,
+      "mandatory_hit": 0,
+      "mandatory_total": 5,
+      "expected_hit": 0,
+      "expected_total": 6,
+      "method_points": [
+        { "id": "MP-1", "result": "pass | fail", "evidence": "" },
+        { "id": "MP-2", "result": "pass | fail", "evidence": "" },
+        { "id": "MP-3", "result": "pass | fail", "evidence": "" },
+        { "id": "MP-4", "result": "pass | fail", "evidence": "" }
+      ],
+      "result": "pass | fail"
+    },
+    {
+      "request": "R2",
+      "queries": 0,
+      "manual_reads": 0,
+      "manual_reads_before_first_query": 0,
+      "wall_seconds": 0,
+      "mandatory_hit": 0,
+      "mandatory_total": 6,
+      "expected_hit": 0,
+      "expected_total": 6,
+      "method_points": [
+        { "id": "MP-1", "result": "pass | fail", "evidence": "" },
+        { "id": "MP-2", "result": "pass | fail", "evidence": "" },
+        { "id": "MP-3", "result": "pass | fail", "evidence": "" },
+        { "id": "MP-4", "result": "pass | fail", "evidence": "" }
+      ],
+      "result": "pass | fail"
+    },
+    {
+      "request": "R3",
+      "queries": 0,
+      "manual_reads": 0,
+      "manual_reads_before_first_query": 0,
+      "wall_seconds": 0,
+      "mandatory_hit": 0,
+      "mandatory_total": 4,
+      "expected_hit": 0,
+      "expected_total": 6,
+      "method_points": [
+        { "id": "MP-1", "result": "pass | fail", "evidence": "" },
+        { "id": "MP-2", "result": "pass | fail", "evidence": "" },
+        { "id": "MP-3", "result": "pass | fail", "evidence": "" },
+        { "id": "MP-4", "result": "pass | fail", "evidence": "" }
+      ],
+      "result": "pass | fail"
+    }
+  ],
+
+  "baseline": {
+    "_comment": "criteria.md section 8. Produced independently, before the run or by another person.",
+    "produced_by": "human | cold agent",
+    "operator": "who",
+    "produced_before_run": true,
+    "saw_criteria": false,
+    "wall_seconds": 0,
+    "commands": 0,
+    "mandatory_facts_hit": 0,
+    "facts_stated_wrongly": 0,
+    "blind_spots_flagged": 0,
+    "notes": ""
+  },
+
+  "misses": [
+    {
+      "id": "RUN-<run_id>-1",
+      "criterion": "IT-05",
+      "class": "M1 | M2 | M3 | M4 | M5 | M6",
+      "what_was_missed": "",
+      "correction": "one line, imperative",
+      "owner": "maintainer",
+      "target_artefact": "path/to/file",
+      "carried_from": null
+    }
+  ],
+
+  "result": "pass | fail | void",
+  "notes": ""
+}

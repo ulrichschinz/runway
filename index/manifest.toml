@@ -43,13 +43,19 @@ note = "Conceptual retrieval over docs is Step 7, together with the CLI and MCP 
 
 [unsupported]
 # Known-unsupported mechanisms. These MUST surface as blind spots, never as invented edges.
+#
+# This list is prose ABOUT the index, not input to it: the blind spots a query reports are
+# declared in tools/index/build.py, and nothing compares the two. They had drifted apart by
+# one entry, found and corrected by the Step 16d audit; the standing gap is RISK-IDX-002.
+# Seven blind spots, and `./run violations` or any query answer is the authority on them.
 items = [
   "Vue template-only component usage (BLIND-FE-001)",
   "dynamic import() (BLIND-FE-002)",
-  "fastapi-mcp internal tool naming (BLIND-MCP-001)",
+  "fastapi-mcp internal tool naming (BLIND-MCP-001) — resolved 2026-08-26 by runtime observation; the graph keeps it as a resolved blind spot and RISK-MCP-001 carries what is left",
   "Taskwarrior internals (BLIND-TASK-001)",
   "the deploy host compose file (BLIND-OPS-001)",
   "nginx envsubst templating (BLIND-NGINX-001)",
+  "import-derived test protection (BLIND-TEST-001) — code exercised only through the FastAPI TestClient produces no TESTED_BY edge",
 ]
 
 [validation]

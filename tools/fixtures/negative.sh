@@ -62,6 +62,16 @@ ln -s "$REPO_ROOT/frontend/node_modules" "$SANDBOX/frontend/node_modules"
 pass=0
 fail=0
 
+# Which RULE ids an arm has actually been observed failing on. The two counts are not the
+# same number and were reported as if they were until Step 16d: several rules have more
+# than one arm, so "47 arms passed" was being read as "47 rules are proven". Coverage is
+# the claim RULE-GATE-002 makes, so coverage is what gets checked at the end.
+COVERED=$(mktemp)
+trap 'rm -rf "$SANDBOX"; rm -f "$COVERED"' EXIT INT TERM
+
+# record_rule <rule-id> — note that an arm proved this rule able to fail.
+record_rule() { printf '%s\n' "$1" >>"$COVERED"; }
+
 # reset — restore the sandbox to its pristine committed state between fixtures.
 reset() {
 	(cd "$SANDBOX" && git reset -q --hard && git clean -qfd)
@@ -80,6 +90,7 @@ expect_red() {
 	if [ "$rc" -eq "$EX_RULE" ] && printf '%s' "$out" | grep -q "$want"; then
 		printf '  PASS  %-18s %s went red\n' "$label" "$want"
 		pass=$((pass + 1))
+		record_rule "$want"
 	else
 		printf '  FAIL  %-18s expected exit %s naming %s, got exit %s\n' \
 			"$label" "$EX_RULE" "$want" "$rc" >&2
@@ -104,6 +115,7 @@ expect_code() {
 	if [ "$rc" -eq "$want_code" ] && printf '%s' "$out" | grep -q "$want"; then
 		printf '  PASS  %-18s exit %s, %s\n' "$label" "$want_code" "$want"
 		pass=$((pass + 1))
+		record_rule "$want"
 	else
 		printf '  FAIL  %-18s expected exit %s matching %s, got exit %s\n' \
 			"$label" "$want_code" "$want" "$rc" >&2
@@ -205,7 +217,7 @@ expect_red "TEST-004" "tools/checks/js-test.sh" "RULE-TEST-004"
 
 # --- RULE-IDX-001 — the index goes stale when a source changes --------------
 printf '\n# staleness probe\n' >>"$SANDBOX/backend/app/config.py"
-expect_code "IDX-001" "tools/checks/index-fresh.sh" 4 "index is stale"
+expect_code "IDX-001" "tools/checks/index-fresh.sh" 4 "RULE-IDX-001"
 
 # --- RULE-IDX-002 — a non-deterministic build -------------------------------
 #
@@ -496,6 +508,23 @@ Recorded as `RISK-FIXTURE-999`, which is declared nowhere.
 ADR
 expect_red "DOC-004" "tools/checks/contract.sh" "RULE-DOC-004"
 
+# --- RULE-DOC-005 — a rule points at a heading that no longer exists ---------
+#
+# The realistic way this breaks is a rename, not a deletion: the section is still there,
+# under a different title, so the document looks fine and only the pointer is dead. The
+# fixture renames the heading RULE-HYG-001 and RULE-HYG-002 both point at.
+python3 - "$SANDBOX/docs/task-interface.md" <<'PATCH'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "## Repository hygiene\n"
+assert old in t, "the hygiene heading is not where the fixture expects it"
+p.write_text(t.replace(old, "## Keeping the repository clean\n", 1))
+PATCH
+expect_red "DOC-005" "tools/checks/contract.sh" "RULE-DOC-005"
+
 # --- RULE-RULE-001 — an executable rule with no fixture ---------------------
 python3 - "$SANDBOX/rules/ledger.yaml" <<'PATCH'
 import pathlib
@@ -728,6 +757,7 @@ set -e
 if [ "$rc" -eq "$EX_RULE" ] && printf '%s' "$out" | grep -q 'RULE-GATE-001'; then
 	printf '  PASS  %-18s %s went red\n' "GATE-001" "RULE-GATE-001"
 	pass=$((pass + 1))
+	record_rule RULE-GATE-001
 else
 	printf '  FAIL  %-18s expected exit %s naming RULE-GATE-001, got exit %s\n' \
 		"GATE-001" "$EX_RULE" "$rc" >&2
@@ -736,5 +766,60 @@ else
 fi
 reset
 
-printf '  %s rule(s) proven able to fail, %s not\n' "$pass" "$fail"
+# --- coverage -----------------------------------------------------------------
+#
+# An arm count is not a rule count. Until Step 16d this script printed the number of arms
+# that passed and every document downstream read it as the number of rules proven — which
+# was three higher than the truth, and had already been used to argue against adding an
+# arm. So the accounting is done here instead of inferred: the ledger says which rules
+# declare tools/fixtures/negative.sh as their fixture, and every one of them must have
+# been observed going red above. A rule that quietly stops being exercised is exactly the
+# untested shell call RULE-GATE-002 exists to prevent.
+
+sort -u "$COVERED" >"$COVERED.uniq" && mv "$COVERED.uniq" "$COVERED"
+printf '  %s fixture arm(s) passed, %s failed\n' "$pass" "$fail"
+
+python3 - "$LEDGER" "$COVERED" <<'COVERAGE' || fail=$((fail + 1))
+import re
+import sys
+
+ledger, covered_path = sys.argv[1], sys.argv[2]
+
+automated: list[str] = []
+declared: list[str] = []
+rid = None
+pending = False
+for line in open(ledger, encoding="utf-8"):
+    if line.startswith("residual_risks:"):
+        break
+    match = re.match(r"  - id: (\S+)", line)
+    if match:
+        rid, pending = match.group(1), False
+        continue
+    if pending:
+        if line.strip():
+            (automated if line.split()[0] == "tools/fixtures/negative.sh" else declared).append(rid)
+            pending = False
+        continue
+    match = re.match(r"    fixture: ?(.*)$", line)
+    if match and rid:
+        value = match.group(1).strip()
+        if value in (">", "|", ">-", "|-"):
+            pending = True
+        else:
+            (automated if value.split()[0] == "tools/fixtures/negative.sh" else declared).append(rid)
+
+covered = {line.strip() for line in open(covered_path, encoding="utf-8") if line.strip()}
+missing = sorted(set(automated) - covered)
+total = len(automated) + len(declared)
+
+print(
+    f"  {len(covered)} of {total} executable rules proven able to fail; "
+    f"{len(declared)} declare no automated fixture ({', '.join(sorted(declared))})"
+)
+for rule in missing:
+    print(f"  FAIL  {rule} declares an automated fixture that no arm exercised", file=sys.stderr)
+sys.exit(1 if missing else 0)
+COVERAGE
+
 [ "$fail" -eq 0 ] || exit "$EX_RULE"

@@ -2,6 +2,7 @@
 # RULE-DOC-001  Every factual claim in AGENTS.md MUST hold.
 # RULE-DOC-002  AGENTS.md MUST stay inside its length budget.
 # RULE-DOC-003  A scoped contract refines the root; it never defines rules of its own.
+# RULE-DOC-005  Every rule's contract: pointer MUST resolve — the file, and the anchor.
 # RULE-RULE-001 The Rule Ledger MUST be complete: every rule has a check and a fixture.
 # RULE-RULE-002 No waiver may be expired, and each records all five groups.
 # RULE-RULE-003 Every inline suppression MUST reference a waiver or a justified suppression.
