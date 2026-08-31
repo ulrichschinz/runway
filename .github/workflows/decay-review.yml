@@ -1,0 +1,64 @@
+name: Decay review
+
+# The monthly adapter, and nothing more.
+#
+# Every decision this job could make lives in `./run decay-review` instead: which
+# diagnostics run, what counts as a finding, what the evidence contains, how it is hashed,
+# and whether the index needs rebuilding afterwards. This file schedules that command,
+# gives it a clean clone to run in, and commits what it wrote. If a conditional ever
+# appears below, the logic has been put in the wrong place — YAML is where rules go to
+# stop being testable.
+#
+# It runs on the 1st of each month. `RULE-GOV-002` fails `verify` 45 days after the last
+# recorded review, so one missed run is survivable and two are not — red means the
+# schedule is broken, not that a run was late.
+
+on:
+  schedule:
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: decay-review
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Full history: the co-change diagnostic reads a year of commits, and a shallow
+          # clone would make it report an empty result rather than fail.
+          fetch-depth: 0
+
+      - name: Read declared runtime versions
+        id: versions
+        run: grep -E '^[A-Z_]+=' tools/versions.env >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ steps.versions.outputs.NODE_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Bootstrap from a clean clone
+        run: make bootstrap
+
+      - name: Decay review
+        run: ./run decay-review
+
+      - name: Commit the evidence
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Decay review — evidence from CI run ${{ github.run_id }}" ops/decay-review.json ops/decay-history.jsonl
+          git push

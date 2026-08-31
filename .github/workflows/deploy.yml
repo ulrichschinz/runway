@@ -107,7 +107,17 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: echo "deploy triggered"
-          # Note: the server uses a forced command — the script above is ignored.
-          # Connecting with the deploy key automatically triggers:
-          # cd /opt/services/runway && docker compose pull && docker compose up -d --remove-orphans
+          # The server uses a forced command, so this is never executed as a script. It is
+          # delivered as SSH_ORIGINAL_COMMAND, and ops/deploy/deploy-command.sh reads the commit
+          # out of it. That commit is the only caller-controlled input the host accepts, and it
+          # is reduced to 40 hex characters before it is used.
+          #
+          # Until 2026-08-28 this said `echo "deploy triggered"` and the forced command was
+          # `docker compose pull && docker compose up -d`, which shipped images but never the
+          # compose file. The compose file was maintained by hand on the host, and this
+          # repository's copy of it was a transcription that drifted — three claims about
+          # production were each true when written and each quietly stopped being true. The
+          # forced command now fetches ops/deploy/docker-compose.yml at this commit and applies
+          # it before pulling, so the repository determines the deployment instead of describing
+          # it. RULE-OPS-003 bounds what that file may ask of the host.
+          script: deploy ${{ github.sha }}

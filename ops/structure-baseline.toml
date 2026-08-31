@@ -22,6 +22,12 @@ allowlist = [
 
 [hubs]
 "backend/app/database.py" = 7
+# Recorded on 2026-08-28 with the audit log. Five dependents is the shape of the thing: an
+# audit writer is a single sink that everything with an event to record reaches — the auth
+# dependency, three routers and the lifespan. Concentration here is the design, exactly as it
+# is for the HTTP egress point below; what would be a real signal is a SIXTH, because that
+# means a new class of event and a new call site to review for what it puts in a row.
+"backend/app/audit.py" = 5
 "frontend/src/components/TaskList.vue" = 6
 "frontend/src/components/TaskModal.vue" = 6
 # Raised from 5 on 2026-08-25: /inbox stopped implementing its own authentication and

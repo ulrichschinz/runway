@@ -20,6 +20,9 @@ Five things are checked:
 * `RULE-DOC-004` — every reference in a decision record or a change brief resolves. The
   same resolution `RULE-DOC-001` performs on the contract, applied to the documents the
   contract points at, because a dangling reference in an ADR is followed just as readily.
+* `RULE-DOC-005` — every rule's `contract:` pointer resolves. That field is what a gate
+  failure prints as its `why:` line, so a stale anchor silently turns the one teaching
+  moment a rule gets into a dead end.
 """
 
 from __future__ import annotations
@@ -226,6 +229,56 @@ def check_ledger() -> None:
                     fail("RULE-RULE-001", f"{rid} names fixture `{path}`, which does not exist")
 
 
+# --- where a failure sends you -------------------------------------------------
+#
+# RULE-DOC-005. `fail_rule` in tools/lib.sh prints the `contract:` field of the violated
+# rule as the `why:` line, so that pointer is the one piece of teaching a gate failure
+# does. A pointer into a file that no longer has that heading teaches nothing and is
+# invisible: the message still prints, it just sends the reader nowhere.
+
+_ANCHOR_STRIP = re.compile(r"[`*_\[\]()]")
+_ANCHOR_DROP = re.compile(r"[^\w\s-]")
+
+
+def _slug(heading: str) -> str:
+    """The GitHub heading slug: lowercase, punctuation dropped, spaces hyphenated."""
+    text = _ANCHOR_STRIP.sub("", heading.strip().lower())
+    text = _ANCHOR_DROP.sub("", text)
+    return re.sub(r"\s+", "-", text).strip("-")
+
+
+def _anchors(path: Path) -> set[str]:
+    return {
+        _slug(line.lstrip("#"))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.startswith("#")
+    }
+
+
+def check_rule_pointers() -> None:
+    """RULE-DOC-005 — every rule's `contract:` pointer resolves.
+
+    Audited by hand for the first time in Step 16d, when all forty-four happened to
+    resolve. Nothing had been holding them there; this is the ratchet that does.
+    """
+    data = yaml.safe_load(LEDGER.read_text(encoding="utf-8"))
+    for rule in data.get("rules", []):
+        rid = rule.get("id", "<no id>")
+        pointer = str(rule.get("contract") or "").strip()
+        if not pointer:
+            continue  # RULE-RULE-001 already reports a missing field
+        rel, _, anchor = pointer.partition("#")
+        target = ROOT / rel
+        if not target.is_file():
+            fail("RULE-DOC-005", f"{rid} points at `{rel}`, which is not a file")
+            continue
+        if anchor and anchor not in _anchors(target):
+            fail(
+                "RULE-DOC-005",
+                f"{rid} points at `{pointer}`, but {rel} has no heading with that anchor",
+            )
+
+
 # --- waivers -------------------------------------------------------------------
 
 REQUIRED_WAIVER_FIELDS = (
@@ -405,6 +458,7 @@ def main() -> int:
     check_length_budget()
     check_scoped_contracts()
     check_ledger()
+    check_rule_pointers()
     waiver_data = check_waivers()
     check_suppressions(waiver_data)
     check_shims()

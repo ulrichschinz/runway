@@ -670,6 +670,14 @@ Delivered as four small PRs rather than one:
    governance residual risk with a re-open trigger rather than papered over. (16a)
 6. **SEC-3 is a hypothesis, not a demonstrated exploit** (no `task` binary on this host). Step 12's
    adversarial fixture is designed to confirm or refute it, and the record will be updated either way.
+7. **There is no quarantine inventory, and there never was one.** Step 16c names
+   "the waiver/quarantine/shim inventories" among the decay review's diagnostics, but this repository has
+   only two of the three: `rules/waivers.yaml` and `rules/shims.yaml`. The role a quarantine list would
+   play — a registry of known-bad structure that must not grow — is occupied by `known_cycles` in
+   `architecture.toml`, which is a ratchet rather than an inventory. The decay review reports the absence
+   explicitly rather than silently checking two of three things. Recorded here as a scope clarification,
+   not as a risk: nothing is unowned, and inventing a third empty register would add a file to maintain
+   and no enforcement. (16c)
 
 ---
 

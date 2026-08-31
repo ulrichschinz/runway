@@ -9,7 +9,7 @@ set -eu
 
 if out=$("$REPO_ROOT/tools/fixtures/negative.sh" 2>&1); then
 	# Human summary only: in JSON mode stdout carries the profile object and nothing else.
-	is_json || printf '%s\n' "$out" | grep -E '(PASS|rule\(s\) proven)' | sed 's/^ */      /'
+	is_json || printf '%s\n' "$out" | grep -E '(PASS|arm\(s\) passed|proven able to fail)' | sed 's/^ */      /'
 	exit "$EX_OK"
 fi
 printf '%s\n' "$out" | sed 's/^/        /' >&2

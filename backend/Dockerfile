@@ -45,8 +45,17 @@ COPY requirements.txt requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY taskrc_template.txt .
+COPY log_config.json .
 COPY app/ ./app/
 
 RUN mkdir -p /app/data
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --log-config replaces uvicorn's own loggers, so the access lines, the application lines and
+# any traceback all leave this container as JSON on one stream, through one redaction filter.
+# Without it uvicorn installs plain-text handlers of its own before the application is even
+# imported, and those lines would bypass the filter entirely (ADR 0024).
+#
+# log_config.json is generated from app.logging_setup.dict_config and a unit test holds the
+# two together; edit the module, then regenerate, never the other way round.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--log-config", "log_config.json"]

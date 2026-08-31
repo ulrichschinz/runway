@@ -9,8 +9,15 @@
 # is a ${...} reference resolved from a .env beside it on the host, which is not and must
 # never be in this repository (RULE-HYG-001).
 #
-# It is NOT deployed from here. Changes must be applied to the host by hand and this file
-# updated in the same change; nothing detects drift between the two (RISK-OPS-002).
+# THIS FILE IS DEPLOYED. Since 2026-08-28 the deploy key's forced command fetches it at the
+# deployed commit, validates it and applies it before pulling images — see
+# ops/deploy/deploy-command.sh and docs/operations.md#the-deploy-mechanism. It is no longer a
+# transcription of the host's file; it is the host's file. Edit it through a pull request like
+# code, never by hand on the server.
+#
+# RULE-OPS-003 fails the gate if anything here asks the host for privilege, its network
+# namespace, or a bind mount outside the service directory. RULE-HYG-003 fails if a literal
+# secret ever replaces a ${...} reference.
 services:
   backend:
     # Parameterised so the documented rollback works. Unset resolves to :latest, which is
@@ -26,8 +33,23 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - DATA_ROOT=/app/data
       - DB_PATH=/app/users.db
+      # Unset resolves to INFO, which is what the application defaults to anyway — so this
+      # line changes nothing until someone raises it to debug a live problem. It is here so
+      # the knob is visible where the deployment is described rather than only in README.
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     networks:
       - traefik-public
+    # Lands with the next deploy through the mechanism above; until that deploy runs, the host
+    # is still on Docker's default json-file driver with no size limit.
+    #
+    # 10m x 5 caps each service at 50 MB. The backend now writes a JSON line per request and
+    # the same disk holds users.db and data/, so an unbounded log is a full disk that takes
+    # the database down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # A container that crash-loops on startup is otherwise indistinguishable from a healthy
     # one: `docker compose up -d` returns success either way. On 2026-08-04 that gap kept a
     # dead backend in production through two green deploys (ADR 0004). Python rather than
@@ -56,6 +78,12 @@ services:
         condition: service_healthy
     networks:
       - traefik-public
+    # Lands with the next deploy — see the backend service above.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:4000/"]
       interval: 30s

@@ -28,9 +28,13 @@ validate "./run check JSON=1"        env RUNWAY_JSON=1 ./run check        || tru
 validate "./run check PLAN=1 JSON=1" env RUNWAY_JSON=1 RUNWAY_PLAN=1 ./run check || true
 validate "./run doctor JSON=1"       env RUNWAY_JSON=1 ./run doctor       || true
 validate "./run help JSON=1"         env RUNWAY_JSON=1 ./run help         || true
+# --no-write is what makes the decay review checkable here at all: the command's normal
+# mode writes evidence, stages it and rebuilds the index, and a gate that mutates the
+# repository to verify it is a gate nobody can trust the result of.
+validate "./run decay-review JSON=1" env RUNWAY_JSON=1 ./run decay-review --no-write || true
 
 if ! check_result; then
 	exit "$EX_RULE"
 fi
-ok "check, plan, doctor and help all emit valid JSON"
+ok "check, plan, doctor, help and decay-review all emit valid JSON"
 exit "$EX_OK"

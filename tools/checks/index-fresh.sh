@@ -10,19 +10,33 @@ set -eu
 cd "$REPO_ROOT"
 state=index/state.json
 
-if [ ! -f "$state" ]; then
-	printf '  the index has not been built — run make index\n' >&2
+# Exit 4 is not a rule violation, so fail_rule is wrong here — it would add a finding to
+# the profile's violation list and claim the gate went red over a rule. The rule id and the
+# contract pointer are printed by hand instead, because the failure message audit in Step
+# 16d found this to be the one gate failure a reader meets most often and the only one that
+# named neither.
+_why=$(rule_field RULE-IDX-001 contract)
+_how=$(rule_field RULE-IDX-001 fix)
+
+stale() {
+	printf '  STALE RULE-IDX-001  %s\n' "$1" >&2
+	shift
+	for _detail in "$@"; do printf '        %s\n' "$_detail" >&2; done
+	[ -n "$_why" ] && printf '        why:  %s\n' "$_why" >&2
+	[ -n "$_how" ] && printf '        fix:  %s\n' "$_how" >&2
 	exit "$EX_STALE_INDEX"
+}
+
+if [ ! -f "$state" ]; then
+	stale "the index has not been built"
 fi
 
 recorded=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sources_sha256"])' "$state")
 current=$(python3 "$REPO_ROOT/tools/index/sources_hash.py")
 
 if [ "$recorded" != "$current" ]; then
-	printf '  the index is stale: tracked sources have changed since it was built\n' >&2
-	printf '    recorded %s\n    current  %s\n' "$recorded" "$current" >&2
-	printf '    rebuild with: make index\n' >&2
-	exit "$EX_STALE_INDEX"
+	stale "the index is stale: tracked sources have changed since it was built" \
+		"recorded $recorded" "current  $current"
 fi
 
 schema=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["schema_version"])' "$state")

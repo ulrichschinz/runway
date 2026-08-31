@@ -62,6 +62,16 @@ ln -s "$REPO_ROOT/frontend/node_modules" "$SANDBOX/frontend/node_modules"
 pass=0
 fail=0
 
+# Which RULE ids an arm has actually been observed failing on. The two counts are not the
+# same number and were reported as if they were until Step 16d: several rules have more
+# than one arm, so "47 arms passed" was being read as "47 rules are proven". Coverage is
+# the claim RULE-GATE-002 makes, so coverage is what gets checked at the end.
+COVERED=$(mktemp)
+trap 'rm -rf "$SANDBOX"; rm -f "$COVERED"' EXIT INT TERM
+
+# record_rule <rule-id> — note that an arm proved this rule able to fail.
+record_rule() { printf '%s\n' "$1" >>"$COVERED"; }
+
 # reset — restore the sandbox to its pristine committed state between fixtures.
 reset() {
 	(cd "$SANDBOX" && git reset -q --hard && git clean -qfd)
@@ -80,6 +90,7 @@ expect_red() {
 	if [ "$rc" -eq "$EX_RULE" ] && printf '%s' "$out" | grep -q "$want"; then
 		printf '  PASS  %-18s %s went red\n' "$label" "$want"
 		pass=$((pass + 1))
+		record_rule "$want"
 	else
 		printf '  FAIL  %-18s expected exit %s naming %s, got exit %s\n' \
 			"$label" "$EX_RULE" "$want" "$rc" >&2
@@ -104,6 +115,7 @@ expect_code() {
 	if [ "$rc" -eq "$want_code" ] && printf '%s' "$out" | grep -q "$want"; then
 		printf '  PASS  %-18s exit %s, %s\n' "$label" "$want_code" "$want"
 		pass=$((pass + 1))
+		record_rule "$want"
 	else
 		printf '  FAIL  %-18s expected exit %s matching %s, got exit %s\n' \
 			"$label" "$want_code" "$want" "$rc" >&2
@@ -205,7 +217,7 @@ expect_red "TEST-004" "tools/checks/js-test.sh" "RULE-TEST-004"
 
 # --- RULE-IDX-001 — the index goes stale when a source changes --------------
 printf '\n# staleness probe\n' >>"$SANDBOX/backend/app/config.py"
-expect_code "IDX-001" "tools/checks/index-fresh.sh" 4 "index is stale"
+expect_code "IDX-001" "tools/checks/index-fresh.sh" 4 "RULE-IDX-001"
 
 # --- RULE-IDX-002 — a non-deterministic build -------------------------------
 #
@@ -496,6 +508,23 @@ Recorded as `RISK-FIXTURE-999`, which is declared nowhere.
 ADR
 expect_red "DOC-004" "tools/checks/contract.sh" "RULE-DOC-004"
 
+# --- RULE-DOC-005 — a rule points at a heading that no longer exists ---------
+#
+# The realistic way this breaks is a rename, not a deletion: the section is still there,
+# under a different title, so the document looks fine and only the pointer is dead. The
+# fixture renames the heading RULE-HYG-001 and RULE-HYG-002 both point at.
+python3 - "$SANDBOX/docs/task-interface.md" <<'PATCH'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "## Repository hygiene\n"
+assert old in t, "the hygiene heading is not where the fixture expects it"
+p.write_text(t.replace(old, "## Keeping the repository clean\n", 1))
+PATCH
+expect_red "DOC-005" "tools/checks/contract.sh" "RULE-DOC-005"
+
 # --- RULE-RULE-001 — an executable rule with no fixture ---------------------
 python3 - "$SANDBOX/rules/ledger.yaml" <<'PATCH'
 import pathlib
@@ -545,6 +574,166 @@ printf 'chatty-fixture       check           Prints to stdout regardless of JSON
 	>>"$SANDBOX/tools/checks/profiles.conf"
 expect_red "TI-003" "tools/checks/json-output.sh" "RULE-TI-003"
 
+# --- RULE-OPS-001 — the one subprocess call loses its timeout ---------------
+# The real failure mode, and the reason the rule exists: `timeout=10` is one keyword argument
+# that nothing but this check is holding in place. Delete it and require the gate to say so.
+python3 - "$SANDBOX/backend/app/services/task_runner.py" <<'DROPTIMEOUT'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "        timeout=10,\n"
+assert old in t, "the task_runner timeout is not where the fixture expects it"
+p.write_text(t.replace(old, "", 1))
+DROPTIMEOUT
+expect_red "OPS-001" "tools/checks/timeouts.sh" "RULE-OPS-001"
+
+# --- RULE-OPS-001 — an egress call arrives with no timeout ------------------
+# The application makes no network calls today, so the egress half of this rule would
+# otherwise be entirely unproven — a check that has only ever been observed on subprocess.
+# Introduce the first HTTP client the way someone actually would, and require the gate to
+# catch it before it reaches a worker.
+python3 - "$SANDBOX/backend/app/services/task_service.py" <<'ADDEGRESS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+p.write_text(
+    "import httpx\n"
+    + t
+    + '\n\ndef _notify(url: str) -> None:\n    httpx.post(url, json={"ok": True})\n'
+)
+ADDEGRESS
+expect_red "OPS-001-egress" "tools/checks/timeouts.sh" "RULE-OPS-001"
+
+# --- RULE-OPS-002 — the resolved JWT secret is written to a logger ----------
+# Startup is where a boot-time diagnostic lands, and startup_checks already holds the resolved
+# secret in a local. One `%s` and every restart writes the signing key to the container log.
+# The runtime redaction filter would catch this one on the way out — that is the point of
+# having both — but the gate must refuse it at the call site, before it is ever emitted.
+python3 - "$SANDBOX/backend/app/startup_checks.py" <<'LOGSECRET'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = '    secret = (settings.jwt_secret or "").strip()\n'
+assert old in t, "the resolved secret is not where the fixture expects it"
+t = t.replace("from app.config import settings", "import logging\n\nfrom app.config import settings", 1)
+t = t.replace(old, old + '    logging.getLogger(__name__).info("jwt secret is %s", secret)\n', 1)
+p.write_text(t)
+LOGSECRET
+expect_red "OPS-002-secret" "tools/checks/log-secrets.sh" "RULE-OPS-002"
+
+# --- RULE-OPS-002 — a password and an API key go into an f-string -----------
+# The second arm, and the likelier one: request-scoped logging added to the handlers that
+# hold the credential. Both lines are written the way such a line is actually first written —
+# an f-string, everything in scope interpolated because it was all right there. The import is
+# aliased and the logger renamed, because a rule a rename defeats is advice.
+python3 - "$SANDBOX/backend/app/routers/auth.py" <<'LOGCREDS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+login = "    rate_limit.clear(body.username)\n"
+# Anchored on the return alone: the handler now carries a legitimate log line of its own,
+# and an anchor that spans it would break every time that line is reworded.
+rotate = "    return ApiKeyInfo(api_key=new_key)\n"
+assert login in t, "the login success path is not where the fixture expects it"
+assert rotate in t, "regenerate_apikey is not where the fixture expects it"
+t = "import logging as lg\n\n" + t
+t = t.replace(
+    login,
+    login + '    lg.getLogger("audit").info(f"login ok: {body.username} / {body.password}")\n',
+    1,
+)
+t = t.replace(
+    rotate,
+    '    _audit = lg.getLogger("audit")\n'
+    + '    _audit.info("rotated key for %s: %s", username, new_key)\n'
+    + rotate,
+    1,
+)
+p.write_text(t)
+LOGCREDS
+expect_red "OPS-002-fstring" "tools/checks/log-secrets.sh" "RULE-OPS-002"
+
+# --- RULE-OPS-003 — the deploy compose asks the host for privilege ----------
+# Since the forced command applies this file at the deployed commit, an edit here reaches the
+# host directly. `privileged: true` is the shortest path from "merged a YAML change" to "owns
+# the machine", and it is one line in a file that reviews mostly skim.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'PRIVESC'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    restart: unless-stopped\n"
+assert anchor in t, "the compose file does not look as the fixture expects"
+p.write_text(t.replace(anchor, anchor + "    privileged: true\n", 1))
+PRIVESC
+expect_red "OPS-003-privileged" "tools/checks/deploy-compose.sh" "RULE-OPS-003"
+
+# --- RULE-OPS-003 — the deploy compose mounts the host in ------------------
+# The quieter half, and the more likely one: a bind mount whose source climbs out of the
+# service directory. Mounting the docker socket is the canonical way a container stops being
+# one, and it looks like ordinary plumbing in a diff.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'HOSTMOUNT'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "      - ./data:/app/data\n"
+assert anchor in t, "the data mount is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + "      - /var/run/docker.sock:/var/run/docker.sock\n", 1))
+HOSTMOUNT
+expect_red "OPS-003-hostmount" "tools/checks/deploy-compose.sh" "RULE-OPS-003"
+
+# --- RULE-GOV-002 — the decay review silently stopped happening -------------
+#
+# The failure this rule exists for is not a bad review; it is no review. A scheduled
+# workflow that stops producing evidence — a runner change, an expired token, a branch
+# rename — leaves every other check green, and the only thing that ever notices is a date.
+#
+# So the fixture produces a REAL review in the sandbox first, then backdates it past its
+# own overdue limit and recomputes the hash by the documented recipe. That matters twice
+# over: a report with a stale date and a stale hash would go red for the wrong reason and
+# the fixture would pass vacuously, and recomputing the hash here rather than calling the
+# tool is an independent check that the recipe in docs/task-interface.md is the one the
+# gate actually uses.
+(cd "$SANDBOX" && python3 tools/index/build.py >/dev/null 2>&1) || true
+(cd "$SANDBOX" && backend/.venv/bin/python tools/decay_review.py >/dev/null 2>&1) || true
+python3 - "$SANDBOX/ops/decay-review.json" "$(cd "$SANDBOX" && git rev-parse HEAD)" <<'DECAYSTALE'
+import datetime
+import hashlib
+import json
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+record = json.loads(p.read_text())
+# Without this the fixture could pass vacuously on the PARENT repository's report, whose
+# revision the sandbox has never heard of — red, but for the wrong reason.
+assert record["repo_revision"] == sys.argv[2], "the review did not run in the sandbox"
+overdue = int(record["overdue_after_days"])
+record["generated_at"] = (
+    datetime.date.today() - datetime.timedelta(days=overdue + 30)
+).isoformat()
+body = {k: v for k, v in record.items() if k != "report_sha256"}
+record["report_sha256"] = hashlib.sha256(
+    json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+).hexdigest()
+p.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+DECAYSTALE
+expect_red "GOV-002-overdue" "tools/checks/decay-freshness.sh" "RULE-GOV-002"
+# The review rebuilt the sandbox index around an evidence file that reset() has just
+# removed again, so the index is now stale for whatever runs next.
+(cd "$SANDBOX" && python3 tools/index/build.py >/dev/null 2>&1) || true
+
 # --- RULE-GATE-001 — the profile blows its runtime budget -------------------
 #
 # A budget of 0 alone proves nothing: the suite finishes inside a second and 0 > 0 is
@@ -568,6 +757,7 @@ set -e
 if [ "$rc" -eq "$EX_RULE" ] && printf '%s' "$out" | grep -q 'RULE-GATE-001'; then
 	printf '  PASS  %-18s %s went red\n' "GATE-001" "RULE-GATE-001"
 	pass=$((pass + 1))
+	record_rule RULE-GATE-001
 else
 	printf '  FAIL  %-18s expected exit %s naming RULE-GATE-001, got exit %s\n' \
 		"GATE-001" "$EX_RULE" "$rc" >&2
@@ -576,5 +766,60 @@ else
 fi
 reset
 
-printf '  %s rule(s) proven able to fail, %s not\n' "$pass" "$fail"
+# --- coverage -----------------------------------------------------------------
+#
+# An arm count is not a rule count. Until Step 16d this script printed the number of arms
+# that passed and every document downstream read it as the number of rules proven — which
+# was three higher than the truth, and had already been used to argue against adding an
+# arm. So the accounting is done here instead of inferred: the ledger says which rules
+# declare tools/fixtures/negative.sh as their fixture, and every one of them must have
+# been observed going red above. A rule that quietly stops being exercised is exactly the
+# untested shell call RULE-GATE-002 exists to prevent.
+
+sort -u "$COVERED" >"$COVERED.uniq" && mv "$COVERED.uniq" "$COVERED"
+printf '  %s fixture arm(s) passed, %s failed\n' "$pass" "$fail"
+
+python3 - "$LEDGER" "$COVERED" <<'COVERAGE' || fail=$((fail + 1))
+import re
+import sys
+
+ledger, covered_path = sys.argv[1], sys.argv[2]
+
+automated: list[str] = []
+declared: list[str] = []
+rid = None
+pending = False
+for line in open(ledger, encoding="utf-8"):
+    if line.startswith("residual_risks:"):
+        break
+    match = re.match(r"  - id: (\S+)", line)
+    if match:
+        rid, pending = match.group(1), False
+        continue
+    if pending:
+        if line.strip():
+            (automated if line.split()[0] == "tools/fixtures/negative.sh" else declared).append(rid)
+            pending = False
+        continue
+    match = re.match(r"    fixture: ?(.*)$", line)
+    if match and rid:
+        value = match.group(1).strip()
+        if value in (">", "|", ">-", "|-"):
+            pending = True
+        else:
+            (automated if value.split()[0] == "tools/fixtures/negative.sh" else declared).append(rid)
+
+covered = {line.strip() for line in open(covered_path, encoding="utf-8") if line.strip()}
+missing = sorted(set(automated) - covered)
+total = len(automated) + len(declared)
+
+print(
+    f"  {len(covered)} of {total} executable rules proven able to fail; "
+    f"{len(declared)} declare no automated fixture ({', '.join(sorted(declared))})"
+)
+for rule in missing:
+    print(f"  FAIL  {rule} declares an automated fixture that no arm exercised", file=sys.stderr)
+sys.exit(1 if missing else 0)
+COVERAGE
+
 [ "$fail" -eq 0 ] || exit "$EX_RULE"

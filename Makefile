@@ -77,7 +77,7 @@ lock: ## Regenerate the hash-pinned Python dependency locks
 	@./run lock
 
 scaffold: ## Create a new unit that is conformant by construction
-	@./run scaffold
+	@./run scaffold KIND=$(KIND) NAME=$(NAME)
 
 fix: ## Apply every deterministic, semantics-preserving repository-owned fix
 	@./run fix

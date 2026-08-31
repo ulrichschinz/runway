@@ -115,8 +115,53 @@ Exits `4` when the index is stale, because the answer would have been unreliable
 changed against the base.
 
 ### `make scaffold`
-Creates a new unit that is conformant to the structure and the boundary rules by construction, with a
-passing smoke test and zero manual edits. *Implemented in Step 16.*
+Creates a new unit that is conformant to the structure, the boundary rules and the gate **by
+construction**: one command, then `./run verify` is green with nothing edited by hand.
+
+```sh
+./run scaffold KIND=backend-feature  NAME=reports
+./run scaffold KIND=frontend-feature NAME=reports
+```
+
+`NAME` must match `^[a-z][a-z0-9]*(_[a-z0-9]+)*$` — it becomes a Python module, a URL segment, a unit id
+and a Vue component name, and that is the set of strings that is safe in all four.
+
+**`KIND=backend-feature`** emits a router, a service, a models module and both test tiers, and registers
+the slice as a unit:
+
+| It writes | So that |
+|---|---|
+| `backend/app/routers/<name>.py` | one real `GET /<name>`, guarded by `get_current_user` |
+| `backend/app/services/<name>_service.py` | the logic is reachable without a client |
+| `backend/app/<name>_models.py` | the shapes live with the feature, not in the shared DTO kernel |
+| `backend/tests/unit/test_<name>.py` | the slice is covered — a new module with no tests moves total coverage toward the `RULE-TEST-003` floor |
+| `backend/tests/container/test_<name>.py` | the module is proven present in the shipped image |
+| a `be/feature/<name>` unit in `architecture.toml` | `RULE-ARCH-001` has an edge list to check it against — one that withholds `be/adapters/task` |
+| a line in `rules/route-guards.toml` | `RULE-SEC-001` passes; a route with no declared guard fails the gate |
+| the route counts in `AGENTS.md` | `RULE-DOC-001` checks them against the index, and a new route moves both |
+
+**`KIND=frontend-feature`** emits a view, its pure logic module and a vitest file, registers an `fe/<name>`
+unit whose edges allow `fe/shared` and `fe/layout` only, and adds the SPA route. There is no second test
+tier here: the frontend has one, by decision (ADR 0007, `RISK-TEST-004`).
+
+Both then finish the job the way a hand-written change has to: `make fix`, `./run surfaces --update` for the
+snapshots the new route moves, a `git add` of everything written — **the index reads `git ls-files`, so an
+unstaged file does not exist as far as ownership and the counted claims are concerned** — and a fan-in
+baseline raised in `ops/structure-baseline.toml` if the new unit pushed one over. That last one is a
+ratchet being raised by a generator, which is why it lands in the diff with a dated line naming the command
+that moved it. Review it.
+
+It refuses rather than overwrites: an existing unit id or an existing target file exits `2` and changes
+nothing. A missing or unknown `KIND` or `NAME` also exits `2`.
+
+**What it does not do.** It does not design the feature, it does not write the Change Impact Brief
+(`./run brief` pre-fills one; the fields that need intent stay TODO), and it does not commit.
+
+**Removing one again** is `git checkout` plus `rm`, because every edit it makes is to a tracked file and
+every addition is a new file. By hand, in a tree with other work in flight: delete the generated files,
+delete the unit block and the `allowed_edges` block between the `generated feature` markers in
+`architecture.toml`, remove the unit id from the `to` lists it was added to, undo the router mount, the
+guard line and the two counts, then `make fix` and `./run surfaces --update`.
 
 ### `make fix`
 Applies every deterministic, semantics-preserving repository-owned fix: `ruff` import order, safe lint fixes
@@ -161,8 +206,21 @@ closure: every transitive dependency with its hashes, which is what the images i
 `.txt`; `RULE-DEP-004` fails if a lock is missing or unhashed.
 
 ### `make decay-review`
-Runs the recurring agent-readiness decay review and writes verifiable evidence of the run. *Implemented in
-Step 16.*
+Runs the recurring agent-readiness decay review and writes verifiable evidence of the run.
+
+```sh
+./run decay-review              # run it, write the evidence, stage it
+./run decay-review --no-write   # report only: writes nothing, stages nothing, rebuilds nothing
+./run decay-review JSON=1       # the evidence record itself, on stdout
+```
+
+Six diagnostics, described in [The decay review](#the-decay-review) below. It reports; it does not judge —
+exit `0` means the review ran, whatever it found. Exit `4` means the index was stale and nothing was
+measured, because four of the six diagnostics read it.
+
+The normal mode writes `ops/decay-review.json`, appends a line to `ops/decay-history.jsonl`, stages both and
+rebuilds the index. Staging is for the same reason `make scaffold` stages: the index reads `git ls-files`,
+so an unstaged file is invisible to it. **What to commit stays a decision.**
 
 ## Exit codes
 
@@ -226,10 +284,22 @@ One file and one line:
 1. write `tools/checks/<name>.sh` — source `tools/lib.sh`, call `fail_rule <RULE-ID> "<message>"` for each
    violation, exit `1` if any fired;
 2. add `<name>` with its profiles to `tools/checks/profiles.conf`;
-3. add the rule to `rules/ledger.yaml` with its class, its check, and its negative fixture.
+3. add the rule to `rules/ledger.yaml` with its class, its check, its negative fixture and its `contract:`
+   pointer;
+4. add an arm to `tools/fixtures/negative.sh` that constructs a real violation and watches the gate go red.
 
-Step 3 is not optional. A rule without a fixture proving that a real violation turns the gate red is a rule
-nobody has confirmed works.
+Steps 3 and 4 are not optional, and `RULE-GATE-002` now checks that they were both done: the ledger says
+which rules name `tools/fixtures/negative.sh` as their fixture, and every one of them has to be observed
+failing in the same run. A rule that quietly stops being exercised is the untested shell call the whole
+conformance suite exists to prevent.
+
+The `contract:` pointer is not documentation about the rule. `fail_rule` reads it and prints it as the
+`why:` line of the failure, so it is the one moment a rule gets to teach the reader the part of the contract
+they just violated — which makes a pointer at a heading that has since been renamed worse than none, because
+it still prints and still looks authoritative. `RULE-DOC-005` resolves every one of them: the file must
+exist, and where an `#anchor` is given, the file must carry a heading that produces it. Where the rule has a
+deterministic repository-owned repair, `fix:` names the exact command, and `make fix` is that command for
+everything the tools own — formatting, safe lint fixes and the index.
 
 ## Repository hygiene
 
@@ -430,23 +500,124 @@ Each fixture executes inside a throwaway copy of the **current working tree**, w
 rather than copied, so it never mutates the tree you are working in and is safe to run with uncommitted
 changes in flight.
 
+It reports two numbers, and they are not the same number:
+
+```
+  48 fixture arm(s) passed, 0 failed
+  42 of 45 executable rules proven able to fail; 3 declare no automated fixture (…)
+```
+
+Several rules have more than one arm — `RULE-OPS-001` is proven twice, once for the subprocess and once for
+an egress call — so the arm count runs ahead of the rule count. Until Step 16d only the arm count was
+printed, and every document downstream read it as the rule count; the difference had already been used as an
+argument against adding an arm. The second line is the claim this rule actually makes, and the suite fails
+when a rule that declares an automated fixture is not observed failing.
+
+**Three rules declare no automated fixture, and say so in the ledger rather than being silently absent:**
+`RULE-TEST-002` needs Docker and an x86_64 host the offline sandbox does not have (`RISK-TEST-002`);
+`RULE-GOV-001` needs a live GitHub to drift from, and its three drift scenarios were constructed by hand
+(`RISK-GOV-003`); and `RULE-GATE-002` is the suite itself, so an arm for it would have to make the suite
+fail from inside itself (`RISK-GATE-001`).
+
 This is the rule that makes the others trustworthy: a gate component nobody has watched fail is not a rule,
 it is a shell call, and it is worse than nothing because it is believed.
 
+## The decay review
+
+`RULE-GOV-002`. Every other rule here asks *"is this change allowed?"*. The decay review asks *"is the gate
+still worth trusting?"* — a question no individual green run can answer, because rot leaves every check
+green. A baseline that only ever rises has stopped being a ratchet. A waiver whose expiry is three weeks out
+is a decision nobody has made. An index whose extractors drifted answers confidently and wrongly.
+
+`./run decay-review` runs six diagnostics:
+
+| Diagnostic | What it measures | What it cannot see |
+|---|---|---|
+| **cycles** | the declared cycle inventory, new cycles, cycles still declared after being resolved, and the trend against the previous review | cycles *inside* a unit — `architecture.toml` declares no structure below unit level |
+| **hubs** | every fan-in baseline in `ops/structure-baseline.toml`, split by who raised it: a comment naming a repository command is machine-raised (`RISK-ARCH-001`), prose is human-raised, nothing at all is unattributed (`RISK-ARCH-002`) | allowlisted files, which have no baseline at all; and the attribution itself, which is read from a comment nothing enforces |
+| **co-change** | file pairs that change together across a unit boundary, over a 365-day window, ignoring commits touching more than 15 files. Pairs where both sides are governance artefacts are marked explained — the meta-rule *requires* them to move together | correlation is not coupling, and it says nothing about files that change rarely |
+| **expiries** | every dated exception in `rules/waivers.yaml` and `rules/shims.yaml`, with days remaining, warning at 93 days — three review periods, so a warning is seen at least twice before `RULE-RULE-002` or `RULE-SEC-002` stops the gate | an exception that was never registered. There is **no quarantine inventory** in this repository; the cycle inventory is the ratchet that occupies that role, and it carries a teardown path rather than a date |
+| **index-quality** | node, edge, file and blind-spot counts, the evidence-class histogram, edge kinds, and tracked files belonging to no unit | whether the extractors are right — every number is produced by the thing being measured |
+| **cold-agent-change-reduced** | the decision procedure of [`AGENTS.md`](../AGENTS.md) §2 run end to end for one change request, from a cold index load, with twelve assertions inside a six-query, five-second budget | the agent. See below |
+
+### The reduced Cold-Agent Change Test
+
+What is reduced is the agent, not the index. The test runs one change request — *add a field to the response
+of the task-update endpoint* — through locate-the-owner, read-the-scoped-contract, assess-the-blast-radius
+and find-the-protecting-tests, and asserts the facts a change of that shape needs: the owning unit, the
+connected public surfaces and their MCP tool names, an end-to-end path from a route to the adapter, the
+dependents of the shared kernel, that every answer carries an index revision and a freshness verdict and its
+own blind spots, and that **no authoritative edge carries a guessed evidence class**.
+
+It does **not** run a session. So it cannot show that an agent queried the index instead of grepping
+(`RISK-DOC-001`), cannot compare the answers against a `grep`/manual baseline, cannot judge whether the
+contract was read or the right Delivery Pattern chosen, and covers one request where the full test covers
+three. It also runs on this machine's toolchain rather than a cold one. All of that is Step 16d.
+
+### The evidence, and how to check it yourself
+
+`ops/decay-review.json` carries the repository revision, the index revision, the CI run id **or a recorded
+reason for its absence**, every executed check with its findings, the result, and `report_sha256` over all
+of it. `ops/decay-history.jsonl` carries one summary line per review, which is where the trend comes from.
+
+The evidence is built to be recomputed rather than trusted. Two commands do it:
+
+```sh
+# 1. the hash covers every field except itself
+python3 -c 'import hashlib,json;d=json.load(open("ops/decay-review.json"));h=d.pop("report_sha256");print(h==hashlib.sha256(json.dumps(d,sort_keys=True,separators=(",",":")).encode()).hexdigest())'
+
+# 2. the revision it claims is one this branch actually contains
+git merge-base --is-ancestor "$(python3 -c 'import json;print(json.load(open("ops/decay-review.json"))["repo_revision"])')" HEAD && echo ok
+```
+
+`tools/checks/decay-freshness.sh` runs exactly those two, plus a schema check and the date arithmetic. **It
+reads the evidence and never `AGENTS.md`**: the contract may display the date of the last review, but a
+contract that is the *source* of that date is a document asserting its own freshness, which is the failure
+the rule exists to prevent.
+
+**Period: monthly, overdue at 45 days.** `.github/workflows/decay-review.yml` runs on the 1st of each month
+and is an adapter — it checks out, bootstraps, runs the command and commits what it wrote. The 14-day slack
+between due and overdue is deliberate: `RULE-GOV-002` runs in `verify`, which gates the deploy, and a
+governance rule that turns one failed cron run into a production blocker is a rule that gets switched off.
+Red means the *schedule* is broken, not that a run was late.
+
+`RULE-GOV-002` is in the `verify` profile only. An overdue review is not something a contributor can fix in
+the tree they are working in — the fix is to run a review and commit its evidence, which is a separate act —
+and a `check` that fails on every machine for a reason unrelated to the change in front of it is how a fast
+gate stops being run at all.
+
 ## Known gaps at this step
 
+> **Rewritten 2026-08-30.** Everything below this line described the repository as it stood at Step 2, and
+> most of it had been false for weeks: it claimed there was not a single test here, and that an expired
+> waiver could not fail the gate. Both were fixed in Steps 3 and 9 and nobody came back to this section.
+> Prose does not have a checker — `RULE-DOC-001` verifies `AGENTS.md`, not this file, and no decay
+> diagnostic can see a paragraph that quietly stopped being true. Recorded as `RISK-DOC-004`.
+
 - The commands marked *implemented in Step N* exit `3` with a message naming that step. They do not pretend
-  to succeed.
+  to succeed. `rebuild-verify` is the only one left.
 - The root contract is `AGENTS.md`, and `RULE-DOC-001` checks every factual claim in it against the actual
-  repository — paths, commands, identifiers and the counted public-surface claims.
-- **`make verify` runs no tests.** There is not a single test in this repository yet. A green `verify` means
-  the repository is hygienic, its interface is coherent, and its code is formatted, lint-clean and
-  type-clean — **not that it behaves correctly.** Steps 3 and 4 add the safety net; Steps 5–8 add the index
-  and boundary enforcement.
-- `rules/waivers.yaml` is not yet validated by a check, so an expired waiver does not currently fail the
-  gate. Four entries carry expiry dates of 2026-11-04. Step 9 adds the validator.
-- The frontend dependency tree carries 5 known vulnerabilities (1 moderate, 4 high) reported by `npm`.
-  Dependency auditing and the license policy are Step 14.
+  repository — paths, commands, identifiers and the counted public-surface claims. **This file is not
+  checked that way.**
+- **A green `verify` does not mean the application is correct.** It means 45 rules held, the backend and
+  frontend suites passed, the index is current and qualified, no boundary or public surface moved
+  unannounced, and that 42 of those 45 rules were separately proven able to fail on a constructed
+  violation while the other three declared, in the ledger, why they cannot be. This paragraph said 47 until
+  the Step 16d audit, because it was quoting the fixture *arm* count as a rule count. What a green run does
+  not cover is stated in [the threat model](threat-model.md), section by section, as *enforced* versus
+  *asserted*.
+- **The gate's own Python is not linted, formatted or type-checked** (`RISK-GATE-002`). ruff covers
+  `backend/app`, `backend/tests` and `tools/index`; mypy covers `backend/app` alone. The ten check
+  implementations under `tools/checks/` and the five command implementations under `tools/` are outside
+  both — the programs that decide whether a change is mergeable are held to a lower standard than the
+  application they judge.
+- **The container tier does not run on arm64** (`RISK-TEST-001`), so a local `verify` on Apple silicon
+  skips the only tests that exercise the real Taskwarrior binary and the cross-tenant isolation boundary.
+  CI runs them. A green local run is weaker than a green CI run, and this is the difference.
+- **Coverage is a floor, not a target** (`RULE-TEST-003`). It sits below the current figure deliberately —
+  a ratchet that tracks the exact number turns every unrelated refactor into a coverage failure.
+- Frontend dependency vulnerabilities and the licence policy are handled as of Step 14; see
+  [`policy/licenses.yaml`](../policy/licenses.yaml) and `RULE-DEP-002`.
 
 
 

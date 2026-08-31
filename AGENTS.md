@@ -52,10 +52,12 @@ If an answer says `STALE`, run `make fix`. The answer was not trustworthy.
 |---|---|
 | A task operation, or anything touching Taskwarrior | `backend/app/services/task_service.py`. **Only `be/adapters/task` may run the subprocess** — routers reach it through the service, which is where validation lives. |
 | A new REST endpoint | a router in `backend/app/routers/`. It automatically becomes an MCP tool named after the handler function — see §5. |
-| Anything reading or writing the users database | `backend/app/database.py`. It is the only module that opens a connection. |
+| Anything reading or writing a database | `backend/app/database.py`. It is the only module that opens a connection — the users database and the audit log alike. |
+| An audit event | `backend/app/audit.py` — the vocabulary and the writer. It lives in `be/adapters/db` because the line above leaves it nowhere else to live. Reading the log is an operator activity; there is no route for it. |
 | A frontend rule about tags, filtering or sorting | `frontend/src/shared/`. These are pure and tested; components are not. |
 | Frontend feature UI | the owning feature unit — `fe/tasks`, `fe/projects`, `fe/identity`. Features never import each other. |
 | A gate rule | a script in `tools/checks/`, a line in `tools/checks/profiles.conf`, an entry in `rules/ledger.yaml`, and a fixture in `tools/fixtures/negative.sh`. All four, or it is not a rule. |
+| A whole new feature, backend or frontend | `make scaffold KIND=backend-feature NAME=x`. It emits the unit, its registration, its guard declaration, both test tiers and the snapshots, so the unit is conformant from its first commit rather than after review. |
 | A non-obvious decision | a dated ADR in `docs/adr/`. |
 
 ## 4. Structure and dependency rules
@@ -115,9 +117,18 @@ never weakened by a selection heuristic. Budgets live in `tools/checks/budgets.c
 are enforced: a slow gate gets bypassed.
 
 **Every rule in `rules/ledger.yaml` has a negative fixture proving it can fail**
-(`tools/fixtures/negative.sh`, run by `RULE-GATE-002`). A gate component nobody has
-watched fail is not a rule — it is a shell call, and it is worse than nothing because it
-is believed.
+(`tools/fixtures/negative.sh`, run by `RULE-GATE-002`), and three of them are prose rather
+than an arm — each saying in the ledger why it cannot be automated, and each carrying a
+risk id. A gate component nobody has watched fail is not a rule — it is a shell call, and
+it is worse than nothing because it is believed. The suite reports arms and rule coverage
+as two separate numbers, because they are two separate claims.
+
+**The gate is itself reviewed, monthly.** `make decay-review` runs six diagnostics no green
+run can produce — cycle and hub trends, co-change against the declared units, the expiry
+inventories, index quality, and a reduced Cold-Agent Change Test — and writes evidence to
+`ops/decay-review.json`. `RULE-GOV-002` fails `verify` when that evidence is overdue or
+does not verify. **It reads the evidence, never this file:** a contract that is the source
+of its own freshness date is the failure that rule exists to prevent.
 
 Exit codes are exact only through `./run`; `make` collapses every failure to `2`. Full
 reference: `docs/task-interface.md`.
@@ -152,11 +163,14 @@ Recorded so a green gate is not mistaken for a broader guarantee:
 - **Frontend rendering, routing and gestures are untested** (`RISK-TEST-004`). The tests
   cover the pure logic where every shipped frontend defect actually was.
 - **The container test tier cannot run on arm64** (`RISK-TEST-001`); CI runs it.
-- **The deploy host's compose file is not in this repository** (`BLIND-OPS-001`). Its
-  contents are now recorded in `docs/operations.md`, but nothing detects drift once the
-  host changes (`RISK-OPS-002`), and the rollback runbook does not work as written.
+- **Nothing compares the deploy host against this repository** (`RISK-OPS-002`). Its compose
+  file is copied to `ops/deploy/docker-compose.yml` and matched on 2026-08-28; after that,
+  drift on either side is undetected. CI has no host access.
 - **Transitive dependencies are not pinned as a whole.** One incident already came from
   that; `RULE-DEP-001` makes the gap survivable, not closed.
+- **What the gate does *not* hold** is written down section by section in
+  `docs/threat-model.md`, with every asserted-only property carrying a risk id
+  (`RISK-DOC-003`). A green gate is not the threat model.
 
 Open security findings with owners and expiries: `rules/waivers.yaml`.
 Full residual-risk register: the `residual_risks` section of `rules/ledger.yaml`.
@@ -165,5 +179,8 @@ Full residual-risk register: the `residual_risks` section of `rules/ledger.yaml`
 
 *Where to go next:* `docs/task-interface.md` (commands, exit codes, every rule) ·
 `docs/change-workflow.md` (delivery patterns, briefs) · `docs/operations.md` (deploy,
-rollback, incidents) · `index/schema.md` (what the index knows) ·
-`docs/plan/phase-0-2.md` (why the repository is shaped this way).
+rollback, incidents) · `docs/security.md` (roles and guards) · `docs/threat-model.md`
+(actors, inputs, secrets, egress, abuse cases — enforced vs. asserted) ·
+`index/schema.md` (what the index knows) ·
+`docs/plan/phase-0-2.md` (why the repository is shaped this way) ·
+`docs/migration-log.md` (what the agent-readiness programme changed, step by step).

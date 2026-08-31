@@ -180,7 +180,7 @@ rules:
     check: tools/checks/index-fresh.sh
     fixture: tools/fixtures/negative.sh
     contract: docs/task-interface.md#the-index
-    fix: make fix   (or make index)
+    fix: make fix
     owner: maintainer
     non_waivable: false
     rationale: >
@@ -266,6 +266,46 @@ rules:
     rationale: >
       A protection that can be switched off in a web UI without leaving a trace is not a
       control. The checked-in file is canonical and drift away from it is detectable.
+
+  - id: RULE-GOV-002
+    statement: >
+      A decay review MUST have been run inside the review period, and its recorded
+      evidence MUST verify: the report hash recomputes, and the revision it names is an
+      ancestor of HEAD.
+    class: executable
+    check: tools/checks/decay-freshness.sh
+    fixture: >
+      tools/fixtures/negative.sh — the overdue arm: a valid, correctly hashed report is
+      backdated past its own overdue_after_days and the gate goes red. The unverifiable
+      arm (one byte changed in a field the hash covers) was constructed and observed by
+      hand on 2026-08-30 and is recorded in docs/briefs/0023-the-decay-review.md. It was
+      left unautomated on the ground that a second arm would overstate the rule count —
+      which was wrong twice over, and Step 16d's audit is where that surfaced: the suite
+      was counting arms rather than rules, so the two numbers were never equal, and the
+      arm would have added no rule to the coverage set in any case. The reason it stays
+      unautomated is now the honest one: the overdue arm already proves the check reads
+      the evidence and can go red, and a second arm re-runs a two-second report to assert
+      a hash comparison one line away from the first.
+    contract: docs/task-interface.md#the-decay-review
+    fix: ./run decay-review
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Every other rule here asks whether a change is allowed. This one asks whether the
+      review that watches the other rules for rot is still happening — which no individual
+      run can answer, because rot leaves every check green. A baseline that only ever rises
+      has stopped being a ratchet, a waiver whose owner has moved on is not a decision
+      anyone is making, and an index whose extractors drifted answers confidently and
+      wrongly. None of that fails verify.
+
+      The check reads ops/decay-review.json and never AGENTS.md. The contract may display
+      the date of the last review; a contract that is the SOURCE of that date is a document
+      asserting its own freshness, which is the exact failure being guarded against.
+
+      It deliberately does not read the review's findings. Judging content would make this
+      a second gate over six diagnostics with thresholds and no fixtures, and the first
+      time it blocked a merge the thresholds would be tuned until it stopped. It proves the
+      review happened; that it does not prove anyone acted on it is RISK-GOV-005.
 
   - id: RULE-ARCH-001
     statement: >
@@ -553,6 +593,29 @@ rules:
       a world that has moved on, and editing them to keep a gate green falsifies the
       history they exist to preserve.
 
+  - id: RULE-DOC-005
+    statement: >
+      Every rule's contract: pointer MUST resolve — the file exists, and where an #anchor
+      is given, the file carries a heading that produces it.
+    class: executable
+    check: tools/checks/contract.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#adding-a-check
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      The contract: field is not documentation about a rule; it is the text a gate failure
+      prints. fail_rule in tools/lib.sh reads it and emits it as the why: line, so it is
+      the one moment a rule gets to teach the reader the part of the contract they just
+      violated. A pointer at a renamed heading still prints, still looks authoritative,
+      and sends the reader to the top of a document instead of to the paragraph that
+      explains the failure — and nothing anywhere would have said so. All forty-four
+      pointers were audited by hand in Step 16d and all forty-four resolved; this rule is
+      the ratchet that keeps them there, not a repair of something broken. It is deliberately
+      narrower than RISK-DOC-002's rejected path-in-prose check: a contract: value is a
+      structured field with exactly one meaning, so there is no prose to disambiguate.
+
   - id: RULE-RULE-001
     statement: >
       Every rule in the ledger MUST declare a statement, class, check, contract, owner and
@@ -658,7 +721,12 @@ rules:
       violation makes the gate fail.
     class: executable
     check: tools/checks/gate-conformance.sh
-    fixture: tools/fixtures/negative.sh (self-proving — it is the fixture suite)
+    fixture: >
+      self-proving, and therefore unautomated: this rule IS tools/fixtures/negative.sh.
+      An arm that made gate-conformance.sh go red would have to make the suite fail from
+      inside itself, running every other arm a second time to do it. What is left
+      unobserved is the wrapper — that a failing suite really does turn into a red gate —
+      and that is recorded as RISK-GATE-001.
     contract: docs/task-interface.md#gate-conformance
     fix: none
     owner: maintainer
@@ -667,6 +735,80 @@ rules:
       A gate component that has never been observed failing is not a rule; it is a shell
       call nobody has tested, and it is worse than nothing because it is believed. This
       rule is why every other rule in this ledger can be trusted.
+
+  - id: RULE-OPS-001
+    statement: >
+      Every blocking outward call the serving application makes — process execution and
+      network egress — MUST declare a timeout at the call site.
+    class: executable
+    check: tools/checks/timeouts.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/operations.md#timeouts
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A call with no timeout does not fail, it waits, and the worker serving the request
+      waits with it. There is one Taskwarrior binary behind every list this application
+      renders, so a `task` invocation that never returns is not a slow page — it is a worker
+      that never comes back, and enough of them is an outage with nothing in any log to
+      explain it. The application makes exactly one such call today and it already declares
+      `timeout=10`; the rule costs nothing now and exists so that stays true when the second
+      one is added, most likely by someone who never read this file. Scoped to backend/app/
+      because repository tooling already runs inside the gate's own runtime budget
+      (RULE-GATE-001). It checks declaration, not sufficiency — see RISK-OPS-003.
+
+  - id: RULE-OPS-002
+    statement: >
+      No credential may reach a log line: the serving application MUST NOT pass a
+      credential-bearing expression — a secret, password or password hash, token, API key or
+      bearer credential — to a logging call, in the message, in an interpolation, or in the
+      structured fields.
+    class: executable
+    check: tools/checks/log-secrets.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/operations.md#no-secrets-in-logs
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      A credential in the database is a credential under a control; the same credential in a
+      log line is one in a file, a backup and someone's scrollback, kept for as long as the
+      retention policy says. Nothing raises and nothing errors, so the disclosure is invisible
+      until somebody reads the file — and by then rotation, not deletion, is the only remedy,
+      exactly as for RULE-DEP-003. The application has no logging at all today, so the property
+      holds for free and stops holding in the first commit that adds a logger; the rule lands
+      before the logging module rather than after it, because the reviewer who would catch
+      logger.info(f"login {body.password}") is the same reviewer reading a hundred new lines of
+      logging plumbing. Scoped to backend/app/, the only code whose output reaches a production
+      log. The check reads source, not emitted output, so it holds whichever transport Step 15a
+      settles on. It matches credential-bearing names, so it cannot see a credential arriving
+      under a neutral name — see RISK-OPS-004.
+
+  - id: RULE-OPS-003
+    statement: >
+      The deploy compose file MUST NOT ask the host for privilege, for its network namespace,
+      or for a bind mount whose source lies outside the service directory.
+    class: executable
+    check: tools/checks/deploy-compose.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/operations.md#the-deploy-mechanism
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Until 2026-08-28 the deploy key could only pull images and restart; the compose file was
+      maintained by hand on the host and ops/deploy/docker-compose.yml was a transcription of
+      it. A transcription is accurate on the day it is taken, and three claims this repository
+      made about production were each true when written and each drifted silently afterwards —
+      every one of them found by reading the host rather than by anything failing. So the
+      compose file became part of the deployed artefact, which removes the drift and widens what
+      a merge to main can reach: compose can mount host paths, join the host network namespace
+      and ask for privilege, none of which application code can do from inside a container. This
+      rule is the boundary on that widening. It does not sandbox the deployment and does not
+      pretend to — whoever can merge can still change what the services run. It refuses the
+      specific edits that turn a container-scoped change into a host-scoped one, in a file that
+      is easy to skim past in review because it is mostly YAML nobody reads twice.
 
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.
@@ -680,6 +822,110 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a change lands that the index would have flagged, and nobody queried it"
     decision_record: AGENTS.md
+
+  - id: RISK-OPS-003
+    statement: >
+      RULE-OPS-001 checks that a timeout is declared, not that it is sensible. A call
+      written with timeout=86400 satisfies the rule and helps nobody; so does one whose
+      timeout is longer than the reverse proxy's own read timeout, which turns a bounded
+      wait into a 504 with a worker still blocked behind it. Declaration is mechanically
+      checkable and sufficiency is not — the right value depends on what the callee does,
+      what the caller promised, and what sits in front of both. The check also knows only
+      the process and HTTP-client shapes it lists: a blocking call through a library it has
+      not been taught is invisible to it.
+    owner: maintainer
+    re_open_trigger: "a second egress client is introduced, a timeout is observed firing in production, or a reverse-proxy read timeout is set below an application timeout"
+    decision_record: docs/adr/0022-timeouts-are-declared.md
+
+  - id: RISK-OPS-004
+    statement: >
+      RULE-OPS-002 is a name-based static scan, and it is bounded on both sides in the same
+      way RISK-DEP-002 records for secret_scan.py. It sees a credential that is *called* one —
+      body.password, settings.jwt_secret, x_api_key, credentials.credentials, new_key — and it
+      is blind to the same value under a neutral name: logging `body`, `row`, `value` or a
+      request object discloses the password with nothing to match on, and so does a credential
+      assembled at runtime or returned by a function whose name does not say so. It reads only
+      backend/app/, so a credential logged by a library, by uvicorn's own access logger, or by
+      an exception traceback that happens to carry one is outside it entirely. And it recognises
+      loggers by import, by assignment from getLogger, and by a receiver named like a logger:
+      a logger reached some other way is a hole. The per-line `log-secrets: allow` marker is
+      deliberately greppable so the standing exemptions stay reviewable.
+    owner: maintainer
+    re_open_trigger: "a credential is found in a production log that the scan did not report, an exemption marker is used more than twice, or a logging library is introduced that this scan does not recognise"
+    decision_record: docs/adr/0023-no-secrets-in-logs.md
+
+  - id: RISK-OPS-005
+    statement: >
+      The runtime redaction filter in backend/app/logging_setup.py is the second half of a
+      two-part control and it is bounded in the mirror image of the first. It removes a value
+      by the field name it arrives under, and by the shapes it has been taught — a JWT, a
+      bcrypt hash, the 43-character token_urlsafe(32) an API key is, and the resolved
+      JWT_SECRET matched literally. It is therefore blind to a credential that has neither: a
+      user's password is an arbitrary string under an arbitrary name, so `logger.info("got",
+      extra={"detail": password})` survives the filter and is caught only by RULE-OPS-002 at
+      the call site — and only while the name says what it is. A credential minted by some
+      future scheme with a different shape is invisible until the shape is added here. The
+      api-key shape is also a false-positive risk in the other direction: any unbroken
+      43-character run of the URL-safe alphabet is redacted, which costs a log line its
+      usefulness rather than costing a disclosure, and that is the trade this takes
+      deliberately. Finally, the filter covers only what passes through this process's
+      handler: anything written before configure_logging runs, or by a sidecar, is outside it.
+    owner: maintainer
+    re_open_trigger: "a credential is found in a log line that both RULE-OPS-002 and the filter passed, a new credential format is introduced, or the api-key shape is observed redacting something an operator needed"
+    decision_record: docs/adr/0024-structured-logging.md
+
+  - id: RISK-DOC-004
+    statement: >
+      Prose rots and nothing detects it. RULE-DOC-001 checks the factual claims in AGENTS.md
+      against the repository, and RULE-DOC-004 resolves identifiers named in records — but no
+      check reads an ordinary paragraph in docs/ and asks whether it is still true. Found on
+      2026-08-30: docs/task-interface.md's "Known gaps" section still claimed there was not a
+      single test in this repository and that an expired waiver could not fail the gate, both
+      fixed in Steps 3 and 9 and both false for weeks. That is the fourth stale claim found on
+      this branch; the other three were about production (RISK-OPS-002) and were caught by
+      reading the host. The common shape is a statement that was true when written, describing
+      something that later changed elsewhere, with no link between the two. The decay review
+      cannot see this either — every diagnostic it runs measures structure, and a paragraph is
+      not structure.
+    owner: maintainer
+    re_open_trigger: "a fifth stale claim is found, or a document acquires a checkable claim format worth enforcing"
+    decision_record: docs/adr/0030-the-decay-review.md
+
+  - id: RISK-ARCH-001
+    statement: >
+      `./run scaffold KIND=backend-feature` raises the `RULE-ARCH-003` hub baseline for
+      backend/app/dependencies.py itself, because every guarded route imports get_current_user
+      and a generated feature is one more importer. The raise is honest — it lands in the diff
+      with a dated comment naming the command that made it, and a human still commits it — but
+      a ratchet a machine can advance no longer measures what it was built to measure. Before
+      this, a rising fan-in on the auth choke point meant somebody should look; now it means
+      either that, or that scaffold ran. Those two are indistinguishable in the number alone,
+      and the second is common while the first is rare, which is the wrong way round for a
+      signal. The alternative considered and rejected was allowlisting dependencies.py, which
+      drops the signal permanently rather than blunting it. Observed twice already: one
+      generated feature took the baseline 6 → 7, a second took it to 8.
+    owner: maintainer
+    re_open_trigger: "a third generated backend feature, or a fan-in rise on dependencies.py that no scaffold run explains"
+    decision_record: docs/adr/0029-the-scaffold-generator.md
+
+  - id: RISK-SURF-001
+    statement: >
+      A fresh database and a migrated one do not have the same schema, and the snapshot that
+      is supposed to be the truth about the schema only ever describes the fresh one.
+      CREATE_USERS declares `api_key TEXT UNIQUE`; the migration that back-fills that column
+      into an existing database declares plain `TEXT`, because SQLite cannot add a UNIQUE
+      column by ALTER TABLE at all. So an instance created after the column existed enforces
+      uniqueness and an instance migrated into it does not — and production is the second
+      kind. tools/surfaces.py captures the schema by running init_db() against an empty
+      temporary file, which is the fresh path, so ops/surfaces/db-schema.sql records the
+      UNIQUE constraint that production does not have. RULE-SURF-001 compares that snapshot
+      against itself and passes: the mechanism cannot see this class of drift, because both
+      sides of the comparison are generated the same way. The practical exposure is small —
+      api_key is secrets.token_urlsafe(32), so a collision is not a real event — but the
+      snapshot is relied on as a description of production and on this point it is wrong.
+    owner: maintainer
+    re_open_trigger: "a migrations/ directory with a version table exists, or a second column diverges between the created and migrated schemas, or a uniqueness assumption is written against api_key"
+    decision_record: docs/adr/0025-narrowing-the-migration-except.md
 
   - id: RISK-OPS-002
     statement: >
@@ -793,11 +1039,14 @@ residual_risks:
       value written outside the application — by hand on the host, or by a future migration
       — is not rejected. Every in-application writer validates against VALID_ROLES, and an
       unrecognised value is not equal to 'admin', so the failure is closed rather than open.
-      A CHECK constraint would need a table rebuild, and migrations currently swallow every
-      exception (WAIVER-OPS-001), which makes a silent half-applied rebuild the more likely
-      failure of the two.
+      A CHECK constraint cannot be added by ALTER TABLE at all; it needs the table copied,
+      which is a different shape of migration from the additive loop init_db runs. Half of
+      this risk's re-open trigger fired on 2026-08-28: WAIVER-OPS-001 is resolved and a failed
+      migration now reports itself (docs/adr/0025-narrowing-the-migration-except.md), so a
+      half-applied rebuild would at least be loud. It would still be half-applied, and the
+      rebuild has no home until there is a migrations/ directory with a version table.
     owner: maintainer
-    re_open_trigger: "WAIVER-OPS-001 is resolved and migrations report their failures, or a third role is introduced"
+    re_open_trigger: "a migrations/ directory with a version table exists, or a third role is introduced"
     decision_record: docs/security.md
 
   - id: RISK-TEST-001
@@ -815,7 +1064,7 @@ residual_risks:
       neither Docker nor an x86_64 host, so the container tier cannot be made to fail
       there on demand.
     owner: maintainer
-    re_open_trigger: "Step 9's ledger validator requires an automated fixture for every executable rule"
+    re_open_trigger: "the fixture sandbox gains Docker and an x86_64 host, or a regression is found that the container tier would have caught and the prose fixture let through"
     decision_record: docs/adr/0006-two-tier-backend-tests.md
 
   - id: RISK-TEST-003
@@ -839,9 +1088,13 @@ residual_risks:
     statement: >
       tools/checks/branch-protection.sh needs network and an authenticated gh. Where it
       cannot reach GitHub it reports that and does not fail, so a run on an offline
-      machine proves nothing about the live governance state.
+      machine proves nothing about the live governance state. The trigger here used to
+      name Step 16c as the thing that would close this. Step 16c landed on 2026-08-30 and
+      did not: none of its six diagnostics touches the rulesets API, so the trigger named
+      an event that had already passed without occurring and could never fire. Corrected
+      by the Step 16d audit.
     owner: maintainer
-    re_open_trigger: "the scheduled decay review (Step 16c) begins carrying this evidence"
+    re_open_trigger: "a decay-review diagnostic reads the live rulesets API and records the result in ops/decay-review.json, or a protection change is found on GitHub that no local run reported"
     decision_record: docs/adr/0005-gate-the-deploy.md
 
   - id: RISK-GOV-003
@@ -850,8 +1103,63 @@ residual_risks:
       observed by hand against the live API because the offline fixture sandbox has no
       GitHub to drift from.
     owner: maintainer
-    re_open_trigger: "Step 9's ledger validator requires an automated fixture for every executable rule"
+    re_open_trigger: "a recorded or stubbed rulesets response makes the three drift arms runnable offline, or a live drift is found that no local run had reported"
     decision_record: docs/operations.md
+
+  - id: RISK-GOV-004
+    statement: >
+      A decay review run outside CI carries no run id. ops/decay-review.json records the
+      absence honestly rather than inventing one, and RULE-GOV-002 accepts the report —
+      requiring a run id would make the rule unsatisfiable on the maintainer's machine and
+      would bind a governance rule to one vendor's CI. What is therefore unattested is the
+      environment: the hash proves the file was not edited after it was written, and the
+      revision check proves it describes a commit this branch contains, but nothing proves
+      the operator ran the real command rather than producing a well-formed file by hand,
+      and nothing proves the toolchain was the declared one. A CI-produced review carries
+      the run id and the clean-clone bootstrap; a local one carries neither.
+    owner: maintainer
+    re_open_trigger: "a decay review is found whose recorded findings do not match the revision it names, or the monthly workflow is removed"
+    decision_record: docs/adr/0030-the-decay-review.md
+
+  - id: RISK-GOV-005
+    statement: >
+      RULE-GOV-002 proves that a decay review happened and that its evidence verifies. It
+      never reads the findings, so a report whose result is `attention` — an approaching
+      expiry, an unattributed ratchet raise, a failing cold-agent assertion — is as green
+      as one with nothing in it. Acting on a review is human judgment and is unenforceable
+      by the same argument as RISK-DOC-001. The mitigation is that the findings are in a
+      checked-in file that changes in a reviewable diff every month, not in a log nobody
+      keeps.
+    owner: maintainer
+    re_open_trigger: "a finding is carried unchanged across three consecutive reviews"
+    decision_record: docs/adr/0030-the-decay-review.md
+
+  - id: RISK-TI-001
+    statement: >
+      RULE-TI-003 says every command's JSON=1 output must be a single valid JSON object.
+      tools/checks/json-output.sh validates five of the twenty-one commands — check, the
+      resolved plan, doctor, help and the decay review — because the rest either mutate
+      state, need arguments, or take minutes. The rule's statement is therefore wider than
+      its check, and a command whose JSON mode is broken outside that five is caught by
+      nothing. Found by the first decay review, 2026-08-30.
+    owner: maintainer
+    re_open_trigger: "an agent reports unparseable JSON from a command the check does not cover"
+    decision_record: docs/adr/0030-the-decay-review.md
+
+  - id: RISK-ARCH-002
+    statement: >
+      Five of the seven fan-in baselines in ops/structure-baseline.toml carry no comment
+      saying who raised them or why — backend/app/database.py,
+      frontend/src/components/TaskList.vue, frontend/src/components/TaskModal.vue,
+      frontend/src/stores/tasks.js and frontend/src/views/_useTaskView.js. They were
+      recorded as observed values when RULE-ARCH-003 was introduced, so each is a ceiling
+      nobody argued for. Combined with RISK-ARCH-001 — a raise a machine can perform — the
+      inventory now contains three kinds of number that read identically: measured,
+      reasoned, and generated. The decay review reports the split every month.
+      Found by the first decay review, 2026-08-30.
+    owner: maintainer
+    re_open_trigger: "an unattributed baseline is raised, or the count of unattributed baselines rises"
+    decision_record: docs/adr/0030-the-decay-review.md
 
   - id: RISK-BOOTSTRAP-001
     statement: >
@@ -874,6 +1182,28 @@ residual_risks:
     re_open_trigger: "an index query returns an mcp_tool name that does not appear in ops/surfaces/mcp-tools.json, or the extractor is changed to read the snapshot"
     decision_record: docs/adr/0020-runtime-observed-surfaces.md
 
+  - id: RISK-OPS-006
+    statement: >
+      NOTHING PRUNES THE AUDIT DATABASE. `data/audit.db` grows for the lifetime of the
+      deployment and no retention period, no vacuum and no archival step exists — that is a
+      deliberate omission, not an oversight: a first cut that deletes rows is a first cut
+      that can delete the evidence `SHIM-SEC-006` is waiting on, and choosing what may be
+      forgotten is a decision with a legal and an operational half that has not been taken.
+      The growth is dominated by one row per SUCCESSFULLY authenticated request, roughly
+      150 bytes each, so a deployment serving ten thousand requests a day accumulates on the
+      order of half a gigabyte a year on the same partition that holds `users.db` and the
+      Taskwarrior data — the same partition whose exhaustion the container log rotation added
+      in Step 15a was written to prevent, now with a second unbounded writer on it that
+      Docker's log driver does not bound. There is a second, smaller
+      amplification: a login failure writes a row and the rate limiter is per-username, so a
+      caller cycling usernames can append faster than a legitimate one. Rejected credentials
+      deliberately write nothing at all, which is what keeps that bounded by the login route
+      rather than open to any unauthenticated request. Nothing measures the file, nothing
+      alerts on it, and the disk it shares is the one that takes the database down with it.
+    owner: maintainer
+    re_open_trigger: "audit.db exceeds 100 MB, a retention period is agreed, disk pressure is observed on the deploy host, or the SHIM-SEC-006 soak completes and the evidence is no longer needed live"
+    decision_record: docs/adr/0026-the-audit-log.md
+
   - id: RISK-OPS-001
     statement: >
       `platforms: linux/amd64` in deploy.yml is a declaration, not an enforced invariant.
@@ -884,3 +1214,155 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a second deployment target on a different architecture, or a build that runs anywhere other than a hosted x86_64 runner"
     decision_record: docs/adr/0015-pin-the-build-platform.md
+
+  - id: RISK-DOC-003
+    statement: >
+      docs/threat-model.md is an assertion, not a derived artefact. Every claim in it was
+      read out of the code by hand on 2026-08-28 and cited to a file and a line, and nothing
+      re-derives any of it: line numbers move on the next edit, a new router or a new
+      credential shape appears in no section until somebody adds it, and the gate stays green
+      throughout. That is the same class of decay RULE-DOC-001 exists to prevent in AGENTS.md
+      and RULE-DOC-004 in the records — and neither reaches this file, because the contract
+      check reads AGENTS.md and the reference resolver reads docs/adr/ and docs/briefs/ only.
+      Making it executable is not obviously possible: most of what a threat model asserts is
+      an absence ("no egress", "no second auth path", "no credential in a row"), and an
+      absence has no syntax to scan for. What IS mechanically held is held by the rules the
+      document names section by section, which is why it names them rather than restating
+      them; the residue is this risk. The mitigation is a convention: the document states,
+      per section, which claims are enforced and which are only asserted, so a reader can
+      see what the gate is not doing for them.
+    owner: maintainer
+    re_open_trigger: "a claim in docs/threat-model.md is found to be false, a new trust boundary or credential shape is added without a section describing it, or a decay review (Step 16c) is asked to carry this document"
+    decision_record: docs/adr/0027-the-threat-model.md
+
+  - id: RISK-OPS-007
+    statement: >
+      The application makes NO network egress, and nothing keeps it that way. Verified
+      2026-08-28: no import of httpx, requests, urllib, aiohttp, http.client, socket or
+      smtplib appears anywhere under backend/app/, so the only outward call the serving
+      process makes is the Taskwarrior subprocess. That absence is what the egress half of
+      the threat model rests on, and it is an observation about today's tree rather than an
+      invariant. Nothing forbids the first egress call and nothing announces it: httpx is
+      already installed as a transitive dependency of mcp, so adding one is an import away.
+      RULE-OPS-001 is the closest control and it is deliberately narrower — it requires a
+      timeout on an egress call once one exists, which makes the first one survivable, not
+      visible. RULE-ARCH-004 restricts subprocess to task_runner and could be extended to
+      the HTTP clients, but that would forbid egress outright rather than route it through a
+      declared boundary, and no such boundary has been designed. So the honest statement is:
+      an agent adding an outbound call would satisfy every rule in the gate, and the threat
+      model's egress section would silently become wrong.
+    owner: maintainer
+    re_open_trigger: "any module under backend/app/ imports an HTTP or socket client, an outbound integration is designed, or restricted_imports in architecture.toml is extended to cover egress"
+    decision_record: docs/adr/0027-the-threat-model.md
+
+  - id: RISK-SEC-004
+    statement: >
+      No request field declares a length limit. backend/app/models.py constrains types and
+      nothing else — no Field(max_length=...), no constr, no annotated bound on any of the
+      string fields, and TaskCreate.description, AnnotationCreate.text and InboxItem.note
+      are the ones that matter, because they travel into the Taskwarrior argv and into that
+      user's task store. Neither uvicorn nor Starlette imposes a body-size limit by default,
+      so the bound on a single task description is whatever Traefik and the kernel happen to
+      allow. Two consequences, and their severity is deliberately not overstated: a very
+      large description is storage growth in a per-user data directory on the same partition
+      as users.db and audit.db (the partition RISK-OPS-006 is already about), and an
+      argument long enough to exceed the kernel's per-argument limit makes execve fail,
+      which task_runner surfaces as a 500 rather than a 400. The second was NOT reproduced
+      here: the limit is a Linux constant and this repository's development host is macOS,
+      where a one-megabyte argument executed fine. Both are capacity questions, which
+      decision F1 puts out of scope — recorded rather than silently assumed, which is what
+      F1 asks for.
+    owner: maintainer
+    re_open_trigger: "a 500 is observed from a long description or annotation, disk usage grows from task data rather than from logs or audit rows, a body-size limit is set at the proxy, or F1's capacity exclusion is revisited"
+    decision_record: docs/adr/0027-the-threat-model.md
+
+  - id: RISK-SEC-005
+    statement: >
+      RULE-SEC-001 reads backend/app/routers/*.py and nothing else — tools/checks/route_guards.py
+      globs that one directory — so a route declared anywhere outside the routers package is
+      neither observed nor required to appear in rules/route-guards.toml. One route is outside
+      it today: GET /health, declared on the app object in backend/app/main.py, unauthenticated,
+      returning a fixed {"status": "ok"}. That route is harmless and it is also the proof of the
+      gap: the declaration file has thirty-one entries and the application serves thirty-two
+      routes, and nothing anywhere says so. The consequence is not the health check, it is the
+      next route someone adds beside it — a guard forgotten there fails exactly the way
+      RULE-SEC-001 was written to prevent, silently and for everybody, while the gate stays
+      green. The partial backstop is RULE-SURF-001: a new route changes the OpenAPI snapshot,
+      so it cannot arrive unnoticed, but regenerating that snapshot is a normal part of adding
+      a route and it demands no guard declaration. Closing this means widening the checker's
+      scope to every module that can hold a decorator, which also means deciding what an
+      infrastructure route like /health declares.
+    owner: maintainer
+    re_open_trigger: "a second route is declared outside backend/app/routers/, an authenticated or state-changing route is added to main.py, or the route-guard checker is given a wider scope"
+    decision_record: docs/adr/0027-the-threat-model.md
+
+  # --- found by the Phase 4 audit, Step 16d (docs/adr/0031-the-phase-4-audit.md) ------
+
+  - id: RISK-GATE-001
+    statement: >
+      RULE-GATE-002 is the rule that makes every other rule trustworthy, and it is the one
+      rule nobody has watched fail. tools/checks/gate-conformance.sh runs the fixture suite
+      and turns a non-zero exit into a gate failure; that wrapper — the three lines between
+      a failing fixture and a red gate — has never been exercised, because the only way to
+      exercise it is to make the suite fail from inside itself, which means running every
+      other arm a second time inside the sandbox and roughly doubling the runtime of verify.
+      The exposure is narrow and it is real: if the wrapper's condition were inverted, or if
+      it swallowed the exit code, every conformance run since Step 2 would have reported the
+      same green and meant nothing. What holds it today is that the suite is invoked by
+      tools/run-profile.sh, which classifies any non-zero exit, and that the fixtures'
+      sandbox aborts when the pristine tree is not green.
+    owner: maintainer
+    re_open_trigger: "gate-conformance.sh grows a second execution path, a fixture failure is observed reaching a green verify, or the fixture suite gains a mode cheap enough to nest"
+    decision_record: docs/adr/0031-the-phase-4-audit.md
+
+  - id: RISK-GATE-002
+    statement: >
+      The gate's own Python is not linted, formatted or type-checked. ruff runs over
+      backend/app, backend/tests and tools/index; mypy's files list is backend/app alone. That
+      leaves fifteen modules and about 4,300 lines outside every one of them — the ten check
+      implementations under tools/checks/ and the five command implementations tools/brief.py,
+      tools/decay_review.py, tools/grant-admin.py, tools/scaffold.py and tools/surfaces.py.
+      These are the programs that decide whether a change is mergeable and the programs an
+      agent is told to trust over its own reading of the tree, and they are held to a lower
+      standard than the application they judge. Widening the scope is not free — it would land
+      a pile of findings in one commit, which is why RULE-LINT-001 was deliberately introduced
+      narrow — but the asymmetry was never a decision anyone recorded, and until Step 16d it
+      was not written down anywhere.
+    owner: maintainer
+    re_open_trigger: "a defect in a check script reaches main, ruff or mypy scope is widened for any other reason, or a sixth command implementation is added under tools/"
+    decision_record: docs/adr/0031-the-phase-4-audit.md
+
+  - id: RISK-IDX-002
+    statement: >
+      index/manifest.toml's [unsupported] list and the index's actual blind spots are two
+      hand-kept copies of one fact and they had drifted. The manifest listed six mechanisms;
+      the graph carries seven, because BLIND-TEST-001 — import-derived test protection, which
+      sees no TESTED_BY edge for anything exercised through the FastAPI TestClient — was added
+      to tools/index/build.py and never to the manifest. The manifest also still lists
+      BLIND-MCP-001 as unsupported, which the graph records as resolved by runtime observation
+      in Step 13. Nothing reads [unsupported]: the blind spots a query reports come from
+      _declare_global_blind_spots in the builder, so the manifest is prose about the index
+      rather than input to it. Both copies are corrected as of 2026-08-30 and nothing keeps
+      them together. This matters beyond tidiness because the manifest is what a reader is
+      pointed at to learn what the index cannot see, and a benchmark that scores an agent on
+      flagging the declared blind spots has to be scored against the right number.
+    owner: maintainer
+    re_open_trigger: "an eighth blind spot is declared, a blind spot is resolved, or the two lists are found to disagree again"
+    decision_record: docs/adr/0031-the-phase-4-audit.md
+
+  - id: RISK-GOV-006
+    statement: >
+      Nothing in this repository has ever observed branch protection BLOCK a merge. RULE-GOV-001
+      compares the live ruleset against ops/github/ruleset.json, which establishes that the
+      configuration is what was intended — a different and weaker claim than that a red VERIFY
+      stops a merge button. Step 16d confirmed against the live API on 2026-08-30 that the
+      main-protection ruleset is active on the default branch with verify as a required status
+      check and an empty bypass_actors list, and that is the end of what a read-only,
+      pull-request-free check can establish: GitHub evaluates a required status check when a
+      merge is attempted, so the enforcing behaviour is only observable by attempting one. The
+      blocking half is therefore asserted from configuration, exactly the posture the plan calls
+      advice rather than a rule. The procedure that would settle it in about five minutes,
+      without merging anything, is written out in docs/adr/0031-the-phase-4-audit.md.
+    owner: maintainer
+    re_open_trigger: "the blocking test in ADR 0031 is performed and its result recorded, a merge is observed completing over a red verify, or bypass_actors becomes non-empty"
+    decision_record: docs/adr/0031-the-phase-4-audit.md

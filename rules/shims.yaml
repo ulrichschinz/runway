@@ -37,10 +37,26 @@ shims:
       moved rather than the promise. The expiry did NOT move: 2026-11-25 still stands, and
       RULE-SEC-002 still fails when it passes.
     evidence: >
-      No mechanical check exists: this repository cannot see what its callers send. Step 15's
-      audit log is the honest prerequisite, because it makes "is anyone still using the Bearer
-      shape" a question the deployment can answer instead of one someone guesses at. Until
-      then, removal would be a decision taken blind.
+      The instrument exists as of 2026-08-28 (Step 15c). Every successful authentication
+      writes an audit row naming which of the three credential shapes was used and on which
+      route, so the question is now a query rather than a guess: run the one under
+      "Is anyone still using the Bearer-as-API-key shape?" in docs/operations.md#the-audit-log
+      against data/audit.db on the deploy host. It returns the caller, the route and the first
+      and last time each was seen; the shape is recorded as `bearer-api-key`.
+
+      What it can prove and what it cannot. Rows are positive evidence: one row means a caller
+      still depends on the shape, names them, and names the endpoint. NO rows is only ever
+      evidence about the observed window — it says nothing was seen, not that nothing exists,
+      and a monthly cron job or a client that has been switched off is exactly what a short
+      window misses. So removal needs a soak on the real deployment, long enough to cover the
+      slowest caller cycle, starting from the day the audit log is actually deployed. Nothing
+      local can produce that, which is why this shim is NOT removed in Step 15 and why the
+      expiry has not moved.
+
+      The instrument is also silent in two directions worth knowing. It sees only successful
+      authentication, so a caller sending an expired key in the Bearer slot never appears; and
+      it only sees what reaches this application, so a client that has migrated but still has
+      the old code path is indistinguishable from one that never had it.
     owner: maintainer
     approved_on: 2026-08-25
     expires: 2026-11-25

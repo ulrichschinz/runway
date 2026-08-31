@@ -17,38 +17,111 @@
 # fix and the rule that keeps it fixed. Calling them waivers would overstate the
 # permission granted: nothing here authorises leaving the defect in place, only landing
 # the lint gate before the fix.
+#
+# `open_security_finding` is a different class and arrived with SEC-5 on 2026-08-28. It is
+# not a suppression of anything: no linter reports it, no gate rule covers it, and there is
+# nothing inline to annotate. It is a Phase 0 security finding that stayed real after the
+# security waves closed every other one of its severity, recorded here because this file is
+# the only artefact in the repository that makes a defect carry an owner and a date. Nothing
+# else about the entry is different — the five groups and the expiry work exactly as above,
+# and RULE-RULE-002 fails the gate when the date passes.
 
 version: 1
 
 waivers:
-  - id: WAIVER-OPS-001
-    class: scheduled_remediation
-    rule: "ruff S110 — try/except/pass swallows the exception"
-    scope: backend/app/database.py
-    finding: SEC-10
+  - id: WAIVER-SEC-003
+    class: open_security_finding
+    rule: >
+      No gate rule. Phase 0 finding SEC-5, unowned in this repository until 2026-08-28:
+      it appeared in the finding table and in one incidental citation, with no waiver, no
+      rule, no step and no expiry, while every other High and Critical finding was closed
+      in Steps 11 and 12.
+    scope: >
+      backend/app/database.py (generate_api_key, and the api_key column of CREATE_USERS),
+      backend/app/routers/auth.py (GET /auth/apikey, POST /auth/apikey/regenerate),
+      backend/app/dependencies.py (both paths that match a presented key against the
+      column), backend/app/models.py (ApiKeyInfo), and the users.db file itself — a
+      bind-mounted file on the deploy host and in every backup taken of it.
+    finding: "SEC-5, severity High — docs/plan/phase-0-2.md, the Phase 0 finding table"
     reason: >
-      The schema migration loop catches every exception and passes, which is how
-      "column already exists" is tolerated on re-run. It also silently swallows genuine
-      migration failures, leaving the database in an unknown state with no signal.
+      API keys are stored in users.db as the cleartext value that authenticates. They are
+      permanent, unscoped and un-expiring, and GET /auth/apikey hands the value back in
+      cleartext on demand. Anyone who can read the database file — on the host, in a
+      backup, or in a copy taken for debugging — holds a working credential for every
+      account in it, and no rotation of JWT_SECRET touches that, because the API-key path
+      is checked before any token work.
+
+      The fix is not a patch. It is store-a-hash plus show-once-on-regeneration, which
+      changes what GET /auth/apikey can return: a hashed column cannot produce the value,
+      so the endpoint either stops returning a key or starts returning a status. That is
+      the response contract of a route the README documents and that fastapi-mcp exposes
+      as an MCP tool, so decision F2 makes it a public-surface migration —
+      expand -> migrate -> switch -> contract with a deprecation window, its own step, its
+      own brief. Folding it into Step 15's audit-log change would have buried a migration
+      of an externally consumed surface inside an observability feature.
     alternatives_evaluated: >
-      Narrowing the except to the specific sqlite "duplicate column" error was
-      considered and is the eventual fix, but it needs logging to report the failures it
-      would then stop swallowing, and this repository has no logging at all yet.
+      Fixing it inside Step 15 was rejected for the reason above: it is an F2 surface
+      migration, and the step that carried it would have been three changes wearing one
+      brief. Encrypting the column at rest rather than hashing it was rejected because the
+      key would have to live beside the database on the same host, which moves the secret
+      rather than removing it, and because the endpoint would still disclose the cleartext
+      value. Deleting GET /auth/apikey outright, which would end the disclosure half
+      immediately, was rejected as the same F2 migration with a worse migration story: it
+      breaks every caller that reads its key back without offering the show-once
+      replacement that makes rotation usable. Leaving SEC-5 unrecorded — the state before
+      2026-08-28 — was rejected because that is not a decision, it is the absence of one,
+      and it is exactly how the finding survived two security waves.
     risk: >
-      Medium. A failed migration is indistinguishable from a successful one; later code
-      then reads columns that may not exist.
+      High and unchanged by this entry. A read of users.db is a full compromise of every
+      account's API access, and an API key is equivalent to a password for everything
+      except changing the password: it authenticates on every route, including the admin
+      routes when the account holds that role. The exposure is at rest rather than remote —
+      obtaining the key through the API already requires being authenticated as that user —
+      so what this finding really buys an attacker is persistence that survives a password
+      change, and a credential that reads identically in a backup taken months ago.
     mitigation: >
-      Migrations are additive ALTER TABLE statements only, and init_db runs on every
-      start, so a transient failure retries.
+      Partial, and honestly partial. Since 2026-08-28 every disclosure through
+      GET /auth/apikey writes an `auth.apikey.disclosed` audit row naming the account, the
+      route and the request id (backend/app/routers/auth.py), and every authenticated
+      request writes a row naming which credential shape was used, so a stolen key's use is
+      visible after the fact and rotation is one POST away. That converts "undetectable and
+      unattributable" into "reconstructable from data/audit.db" — which is worth having and
+      is not a control: it observes the disclosure, it does not prevent it, and it says
+      nothing about a key lifted from the database file directly, because that read passes
+      through no code this repository owns. Alongside it: RULE-OPS-002 and the runtime
+      redaction filter keep the value out of the log stream, RULE-HYG-001 and RULE-HYG-002
+      keep users.db untracked and git-ignored, the deploy host publishes no ports and the
+      database is not reachable from outside the compose network, and keys are
+      secrets.token_urlsafe(32), so guessing one is not the threat.
     owner: maintainer
     approver: maintainer
-    approved_on: 2026-08-04
-    approval_reference: "docs/plan/phase-0-2.md Step 15"
-    expires: 2026-11-04
-    re_open_trigger: "Step 15 lands, or a third table changes shape, or the expiry passes"
+    approved_on: 2026-08-28
+    approval_reference: >
+      Decision 2 of docs/plan/STATUS.md section 3, taken 2026-08-27: record it now with an
+      owner and an expiry, and make the real fix its own step.
+    expiry_rationale: >
+      2027-01-31 is chosen and not defaulted. It is deliberately clear of the two dates
+      already standing in November — WAIVER-TYPE-001 on the 4th and SHIM-SEC-006 on the
+      25th — because three decisions landing in one month is how one of them gets renewed
+      without being read. It is after the shim decision rather than before it: both change
+      the same function's API-key path, and sequencing them means the first is not being
+      reasoned about while the second is in flight. And it leaves room for what the fix
+      actually is under F2 — a step, a deprecation window, and callers who have to move —
+      rather than a date that assumes a patch.
+    expires: 2027-01-31
+    re_open_trigger: >
+      users.db or a backup of it is copied off the deploy host, an api_key value is found
+      outside the database, an `auth.apikey.disclosed` row appears for an account whose
+      owner did not request it, a second deployment of this application is stood up, or the
+      expiry date passes
     resolution: >
-      Step 15 — structured logging, then narrow the except clause and report what it
-      catches. A migrations/ directory becomes due when a third table changes shape.
+      A step of its own. Store bcrypt (or argon2) over the key instead of the value, return
+      the cleartext exactly once from POST /auth/apikey/regenerate, and change
+      GET /auth/apikey to report presence and age rather than the secret — under the
+      public-surface migration pattern of docs/change-workflow.md, because F2 treats the
+      REST route and its MCP tool as externally consumed. The migration has to keep the
+      column readable while both shapes are accepted, since existing agents and MCP clients
+      authenticate with keys that were issued in cleartext and cannot be re-derived.
 
   - id: WAIVER-TYPE-001
     class: scheduled_remediation
@@ -90,6 +163,29 @@ waivers:
 # a truthful historical document fail the gate, and editing the document to match would
 # falsify the history it exists to preserve.
 resolved:
+  - id: WAIVER-OPS-001
+    finding: SEC-10
+    was: >
+      The schema migration loop in init_db wrapped four additive ALTER TABLE statements in
+      `except Exception: pass`. That is how "column already exists" was tolerated on re-run,
+      and it is also how a genuine migration failure became indistinguishable from a
+      successful one: the database was left in an unknown state, later code read columns that
+      may not exist, and nothing anywhere said so. The fix was blocked on there being
+      somewhere to report the failures it would stop swallowing; this repository had no
+      logging at all until Step 15a.
+    resolved_on: 2026-08-28
+    resolved_by: >
+      Step 15b. The clause now catches sqlite3.Error, and only a
+      `sqlite3.OperationalError` whose message contains "duplicate column name" passes
+      silently — the exact type and wording observed against aiosqlite 0.20.0 on SQLite
+      3.53.4, and pinned by a test rather than assumed. Every other database error is logged
+      at ERROR on the JSON stream Step 15a built, naming the statement and SQLite's own words
+      for what was wrong, and the loop continues: migrations are additive and init_db runs on
+      every start, so a transient failure retries, and refusing to serve would convert a
+      retryable error into a deploy-time outage (decision 3). The `# noqa: S110` is gone and
+      ruff passes without it.
+    evidence: docs/briefs/0019-narrowing-the-migration-except.md
+
   - id: WAIVER-SEC-002
     finding: SEC-3
     was: >
@@ -154,6 +250,21 @@ justified_suppressions:
     reviewed_by: maintainer
     reviewed_on: 2026-08-25
 
+  - rule: "ruff S105 — hardcoded password assigned to PASSWORD_CHANGED"
+    scope: backend/app/audit.py
+    reason: >
+      `PASSWORD_CHANGED = "auth.password.changed"` is the name of an audit event, not a
+      credential: the value is a vocabulary term that appears in the `event` column of every
+      row recording a password change, and it is the string an operator types into a query.
+      S105 matches on the identifier containing "password", which here describes the subject
+      of the event rather than its content. The alternatives were both worse — abbreviating
+      the constant would make the vocabulary less readable than the thing it names, and
+      assembling the literal at runtime to dodge the scan would hide it from `grep`, which is
+      how these names are actually found. Exactly the same reading as the `token_type` entry
+      below.
+    reviewed_by: maintainer
+    reviewed_on: 2026-08-28
+
   - rule: "ruff S105 — hardcoded password assigned to token_type"
     scope: backend/app/models.py
     reason: >
@@ -174,7 +285,8 @@ justified_suppressions:
 
   - rule: "ruff S404 — import of the subprocess module"
     scope: >
-      tools/checks/pinning.py, tools/checks/secret_scan.py, tools/index/boundaries.py
+      tools/checks/log_secrets.py, tools/checks/pinning.py, tools/checks/secret_scan.py,
+      tools/checks/timeouts.py, tools/index/boundaries.py
     reason: >
       These are repository tooling, not the application. Each imports subprocess for exactly
       one thing — running `git ls-files` to get the tracked-file list — with a literal argv and
@@ -182,7 +294,7 @@ justified_suppressions:
       which is the boundary that matters; extending it to the toolchain would mean five
       standing exceptions, and a rule with five standing exceptions teaches people it is noise.
     reviewed_by: maintainer
-    reviewed_on: 2026-08-26
+    reviewed_on: 2026-08-28
 
   - rule: "ruff E402 — module level import not at top of file"
     scope: >
