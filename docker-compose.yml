@@ -1,7 +1,11 @@
 services:
   backend:
     build:
-      context: ./backend
+      # Root context, matching deploy.yml: backend/Dockerfile copies from backend/ and from
+      # ops/deploy/. Kept identical to CI deliberately — a local build that resolves paths
+      # differently from the shipped one is a difference nobody sees until it matters.
+      context: .
+      dockerfile: backend/Dockerfile
       network: host
     volumes:
       - ./data:/app/data

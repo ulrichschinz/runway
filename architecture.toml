@@ -59,7 +59,7 @@ scope = "repository"
 owner = "maintainer"
 paths = [
   "tools/**", "ops/**", ".github/**", "Makefile", "run", "docker-compose.yml",
-  "rules/**", "architecture.toml", "index/**", ".gitignore", ".env.example",
+  "rules/**", "architecture.toml", "index/**", ".gitignore", ".dockerignore", ".env.example",
   "backend/Dockerfile", "backend/Dockerfile.test", "backend/requirements.txt",
   "backend/requirements-dev.txt", "backend/requirements.lock",
   "backend/requirements-dev.lock", "policy/**", "backend/pyproject.toml", "backend/taskrc_template.txt",

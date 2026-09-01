@@ -1,0 +1,25 @@
+# Build context for backend/Dockerfile, whose context is the repository root rather than
+# ./backend. It needs exactly two things: the backend source tree, and the deployed compose
+# file that the image carries to the host at /opt/stack/docker-compose.yml.
+#
+# Written as deny-all-then-admit rather than a list of exclusions. An exclusion list is wrong
+# by default: every directory added to this repository afterwards is silently shipped into the
+# build context until someone remembers to exclude it. This way a new directory is invisible
+# to the build until it is deliberately named here.
+#
+# Only backend/Dockerfile uses this file. The frontend build's context is ./frontend, and the
+# container test tier builds backend/Dockerfile.test with ./backend as its context; Docker
+# reads the .dockerignore beside the context root, so neither sees this one.
+*
+
+!backend
+!ops/deploy/docker-compose.yml
+
+# Re-excluded inside the admitted tree: build residue and local state that must never reach
+# an image, and would otherwise invalidate the layer cache on every run.
+backend/**/__pycache__
+backend/**/*.pyc
+backend/**/.pytest_cache
+backend/.venv
+backend/data
+backend/*.db
