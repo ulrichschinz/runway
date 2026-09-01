@@ -15,10 +15,10 @@ on:
     branches: [main]
 
 # Deliberately NOT cancel-in-progress, unlike verify.yml. Cancelling a gate is free — the
-# only loss is compute on an answer nobody needs. Cancelling a deploy is not: the server's
-# forced command runs `docker compose pull && docker compose up -d`, and an interruption
-# between those two leaves production in a state nobody chose, with no signal that it
-# happened. Superseded deploys therefore queue and run in order.
+# only loss is compute on an answer nobody needs. Cancelling a deploy is not: the host's
+# script refreshes the on-disk compose, pulls, and then runs `docker compose up -d`, and an
+# interruption part-way through leaves production in a state nobody chose, with no signal
+# that it happened. Superseded deploys therefore queue and run in order.
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
@@ -68,10 +68,17 @@ jobs:
       # :latest, and the deploy step would then pull it onto an x86_64 host where it dies
       # with `exec format error` — a deploy that takes production down instead of updating
       # it. See docs/adr/0015-pin-the-build-platform.md.
+      # The context is the repository ROOT, not ./backend, and the Dockerfile is named
+      # explicitly. backend/Dockerfile bakes ops/deploy/docker-compose.yml into the image at
+      # /opt/stack/docker-compose.yml, and a file can only enter an image from inside its own
+      # build context. Narrowing the context back to ./backend would silently drop the baked
+      # compose and return this service to shipping images without its configuration.
+      # .dockerignore at the root keeps the context to the backend tree plus that one file.
       - name: Build and push backend
         uses: docker/build-push-action@v7
         with:
-          context: ./backend
+          context: .
+          file: ./backend/Dockerfile
           push: true
           platforms: linux/amd64
           tags: |
@@ -107,17 +114,21 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          # The server uses a forced command, so this is never executed as a script. It is
-          # delivered as SSH_ORIGINAL_COMMAND, and ops/deploy/deploy-command.sh reads the commit
-          # out of it. That commit is the only caller-controlled input the host accepts, and it
-          # is reduced to 40 hex characters before it is used.
+          # The deploy key carries a forced command, so this string is never executed as a
+          # script. It is delivered as SSH_ORIGINAL_COMMAND and the host ignores it. It is
+          # kept only because ssh-action requires a non-empty script, and it names the commit
+          # so the connection is legible in the host's auth log.
           #
-          # Until 2026-08-28 this said `echo "deploy triggered"` and the forced command was
-          # `docker compose pull && docker compose up -d`, which shipped images but never the
-          # compose file. The compose file was maintained by hand on the host, and this
-          # repository's copy of it was a transcription that drifted — three claims about
-          # production were each true when written and each quietly stopped being true. The
-          # forced command now fetches ops/deploy/docker-compose.yml at this commit and applies
-          # it before pulling, so the repository determines the deployment instead of describing
-          # it. RULE-OPS-003 bounds what that file may ask of the host.
+          # WHAT THE HOST ACTUALLY RUNS, read from the host on 2026-08-31:
+          #
+          #   command="sudo /opt/scripts/deploy.sh runway",no-port-forwarding,...
+          #
+          # /opt/scripts/deploy.sh is shared by every service on that host and takes the
+          # service name as its argument. It iterates the stack's images, extracts
+          # /opt/stack/docker-compose.yml from the first image that carries one, writes it
+          # over the on-disk compose, then pulls and runs `up -d --remove-orphans`.
+          #
+          # This comment previously described a runway-specific script that fetched the
+          # compose from raw.githubusercontent at this commit. No such script was ever
+          # installed, and the sha below was never read by anything. See ADR 0032.
           script: deploy ${{ github.sha }}

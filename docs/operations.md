@@ -19,28 +19,60 @@ below for what that cost.
 ## The deploy mechanism
 
 The `deploy` job connects to the host with a key that carries a **forced command**, so the `script:` in
-[`deploy.yml`](../.github/workflows/deploy.yml) is never executed as a script. It is delivered as
-`SSH_ORIGINAL_COMMAND`, and the host runs [`ops/deploy/deploy-command.sh`](../ops/deploy/deploy-command.sh)
-instead. A compromised CI run therefore gets that one script and never a shell.
+[`deploy.yml`](../.github/workflows/deploy.yml) is never executed as a script. A compromised CI run gets
+that one command and never a shell.
 
-The script reads the commit out of the request — the only caller-controlled input the host accepts, reduced
-to 40 hex characters before it is used for anything — then fetches
-[`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml) at that commit, validates it with
-`docker compose config -q`, keeps a timestamped backup of the file it replaces, and only then pulls and
-starts. **If the commit cannot be determined or the fetched file does not validate, it deploys nothing.**
-Carrying on with the compose already on disk would silently reintroduce the drift this exists to remove,
-on exactly the days something is already wrong.
+The forced command is **not runway-specific**. Read from the host on 2026-08-31, the deploy account's
+`authorized_keys` carries one key per service, each of the form:
+
+```
+command="sudo /opt/scripts/deploy.sh runway",no-port-forwarding,no-X11-forwarding,no-agent-forwarding
+```
+
+`/opt/scripts/deploy.sh` is shared by every service on that host and takes the service name as its only
+argument. For each image in the stack it pulls the image and tries to extract
+`/opt/stack/docker-compose.yml` from it; the first image that carries one wins, and that file is written
+over the on-disk `docker-compose.yml`. Then it pulls and runs `up -d --remove-orphans`. An image carrying
+no such file leaves the host's copy untouched.
+
+So the way this repository determines its own deployment is by **baking
+[`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml) into the backend image** at that path.
+That is why [`backend/Dockerfile`](../backend/Dockerfile) has the repository root as its build context
+rather than `./backend`: a file can only enter an image from inside its own build context, and the compose
+file has exactly one source of truth. [`.dockerignore`](../.dockerignore) keeps that context to the backend
+tree plus that one file.
+
+`SSH_ORIGINAL_COMMAND` is ignored by the host. The commit sha in the `script:` line is not read by
+anything; it is kept because the action requires a non-empty script and it makes the connection legible in
+the host's auth log.
+
+### The correction of 2026-08-31
+
+Between 2026-08-28 and 2026-08-31 this section, [`deploy.yml`](../.github/workflows/deploy.yml) and the
+compose file's own header all described a different mechanism: a runway-specific forced command,
+`ops/deploy/deploy-command.sh`, that fetched the compose from `raw.githubusercontent` at the deployed
+commit, validated it, and applied it.
+
+**That script was written, reviewed, merged and never installed.** No forced command ever pointed at it.
+The runbook it came with instructed the reader to repoint the deploy key with a `sed` addressed to a line
+containing `docker compose pull` — a string that appears in no `authorized_keys` on that host. The script
+would also have failed if it had been installed: the deploy account may `sudo` only `/opt/scripts/deploy.sh`,
+so its own `sudo -n docker compose` calls would have been refused.
+
+It was found by reading the host, which is how all four of the earlier stale claims were found. The pattern
+is now five for five, and `RISK-DOC-004` is the record of it.
 
 ### Why the compose file is deployed rather than described
 
-Until 2026-08-28 the forced command was `docker compose pull && docker compose up -d`. That shipped images
-and never the compose file, so the host's copy was maintained by hand and this repository's copy was a
-transcription of it.
+Until 2026-08-31 runway's images carried no baked compose, so the host script's extraction loop fell through
+and the host's copy was whatever someone last edited by hand. This repository's copy was a transcription of
+it.
 
-A transcription is accurate on the day it is taken. Three claims made here about production were each true
+A transcription is accurate on the day it is taken. Four claims made here about production were each true
 when written and each drifted silently afterwards — the healthchecks did not run and then did, the rollback
-runbook was broken and then was not, and log rotation was checked in and not applied. **Every one was found
-by someone reading the host, never by anything failing.** `RISK-OPS-002` is the record of that gap.
+runbook was broken and then was not, log rotation was checked in and not applied, and the deploy mechanism
+itself was described as something that did not exist. **Every one was found by someone reading the host,
+never by anything failing.** `RISK-OPS-002` is the record of that gap.
 
 So the compose file became part of the deployed artefact. Configuration changes now travel the same path as
 code: a pull request, `verify`, a merge, a deploy. Rollback also gets more correct rather than less — pinning

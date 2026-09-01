@@ -41,14 +41,31 @@ WORKDIR /app
 # every transitive one with its hash, and --require-hashes makes pip refuse anything whose
 # artefact does not match. On 2026-08-04 an unpinned transitive (mcp 2.0.0) shipped an image
 # whose backend could not start, through a green deploy (ADR 0004). This is that class closed.
-COPY requirements.txt requirements.lock ./
+COPY backend/requirements.txt backend/requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
-COPY taskrc_template.txt .
-COPY log_config.json .
-COPY app/ ./app/
+COPY backend/taskrc_template.txt .
+COPY backend/log_config.json .
+COPY backend/app/ ./app/
 
 RUN mkdir -p /app/data
+
+# The deployed compose file, carried by the image it belongs to.
+#
+# The host's shared deploy script (/opt/scripts/deploy.sh, used by every service on that
+# box) iterates the stack's images, extracts /opt/stack/docker-compose.yml from the first
+# image that carries one, and writes it over the on-disk compose before pulling. An image
+# without this file leaves the host's copy untouched — which is exactly what runway did
+# until now, and why the host's compose sat unchanged for six days while deploys succeeded.
+#
+# The path is deliberately service-agnostic: the host script carries no vendor name, and
+# this repository does not get to be a special case in it.
+#
+# This is why the build context is the repository root rather than ./backend — the compose
+# has one source of truth, ops/deploy/docker-compose.yml, and baking a copy of it would
+# reintroduce the drift this removes. It is static and secret-free; RULE-HYG-003 fails the
+# gate if a literal ever replaces a ${...} reference, and the host's .env is never touched.
+COPY ops/deploy/docker-compose.yml /opt/stack/docker-compose.yml
 
 # --log-config replaces uvicorn's own loggers, so the access lines, the application lines and
 # any traceback all leave this container as JSON on one stream, through one redaction filter.

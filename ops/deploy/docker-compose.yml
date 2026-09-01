@@ -9,11 +9,17 @@
 # is a ${...} reference resolved from a .env beside it on the host, which is not and must
 # never be in this repository (RULE-HYG-001).
 #
-# THIS FILE IS DEPLOYED. Since 2026-08-28 the deploy key's forced command fetches it at the
-# deployed commit, validates it and applies it before pulling images — see
-# ops/deploy/deploy-command.sh and docs/operations.md#the-deploy-mechanism. It is no longer a
+# THIS FILE IS DEPLOYED. backend/Dockerfile bakes it into the backend image at
+# /opt/stack/docker-compose.yml, and the host's shared deploy script extracts it from the
+# image and writes it over the on-disk compose before pulling — see
+# [the deploy mechanism](../../docs/operations.md#the-deploy-mechanism). It is no longer a
 # transcription of the host's file; it is the host's file. Edit it through a pull request like
 # code, never by hand on the server.
+#
+# It said something different, and wrong, between 2026-08-28 and 2026-08-31: that a
+# runway-specific forced command fetched this file from raw.githubusercontent at the deployed
+# commit. That script was written but never installed, and the mechanism it described never
+# existed on the host. See ADR 0032.
 #
 # RULE-OPS-003 fails the gate if anything here asks the host for privilege, its network
 # namespace, or a bind mount outside the service directory. RULE-HYG-003 fails if a literal

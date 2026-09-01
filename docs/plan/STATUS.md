@@ -1,13 +1,24 @@
 # Session handoff — where we are, and how to go on
 
-**Snapshot taken 2026-08-30 at the head of `step-15a-structured-logging` (`ebe0c91`).** This file is a
+**Snapshot taken 2026-08-31 on `op33-bake-the-compose`, with `main` at `f40a25d`.** This file is a
 *dated handoff*, not a source of truth. Everything in it can drift; §1 tells you how to re-establish the
-real state in about twenty seconds. When they disagree, the commands win — this branch found four
-documents that had quietly stopped being true, and this one is not exempt.
+real state in about twenty seconds. When they disagree, the commands win — this programme has now found
+five documents that had quietly stopped being true, and this one is not exempt.
 
-> **Fifteen commits sit on this branch and none are merged. There is no pull request.** `main` is still at
-> `31326de`. Everything below — Step 15, 16b, 16c, the Phase 4 audit, the deploy mechanism — exists only
-> here. Nothing has reached production.
+> **Everything through the Phase 4 audit is merged and deployed.** PR #33 merged 2026-08-31 (`f40a25d`):
+> Step 15 entire, 16b, 16c, the deploy mechanism and 16d's first half — seventeen commits. The deploy ran
+> green and was **verified on the host by hand**: log rotation active on both containers
+> (`max-size: 10m`, `max-file: 5`), backend healthy, the log stream emitting JSON with a per-request
+> correlation id, and `audit.db` created under `DATA_ROOT` with its first row.
+>
+> **Rotation was applied to the host before the merge, deliberately** — the audit log has never written a
+> byte into an unrotated stream.
+
+> **One thing merged in that PR was false.** It claimed the deploy key's forced command fetches
+> `ops/deploy/docker-compose.yml` at the deployed commit. No such forced command ever existed; the host runs
+> a shared `/opt/scripts/deploy.sh` that extracts a compose file baked into the image. That is what the
+> current branch fixes. See [ADR 0032](../adr/0032-the-deploy-mechanism-correction.md) and
+> [brief 0025](../briefs/0025-bake-the-compose-into-the-image.md).
 
 ---
 
@@ -382,6 +393,22 @@ Two things landed after Step 15 and are easy to miss because they are not plan s
   (`RISK-GATE-002`). `RULE-DOC-005` was added — every rule's `contract:` pointer must resolve.
   The suite now proves **42 of 45** rules able to fail over 48 arms. See
   [brief 0024](../briefs/0024-the-phase-4-audit.md) and [ADR 0031](../adr/0031-the-phase-4-audit.md).
+
+**Deployed 2026-08-31, and corrected the same day.** PR #33 merged as `f40a25d` and the deploy ran green.
+Verified on the host rather than asserted: rotation active on both containers, backend healthy, JSON log
+lines carrying `request_id`, `audit.db` present with its first `admin.bootstrap` row. The soak window for
+`SHIM-SEC-006` therefore starts 2026-08-31, not before — the instrument is now deployed, which is the
+precondition its removal was always waiting on. Do not remove it here; the expiry has not moved.
+
+**And the deploy mechanism this repository described did not exist.** Found on 2026-08-31 while following
+its own installation runbook. The host runs a shared `/opt/scripts/deploy.sh <service>`, forced from the
+deploy account's `authorized_keys`, which deploys a compose file by extracting `/opt/stack/docker-compose.yml`
+from the stack's images. Runway's images carried none, so its configuration never shipped — that is the whole
+reason the host's compose kept an Aug 25 mtime through six successful deploys. The `sed` the runbook asked
+for would have matched nothing, and the script it wanted installed would have been refused by `sudoers`
+anyway. `backend/Dockerfile` now bakes the file, which needs no host edit at all. See
+[ADR 0032](../adr/0032-the-deploy-mechanism-correction.md) and
+[brief 0025](../briefs/0025-bake-the-compose-into-the-image.md).
 
 **Remaining: 16d's second half — running the Cold-Agent Index and Change Tests.** The versioned
 pass criteria exist at [`ops/cold-agent/criteria.md`](../../ops/cold-agent/criteria.md) and were

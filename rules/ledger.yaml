@@ -887,9 +887,18 @@ residual_risks:
       something that later changed elsewhere, with no link between the two. The decay review
       cannot see this either — every diagnostic it runs measures structure, and a paragraph is
       not structure.
+
+      Re-opened 2026-08-31. The fifth was found, and it was the largest: docs/operations.md,
+      deploy.yml and ops/deploy/docker-compose.yml all described a runway-specific forced
+      command that fetched the compose file at the deployed commit. It was written, reviewed
+      and merged; it was never installed, and no forced command ever pointed at it. Unlike the
+      first four this claim was not true when written — the repository described a mechanism it
+      had authored rather than one it had observed, and nothing in the gate can tell those two
+      apart. The trigger below is deliberately not re-armed with a sixth count: counting them
+      has not prevented one. See ADR 0032.
     owner: maintainer
-    re_open_trigger: "a fifth stale claim is found, or a document acquires a checkable claim format worth enforcing"
-    decision_record: docs/adr/0030-the-decay-review.md
+    re_open_trigger: "a documented claim about the deploy host is found false again, or a check exists that reads a host fact rather than a repository fact"
+    decision_record: docs/adr/0032-the-deploy-mechanism-correction.md
 
   - id: RISK-ARCH-001
     statement: >
@@ -937,9 +946,19 @@ residual_risks:
       about production were already false when the file was first read: the healthchecks
       did not run there, and the rollback runbook's RUNWAY_SHA had nothing to substitute
       into. Both are fixed in the checked-in copy.
+
+      Narrowed 2026-08-31. backend/Dockerfile now bakes the file into the backend image at
+      /opt/stack/docker-compose.yml, and the host's shared deploy script writes it over the
+      on-disk copy on every deploy. Drift is therefore corrected by each deploy rather than
+      detected, which is stronger than the comparison job this risk originally asked for. What
+      remains open, and is why this stays a risk: nothing verifies that the write happened.
+      The host script's extraction loop falls through silently for an image that carries no
+      baked file, which is exactly how this service spent six days shipping images without its
+      configuration while every deploy reported success. A deploy that stops baking the file
+      looks identical to one that never needed to.
     owner: maintainer
-    re_open_trigger: "a job exists that compares the checked-in copy against the host, or a documented topology claim is found to be false again"
-    decision_record: docs/operations.md
+    re_open_trigger: "a check confirms after a deploy that the host's compose matches the deployed commit, or a documented topology claim is found to be false again"
+    decision_record: docs/adr/0032-the-deploy-mechanism-correction.md
 
   - id: RISK-DOC-002
     statement: >

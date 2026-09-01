@@ -351,11 +351,13 @@ def _declare_global_blind_spots(graph: Graph) -> None:
         BlindSpot(
             "BLIND-OPS-001",
             "deployment",
-            "The deploy host's compose file is not in this repository. Its contents were "
-            "read on 2026-08-24 and are recorded in docs/operations.md, so the mapping from "
-            "built images to running containers is no longer unknown — but it is a "
-            "transcription the index cannot verify, and nothing detects drift once the host "
-            "changes. See RISK-OPS-002.",
+            "The deploy host's compose file IS this repository's "
+            "ops/deploy/docker-compose.yml: since 2026-08-31 backend/Dockerfile bakes it into "
+            "the image at /opt/stack/docker-compose.yml and the host's shared deploy script "
+            "writes it over the on-disk copy. So it is no longer a transcription. What the "
+            "index still cannot see is whether that write happened — the host script skips "
+            "images carrying no baked file, silently, which is how six days of deploys "
+            "shipped images without configuration. See RISK-OPS-002.",
             ["process topology", "rollback"],
         ),
         BlindSpot(
