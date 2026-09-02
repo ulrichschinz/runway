@@ -10,7 +10,7 @@
 # the deploy workflow would silently start shipping an image whose CMD is pytest.
 # RULE-TI-002 checks that the base images here stay in step with backend/Dockerfile.
 
-FROM archlinux@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309 AS task-builder
+FROM archlinux@sha256:82b1b08faae9d61e3e7e13d562f4d09114d939105b0d59ff34140f3bd418593a AS task-builder
 # Must stay byte-identical to backend/Dockerfile's builder stage: the tier that proves
 # the binary behaves has to build the same binary. RULE-TI-002 checks the base images agree.
 #
