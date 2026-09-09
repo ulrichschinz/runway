@@ -1,4 +1,4 @@
-FROM archlinux@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309 AS task-builder
+FROM archlinux@sha256:b944cc65c5f28665dfd5fdbf5ed2997c88f5bb4a0aefac7ee8a7ef01893e5ed9 AS task-builder
 # Reproducible, which is the whole point of this stage (finding SEC-9).
 #
 # Three things were wrong before, and only the first is obvious:
