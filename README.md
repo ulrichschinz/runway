@@ -149,16 +149,23 @@ The task lands in that user's GTD inbox, ready for processing.
 
 ### MCP server
 
-Runway exposes a full [Model Context Protocol](https://modelcontextprotocol.io) server at `/mcp`.
-This allows any MCP-compatible client (Claude Desktop, Claude Code, custom agents) to manage tasks directly.
+Runway exposes a full [Model Context Protocol](https://modelcontextprotocol.io) server over
+**Streamable HTTP**, at **`/api/mcp`** — the same `/api` prefix every REST call uses, because
+the backend is only reachable through it. Any MCP-compatible client (Claude Code, Claude
+Desktop, custom agents) can manage tasks directly.
 
-**Claude Desktop** — add to `claude_desktop_config.json`:
+> The URL and the transport here were both wrong until 2026-09-18, and the server they
+> described could not complete a handshake at all. If you are carrying an older snippet —
+> `type: sse` pointed at `https://your-host/mcp` — replace it; that one never worked. See
+> [ADR 0033](docs/adr/0033-the-mcp-server-nobody-could-connect-to.md).
+
+**Claude Code** — add to `.mcp.json` in your project, or run the equivalent command:
 ```json
 {
   "mcpServers": {
     "runway": {
-      "type": "sse",
-      "url": "https://your-host/mcp",
+      "type": "http",
+      "url": "https://your-host/api/mcp",
       "headers": {
         "X-Api-Key": "<your-api-key>"
       }
@@ -166,21 +173,34 @@ This allows any MCP-compatible client (Claude Desktop, Claude Code, custom agent
   }
 }
 ```
+```sh
+claude mcp add --transport http runway https://your-host/api/mcp \
+  --header "X-Api-Key: <your-api-key>"
+```
 
-**Claude Code** — add to `.mcp.json` in your project:
+**Claude Desktop** — its config file takes local commands rather than URLs, so a remote
+server is reached through the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote)
+wrapper. Add to `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
     "runway": {
-      "type": "sse",
-      "url": "https://your-host/mcp",
-      "headers": {
-        "X-Api-Key": "<your-api-key>"
-      }
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote", "https://your-host/api/mcp",
+        "--header", "X-Api-Key:${RUNWAY_API_KEY}"
+      ],
+      "env": { "RUNWAY_API_KEY": "<your-api-key>" }
     }
   }
 }
 ```
+
+Both credential shapes work — `X-Api-Key: <key>` and `Authorization: Bearer <key>` — because
+`backend/app/main.py` forwards both into the tool call. Prefer `X-Api-Key`: the Bearer form is
+`SHIM-SEC-006`, a dated compatibility shim, and it will stop working when the shim is removed.
+The MCP endpoint itself is open — anyone who can reach it may list the tools — but every tool
+call is authenticated by the REST endpoint behind it (`RISK-MCP-002`).
 
 Available MCP tools mirror the REST API. **The tool names are FastAPI operation ids** — the
 handler function name, then the path, then the method — not the bare function names this

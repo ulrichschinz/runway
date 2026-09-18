@@ -112,7 +112,8 @@
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
         <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">MCP Server</h3>
         <p class="text-sm text-gray-400 dark:text-gray-500 mb-4">
-          Connect any MCP-compatible client to Runway. The server is available at <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded text-xs">/mcp</code>.
+          Connect any MCP-compatible client to Runway over Streamable HTTP, at
+          <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded text-xs">{{ mcpEndpoint }}</code>.
         </p>
 
         <div class="flex gap-1 mb-3 border-b border-gray-100 dark:border-gray-700">
@@ -195,6 +196,7 @@ import { ref, computed, onMounted, reactive } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import { useAuthStore } from '../stores/auth.js'
 import client from '../api/client.js'
+import { mcpSnippets, mcpUrl } from '../shared/mcpSnippets.js'
 
 const auth = useAuthStore()
 
@@ -269,8 +271,8 @@ function copyKey() {
 
 // --- MCP snippets ---
 const snippetCopied = ref(false)
-const activeTab = ref('Claude Desktop')
-const tabs = ['Claude Desktop', 'Claude Code', 'curl']
+const activeTab = ref('Claude Code')
+const tabs = ['Claude Code', 'Claude Desktop', 'curl']
 
 function copySnippet() {
   navigator.clipboard.writeText(snippets.value[activeTab.value])
@@ -278,42 +280,8 @@ function copySnippet() {
   setTimeout(() => (snippetCopied.value = false), 2000)
 }
 
-const snippets = computed(() => {
-  const key = apiKey.value ?? '<your-api-key>'
-  return {
-    'Claude Desktop': `{
-  "mcpServers": {
-    "runway": {
-      "type": "sse",
-      "url": "https://your-host/mcp",
-      "headers": {
-        "X-Api-Key": "${key}"
-      }
-    }
-  }
-}`,
-    'Claude Code': `{
-  "mcpServers": {
-    "runway": {
-      "type": "sse",
-      "url": "https://your-host/mcp",
-      "headers": {
-        "X-Api-Key": "${key}"
-      }
-    }
-  }
-}`,
-    'curl': `# Add task to inbox
-curl -X POST https://your-host/api/inbox \\
-  -H "Authorization: Bearer ${key}" \\
-  -H "Content-Type: application/json" \\
-  -d '{"description": "My task", "priority": "H"}'
-
-# List pending tasks
-curl https://your-host/api/tasks \\
-  -H "X-Api-Key: ${key}"`,
-  }
-})
+const mcpEndpoint = computed(() => mcpUrl(window.location.origin))
+const snippets = computed(() => mcpSnippets(window.location.origin, apiKey.value))
 
 // --- Admin ---
 const adminSettings = reactive({ allow_registration: true })

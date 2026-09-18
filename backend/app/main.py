@@ -93,5 +93,21 @@ def health():
     return {"status": "ok"}
 
 
-mcp = FastApiMCP(app)
-mcp.mount()
+# The MCP surface. Two arguments, each fixing a defect that made the server unusable in
+# production from its first deploy until 2026-09-18 — see ADR 0033.
+#
+# `headers` is the allowlist of request headers forwarded into the tool call. It defaults to
+# ["authorization"] alone, which meant the `X-Api-Key` header the README and the Settings
+# page have always documented arrived at the endpoint as no credential at all: every tool
+# call came back 401, and the only shape that worked was Bearer-as-API-key — SHIM-SEC-006,
+# the shim scheduled for removal. Forwarding both makes the documented shape the working one
+# and stops MCP depending on the shim.
+#
+# `mount_http` is Streamable HTTP rather than the deprecated HTTP+SSE of `mount()`. SSE
+# advertises its own message endpoint as an absolute path (`/mcp/messages/`), and production
+# reaches this application under the `/api/` prefix that nginx strips — so the path the
+# server handed out resolved to the SPA, and no client could post a second message. Streamable
+# HTTP is one endpoint that never advertises a path, so it is correct behind the proxy with
+# no root_path to keep in sync.
+mcp = FastApiMCP(app, headers=["authorization", "x-api-key"])
+mcp.mount_http()
