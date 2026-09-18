@@ -18,7 +18,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.12
 pydantic-settings==2.6.1
-aiosqlite==0.20.0
+aiosqlite==0.22.1
 # 0.3.3 held here until 2026-09-18, and for most of that time the MCP server did not work.
 # It declares `mcp>=1.6.0` with no upper bound, and the SDK changed the wire wrapper inside
 # that range: 0.3.3 feeds a bare JSONRPCMessage to a receive loop expecting SessionMessage,
