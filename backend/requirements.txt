@@ -1,4 +1,4 @@
-fastapi==0.115.5
+fastapi==0.141.1
 uvicorn[standard]==0.32.1
 # 3.3.0 carried the algorithm-confusion and JWT-bomb advisories (finding SEC-7). 3.5.0 was
 # verified drop-in against this application's exact usage — HS256 encode/decode, and an
