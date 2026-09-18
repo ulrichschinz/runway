@@ -68,11 +68,18 @@ def capture_openapi() -> dict:
 
 
 def capture_mcp_tools() -> dict:
-    """The tool list a client actually receives.
+    """The tool list the booted server object holds.
 
     Recorded with the handler name alongside, because the relationship between the two is the
     thing people get wrong: the tool name is the FastAPI operation id — function name, path
     and method — and renaming the Python function silently renames the tool.
+
+    This said "the tool list a client actually receives" until 2026-09-18, and that was a
+    claim it could not support: no client is involved here. For eleven weeks the names were
+    right and no client could obtain them, because the transport was broken underneath
+    (ADR 0033). What a client receives is now pinned separately, by a real session, in
+    backend/tests/unit/test_mcp_session.py — which asserts the delivered list against this
+    snapshot and so makes the two claims one.
     """
     _, mcp = _booted_app()
     return {

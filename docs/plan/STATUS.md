@@ -1,9 +1,29 @@
 # Session handoff — where we are, and how to go on
 
-**Snapshot taken 2026-08-31 on `op33-bake-the-compose`, with `main` at `f40a25d`.** This file is a
+**Snapshot taken 2026-09-18 on `fix-mcp-transport`, with `main` at `68c24ae`.** This file is a
 *dated handoff*, not a source of truth. Everything in it can drift; §1 tells you how to re-establish the
 real state in about twenty seconds. When they disagree, the commands win — this programme has now found
 five documents that had quietly stopped being true, and this one is not exempt.
+
+> **PR #34 merged 2026-09-01 (`68c24ae`) and deployed green** — the compose file is now baked into the
+> backend image, which is what ADR 0032 corrected. Everything in the plan through 16d's first half is on
+> `main`.
+>
+> **The MCP server has never worked, and that was found on 2026-09-18.** Not a documentation defect: no
+> client could complete a handshake against any deploy of this application. `fastapi-mcp` 0.3.3 against
+> the pinned `mcp` 1.29.0 drops the session at `initialize`; the documented URL was the SPA rather than
+> the API; the SSE transport advertised a message path that resolved to the SPA behind nginx; and
+> `X-Api-Key`, the header every artefact documented, was never forwarded into the tool call. Four
+> independent defects under a green gate, because every artefact describing MCP was derived from the
+> server object in-process and none of them crossed the wire. Fixed on the current branch — Streamable
+> HTTP, `fastapi-mcp` 0.4.0, a header allowlist, and a test that opens a real session. See
+> [ADR 0033](../adr/0033-the-mcp-server-nobody-could-connect-to.md) and
+> [brief 0026](../briefs/0026-the-mcp-server-nobody-could-connect-to.md).
+>
+> **This moves the `SHIM-SEC-006` decision.** The soak that began 2026-08-31 was measuring whether anyone
+> still sends Bearer-as-API-key. MCP clients are a plausible producer of that shape and none of them could
+> connect, so the count gathered so far says nothing about them. Read the window as starting from the
+> deploy of this change.
 
 > **Everything through the Phase 4 audit is merged and deployed.** PR #33 merged 2026-08-31 (`f40a25d`):
 > Step 15 entire, 16b, 16c, the deploy mechanism and 16d's first half — seventeen commits. The deploy ran

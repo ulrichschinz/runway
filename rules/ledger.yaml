@@ -1201,6 +1201,20 @@ residual_risks:
     re_open_trigger: "an index query returns an mcp_tool name that does not appear in ops/surfaces/mcp-tools.json, or the extractor is changed to read the snapshot"
     decision_record: docs/adr/0020-runtime-observed-surfaces.md
 
+  - id: RISK-MCP-002
+    statement: >
+      The MCP endpoint itself is unauthenticated. `mount_http()` is mounted with no
+      dependencies, so anyone who can reach /api/mcp may complete a handshake and list all
+      32 tools without presenting a credential. Every tool CALL is authenticated, by the
+      REST endpoint the call is forwarded to — tests/unit/test_mcp_session.py pins that a
+      call without a credential comes back 401 — so this discloses the tool inventory and
+      nothing else. The inventory is published in README.md and ops/surfaces/mcp-tools.json
+      anyway, which is why this is accepted rather than fixed. Closing it means passing
+      `dependencies=` to the mount, which would also refuse anonymous discovery.
+    owner: maintainer
+    re_open_trigger: "a tool is added whose name or description reveals something not already public, or the endpoint is exposed on a network where enumeration itself matters"
+    decision_record: docs/adr/0033-the-mcp-server-nobody-could-connect-to.md
+
   - id: RISK-OPS-006
     statement: >
       NOTHING PRUNES THE AUDIT DATABASE. `data/audit.db` grows for the lifetime of the
