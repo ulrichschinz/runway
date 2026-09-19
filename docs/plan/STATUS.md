@@ -1,6 +1,6 @@
 # Session handoff — where we are, and how to go on
 
-**Snapshot taken 2026-09-18 on `fix-mcp-transport`, with `main` at `68c24ae`.** This file is a
+**Snapshot taken 2026-09-19 on `main`, at `eaf2abb`.** This file is a
 *dated handoff*, not a source of truth. Everything in it can drift; §1 tells you how to re-establish the
 real state in about twenty seconds. When they disagree, the commands win — this programme has now found
 five documents that had quietly stopped being true, and this one is not exempt.
@@ -9,21 +9,31 @@ five documents that had quietly stopped being true, and this one is not exempt.
 > backend image, which is what ADR 0032 corrected. Everything in the plan through 16d's first half is on
 > `main`.
 >
-> **The MCP server has never worked, and that was found on 2026-09-18.** Not a documentation defect: no
-> client could complete a handshake against any deploy of this application. `fastapi-mcp` 0.3.3 against
-> the pinned `mcp` 1.29.0 drops the session at `initialize`; the documented URL was the SPA rather than
-> the API; the SSE transport advertised a message path that resolved to the SPA behind nginx; and
-> `X-Api-Key`, the header every artefact documented, was never forwarded into the tool call. Four
-> independent defects under a green gate, because every artefact describing MCP was derived from the
-> server object in-process and none of them crossed the wire. Fixed on the current branch — Streamable
-> HTTP, `fastapi-mcp` 0.4.0, a header allowlist, and a test that opens a real session. See
-> [ADR 0033](../adr/0033-the-mcp-server-nobody-could-connect-to.md) and
+> **The MCP server had never worked, and it works now.** Found on 2026-09-18, fixed and deployed the
+> same day: PR #41 merged as `eaf2abb`, the deploy ran green, and the fix was **verified against
+> production** rather than asserted — `initialize` returns a session id through traefik and nginx,
+> `tools/list` delivers 32 tools, a call without a credential comes back 401, and the old SSE message
+> path is 404. That is the first MCP session ever completed against this deployment.
+>
+> It was not a documentation defect. Four independent failures, each sufficient alone: `fastapi-mcp`
+> 0.3.3 against the pinned `mcp` 1.29.0 dropped the session at `initialize`; the documented URL was the
+> SPA rather than the API; SSE advertised a message path that resolved to the SPA behind nginx; and
+> `X-Api-Key`, the header every artefact documented, was never forwarded into the tool call — so the only
+> shape that could ever have worked was `SHIM-SEC-006`. All four sat under a green gate for eleven weeks,
+> because every artefact describing MCP was derived from the server object in this process and none of
+> them crossed the wire. See [ADR 0033](../adr/0033-the-mcp-server-nobody-could-connect-to.md) and
 > [brief 0026](../briefs/0026-the-mcp-server-nobody-could-connect-to.md).
 >
 > **This moves the `SHIM-SEC-006` decision.** The soak that began 2026-08-31 was measuring whether anyone
 > still sends Bearer-as-API-key. MCP clients are a plausible producer of that shape and none of them could
-> connect, so the count gathered so far says nothing about them. Read the window as starting from the
-> deploy of this change.
+> connect, so the count gathered before 2026-09-18 says nothing about them. Read the window as starting
+> from that deploy, not from 2026-08-31.
+>
+> **Found while checking Dependabot #26, and not yet fixed:** `requirements.txt` and the `.lock` the image
+> actually installs can disagree, and nothing compares them. `tools/checks/pinning.py` checks only that
+> the locks exist and carry hashes. A Dependabot PR that bumps the intent file alone passes `verify` and
+> changes nothing in the built image — #26 would have done exactly that. It wants a rule, with the four
+> artefacts the meta-rule requires. No id is allocated yet.
 
 > **Everything through the Phase 4 audit is merged and deployed.** PR #33 merged 2026-08-31 (`f40a25d`):
 > Step 15 entire, 16b, 16c, the deploy mechanism and 16d's first half — seventeen commits. The deploy ran
@@ -358,7 +368,21 @@ direct pushes but would let a red pull request merge.
 
 Say *"where are we and how do we go on"*. The answer should be: read this file, run §1's commands, and then
 pick up at **16d's second half** — the Cold-Agent tests — which is the only implementation work left in the
-plan. Everything before it has landed on this branch.
+plan. Everything before it has landed on `main` and is deployed.
+
+Three things are queued behind it, none blocking, in the order they should be taken:
+
+1. **The lock-drift rule** — `requirements.txt` against the `.lock` the image installs. Described in the
+   banner above. It is the same shape of hole as the MCP defect: a check that verifies an artefact's form
+   rather than the claim people read it as making.
+2. **`WAIVER-TYPE-001`**, expiring 2026-11-04 — an unchecked `Row | None` reaching a 500 on `/auth/me`.
+   Small enough that fixing it beats renewing it.
+3. **`SHIM-SEC-006`**, expiring 2026-11-25 — decide from `audit.db`, counting only rows written after the
+   2026-09-18 deploy, for the reason in the banner.
+
+**Fourteen Dependabot pull requests are open**, oldest from 2026-08-26. #35 (python 3.14) fails `verify`.
+#26 (fastapi-mcp) is superseded by PR #41 and should close itself. Do not merge any Python bump until the
+lock-drift rule exists, or repeat the no-op that #26 would have been.
 
 ### If you are the cold session, stop reading here
 
