@@ -47,7 +47,7 @@ jobs:
         # Pinned to an exact release, unlike the other actions here, because astral-sh
         # publishes no floating major tag past v6 — `@v10` does not exist and the workflow
         # fails to resolve it before any step runs. Bump this deliberately.
-        uses: astral-sh/setup-uv@v10.0.1
+        uses: astral-sh/setup-uv@v10.1.0
 
       - name: Bootstrap from a clean clone
         run: make bootstrap
