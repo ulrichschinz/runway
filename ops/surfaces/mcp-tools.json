@@ -1,13 +1,9 @@
 {
-  "count": 33,
+  "count": 22,
   "tools": [
     {
       "name": "annotate_task_tasks__uuid__annotate_post",
       "summary": "Annotate a task"
-    },
-    {
-      "name": "change_password_auth_password_put",
-      "summary": "Change password"
     },
     {
       "name": "complete_task_tasks__uuid__done_post",
@@ -26,16 +22,8 @@
       "summary": "Delete a task"
     },
     {
-      "name": "get_apikey_auth_apikey_get",
-      "summary": "Get Apikey"
-    },
-    {
       "name": "get_plan_projects_plans__name__get",
       "summary": "Get Plan"
-    },
-    {
-      "name": "get_settings_admin_settings_get",
-      "summary": "Get site settings (admin only)"
     },
     {
       "name": "get_task_tasks__uuid__get",
@@ -52,14 +40,6 @@
     {
       "name": "list_tasks_tasks_get",
       "summary": "List tasks"
-    },
-    {
-      "name": "list_users_admin_users_get",
-      "summary": "List all users (admin only)"
-    },
-    {
-      "name": "login_auth_login_post",
-      "summary": "Login"
     },
     {
       "name": "me_auth_me_get",
@@ -82,22 +62,6 @@
       "summary": "List projects"
     },
     {
-      "name": "regenerate_apikey_auth_apikey_regenerate_post",
-      "summary": "Regenerate Apikey"
-    },
-    {
-      "name": "register_auth_register_post",
-      "summary": "Register"
-    },
-    {
-      "name": "registration_status_auth_registration_status_get",
-      "summary": "Whether this instance currently accepts new registrations (public)"
-    },
-    {
-      "name": "set_user_role_admin_users__target__role_put",
-      "summary": "Promote or demote a user (admin only)"
-    },
-    {
       "name": "someday_gtd_someday_get",
       "summary": "Someday / maybe"
     },
@@ -112,14 +76,6 @@
     {
       "name": "tickler_gtd_tickler_get",
       "summary": "Tickler"
-    },
-    {
-      "name": "update_profile_auth_me_put",
-      "summary": "Update profile (name, email)"
-    },
-    {
-      "name": "update_settings_admin_settings_put",
-      "summary": "Update site settings (admin only)"
     },
     {
       "name": "upsert_plan_projects_plans__name__put",

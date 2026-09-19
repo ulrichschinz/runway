@@ -54,8 +54,9 @@ waivers:
       The fix is not a patch. It is store-a-hash plus show-once-on-regeneration, which
       changes what GET /auth/apikey can return: a hashed column cannot produce the value,
       so the endpoint either stops returning a key or starts returning a status. That is
-      the response contract of a route the README documents and that fastapi-mcp exposes
-      as an MCP tool, so decision F2 makes it a public-surface migration —
+      the response contract of a route the README documents (fastapi-mcp exposed it as an
+      MCP tool until 2026-09-19, when the MCP surface became an allowlist and it became
+      REST-only — ADR 0037), so decision F2 makes it a public-surface migration —
       expand -> migrate -> switch -> contract with a deprecation window, its own step, its
       own brief. Folding it into Step 15's audit-log change would have buried a migration
       of an externally consumed surface inside an observability feature.
@@ -119,9 +120,10 @@ waivers:
       the cleartext exactly once from POST /auth/apikey/regenerate, and change
       GET /auth/apikey to report presence and age rather than the secret — under the
       public-surface migration pattern of docs/change-workflow.md, because F2 treats the
-      REST route and its MCP tool as externally consumed. The migration has to keep the
-      column readable while both shapes are accepted, since existing agents and MCP clients
-      authenticate with keys that were issued in cleartext and cannot be re-derived.
+      REST route as externally consumed (it is no longer an MCP tool — ADR 0037). The
+      migration has to keep the column readable while both shapes are accepted, since
+      existing agents and MCP clients authenticate with keys that were issued in cleartext
+      and cannot be re-derived.
 
   - id: WAIVER-TYPE-001
     class: scheduled_remediation

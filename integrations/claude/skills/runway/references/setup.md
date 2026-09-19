@@ -21,15 +21,47 @@ its own `.mcp.json`, that is fine; keep the name `runway` so permission rules ma
 
 ## 2. Permissions (`~/.claude/settings.json`)
 
-Looking something up should never raise a permission prompt; destructive and account
-operations should never be reachable. Tool names are `mcp__runway__<operation id>` — list
-the real names once and adapt:
+Looking something up should never raise a permission prompt; changes ask; deleting is
+denied. Tool names are `mcp__runway__<operation id>`. Merge these entries into the
+`permissions` block (keep whatever else is there):
 
-- `allow`: health, me, list tasks, get task, the `gtd_*` reads (inbox, next, waiting,
-  someday, projects, project tasks, summary, tickler, overview), get plan.
-- `ask` (default): create, modify, complete, annotate, start/stop, plans, inbox post.
-- `deny`: delete task (optional but recommended), and every auth, API-key, user and admin
-  operation if the server still exposes them.
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__runway__health_health_get",
+      "mcp__runway__me_auth_me_get",
+      "mcp__runway__list_tasks_tasks_get",
+      "mcp__runway__get_task_tasks__uuid__get",
+      "mcp__runway__inbox_gtd_inbox_get",
+      "mcp__runway__next_actions_gtd_next_get",
+      "mcp__runway__waiting_gtd_waiting_get",
+      "mcp__runway__someday_gtd_someday_get",
+      "mcp__runway__projects_gtd_projects_get",
+      "mcp__runway__project_tasks_gtd_projects__name__get",
+      "mcp__runway__tickler_gtd_tickler_get",
+      "mcp__runway__get_plan_projects_plans__name__get"
+    ],
+    "ask": [
+      "mcp__runway__create_task_tasks_post",
+      "mcp__runway__modify_task_tasks__uuid__put",
+      "mcp__runway__complete_task_tasks__uuid__done_post",
+      "mcp__runway__annotate_task_tasks__uuid__annotate_post",
+      "mcp__runway__start_task_tasks__uuid__start_post",
+      "mcp__runway__stop_task_tasks__uuid__stop_post",
+      "mcp__runway__create_project_projects_post",
+      "mcp__runway__upsert_plan_projects_plans__name__put",
+      "mcp__runway__webhook_inbox_inbox_post"
+    ],
+    "deny": [
+      "mcp__runway__delete_task_tasks__uuid__delete"
+    ]
+  }
+}
+```
+
+Authentication, API-key, user and admin operations are not exposed over MCP, so they need
+no entry.
 
 ## 3. The standing rule (global instructions, e.g. `~/.claude/CLAUDE.md`)
 

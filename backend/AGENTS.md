@@ -36,8 +36,11 @@ Coverage floor is a ratchet, not a target — raise it, never lower it to fit a 
 
 ## Things that will surprise you
 
-- `fastapi-mcp` turns every route into an MCP tool **named after the handler function**.
-  Renaming a Python function is a breaking public-surface change.
+- `fastapi-mcp` turns a route into an MCP tool **named after its operation id** (handler
+  function, path, method) — but only if the router's tag is on the allowlist in `main.py`
+  (`tasks`, `gtd`, `projects`, `inbox`, plus `health` and `me`; ADR 0037). Auth and admin
+  routes are REST-only. Renaming the Python function of an exposed route is a breaking
+  public-surface change.
 - Schema migrations are `ALTER TABLE` statements in `init_db()`, run on every start. Only
   "duplicate column name" passes silently — that is the re-run path. Every other database
   error is logged at ERROR and the boot continues, so a failed migration is visible but not

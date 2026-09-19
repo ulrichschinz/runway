@@ -139,8 +139,7 @@ review cannot fix the lists: show the screen, then propose `reset` and stop ther
 - **Deleting** is permanent. Ask every time; prefer completing.
 - **Bulk changes** need one explicit confirmation that lists what will change. The
   shorthand answer in a daily review counts as that confirmation.
-- Never touch authentication, API-key, user or admin operations, even if the server
-  exposes them.
+- Never call authentication, API-key, user or admin operations.
 - If a change fails because the server lacks a capability, say so plainly. Do not work
   around it by deleting and recreating tasks; that loses history, annotations and
   dependencies.

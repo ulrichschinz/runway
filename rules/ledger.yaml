@@ -617,7 +617,10 @@ rules:
     rationale: >
       A document nobody verifies drifts, and a drifted contract is worse than no contract
       because it is followed. Paths, commands, identifiers and the counted public-surface
-      claims are all checked against the actual repository and the index.
+      claims are all checked against the actual repository and the index — except the MCP
+      tool count, which is checked against the observed snapshot ops/surfaces/mcp-tools.json
+      (itself held to the booted server by RULE-SURF-001). Since the MCP surface became an
+      allowlist the index, which derives one tool per route, over-counts it (ADR 0037).
 
   - id: RULE-DOC-002
     statement: "AGENTS.md MUST stay within 250 lines and 12000 bytes."
@@ -1271,20 +1274,22 @@ residual_risks:
     statement: >
       The index derives its mcp_tool nodes from route declarations, while the surface
       snapshot derives them by booting the app. Two producers of the same fact, and only one
-      of them is observed. They agreed on the count when BLIND-MCP-001 was resolved, but
-      nothing compares them, and the names differ in form — the index records the handler
-      function name, the snapshot records the operation id. A query answered from the index
-      will therefore give a tool name no client would recognise. Making the extractor read
-      the snapshot would close it.
+      of them is observed. The names differ in form — the index records the handler
+      function name, the snapshot records the operation id — so a query answered from the
+      index gives a tool name no client would recognise. Since the MCP surface became an
+      allowlist (ADR 0037) the index is also over-inclusive: it still derives one tool per
+      route, including the auth and admin routes that are REST-only, so index mcp_tool
+      nodes say nothing about membership. RULE-DOC-001 therefore counts tools from the
+      snapshot. Making the extractor read the snapshot would close it.
     owner: maintainer
-    re_open_trigger: "an index query returns an mcp_tool name that does not appear in ops/surfaces/mcp-tools.json, or the extractor is changed to read the snapshot"
+    re_open_trigger: "an index consumer relies on mcp_tool membership, an index query returns an mcp_tool name that does not appear in ops/surfaces/mcp-tools.json, or the extractor is changed to read the snapshot"
     decision_record: docs/adr/0020-runtime-observed-surfaces.md
 
   - id: RISK-MCP-002
     statement: >
       The MCP endpoint itself is unauthenticated. `mount_http()` is mounted with no
       dependencies, so anyone who can reach /api/mcp may complete a handshake and list all
-      33 tools without presenting a credential. Every tool CALL is authenticated, by the
+      22 tools without presenting a credential. Every tool CALL is authenticated, by the
       REST endpoint the call is forwarded to — tests/unit/test_mcp_session.py pins that a
       call without a credential comes back 401 — so this discloses the tool inventory and
       nothing else. The inventory is published in README.md and ops/surfaces/mcp-tools.json

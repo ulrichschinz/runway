@@ -138,6 +138,16 @@ The previous configuration paired `allow_origins=["*"]` with `allow_credentials=
 makes Starlette reflect the caller's own `Origin` back — every origin held full credentialed
 access (finding SEC-4).
 
+## MCP surface
+
+The MCP server at `/mcp` exposes an **allowlist**, not the whole API: every operation of the
+`tasks`, `gtd`, `projects` and `inbox` routers, plus `health` and `me`
+(`include_tags` and `include_operations` in `backend/app/main.py`). Login, registration, API-key,
+profile, password, user and admin operations are REST-only. An agent holding a key therefore
+cannot read the key back, rotate it, or reach an admin route through MCP, whatever the account's
+role. The list fails closed — a router with a new tag is not a tool until it is added — and
+`backend/tests/unit/test_mcp_session.py` pins it as a client receives it. ADR 0037.
+
 ## Login throttling
 
 `POST /auth/login` allows `LOGIN_RATE_LIMIT` failed attempts per username per

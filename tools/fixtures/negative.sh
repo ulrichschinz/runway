@@ -544,6 +544,22 @@ expect_red "TEST-005" "tools/checks/skill.sh" "RULE-TEST-005"
 printf '\nThe entry point is `tools/checks/does-not-exist.sh`.\n' >>"$SANDBOX/AGENTS.md"
 expect_red "DOC-001" "tools/checks/contract.sh" "RULE-DOC-001"
 
+# The counted claim itself: the MCP count, one higher than it is. Since ADR 0037 that count
+# is compared against ops/surfaces/mcp-tools.json, not the index; the arm above proves a
+# path claim can fail, this one that the count comparison can.
+python3 - "$SANDBOX/AGENTS.md" <<'MCPCOUNT'
+import pathlib
+import re
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+m = re.search(r"MCP tools \((\d+)\)", t)
+assert m, "MCP count not found"
+p.write_text(t[: m.start(1)] + str(int(m.group(1)) + 1) + t[m.end(1) :])
+MCPCOUNT
+expect_red "DOC-001-count" "tools/checks/contract.sh" "RULE-DOC-001"
+
 # --- RULE-DOC-002 — the contract outgrows its budget ------------------------
 i=0
 while [ "$i" -lt 260 ]; do printf 'padding line %s\n' "$i" >>"$SANDBOX/AGENTS.md"; i=$((i + 1)); done

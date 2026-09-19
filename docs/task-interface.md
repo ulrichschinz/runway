@@ -138,7 +138,7 @@ the slice as a unit:
 | `backend/tests/container/test_<name>.py` | the module is proven present in the shipped image |
 | a `be/feature/<name>` unit in `architecture.toml` | `RULE-ARCH-001` has an edge list to check it against — one that withholds `be/adapters/task` |
 | a line in `rules/route-guards.toml` | `RULE-SEC-001` passes; a route with no declared guard fails the gate |
-| the route counts in `AGENTS.md` | `RULE-DOC-001` checks them against the index, and a new route moves both |
+| the REST route count in `AGENTS.md` | `RULE-DOC-001` checks the REST count against the index and the MCP count against `ops/surfaces/mcp-tools.json`; a new route moves the REST count, and the MCP count only if its tag is on the allowlist (ADR 0037) |
 
 **`KIND=frontend-feature`** emits a view, its pure logic module and a vitest file, registers an `fe/<name>`
 unit whose edges allow `fe/shared` and `fe/layout` only, and adds the SPA route. There is no second test
@@ -543,7 +543,7 @@ changes in flight.
 It reports two numbers, and they are not the same number:
 
 ```
-  53 fixture arm(s) passed, 0 failed
+  54 fixture arm(s) passed, 0 failed
   46 of 49 executable rules proven able to fail; 3 declare no automated fixture (…)
 ```
 

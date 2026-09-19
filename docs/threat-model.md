@@ -54,8 +54,9 @@ everybody's data.
 **Three actors reach the system, not two.** The browser SPA, which authenticates with a JWT held in
 `localStorage` (`token`, `role`, `username` and three more, snapshotted in
 [`ops/surfaces/spa.json`](../ops/surfaces/spa.json)); agents and MCP clients, which authenticate with
-a permanent API key; and the operator with shell on the deploy host, who is outside every control in
-this repository. The third is the largest trusted actor and there is exactly one of them
+a permanent API key — over MCP they reach only the task, GTD, project and inbox operations plus
+`health` and `me`, never an authentication, API-key, user or admin operation (ADR 0037); and the
+operator with shell on the deploy host, who is outside every control in this repository. The third is the largest trusted actor and there is exactly one of them
 (`RISK-GOV-001`), which is also why nothing here can be enforced by review.
 
 **The frontend's role check is decoration.** `auth.role` is read from `localStorage`, so a viewer can
@@ -459,6 +460,13 @@ survives a password change. `users.db` is a bind-mounted file and is in every ba
 route, so a stolen key's *use* is reconstructable and rotation is one `POST` away. That is
 observation, not prevention, and it says nothing about a key read from the file directly.
 `WAIVER-SEC-003`, expiring 2027-01-31.
+
+**Mitigated for agent sessions:** the MCP surface is an allowlist (ADR 0037). No authentication,
+API-key, user or admin operation is a tool, so an agent — or a prompt injected into one — holding a
+key over MCP cannot read it back through `GET /auth/apikey`, rotate it, change the password, or reach
+an admin route, even when the account is an admin. `backend/tests/unit/test_mcp_session.py` pins the
+list as a client receives it, and a call to a removed name returns "Unknown tool" without the key.
+REST is unchanged: the same key used directly against the API still reaches every route.
 
 ### The compatibility shim
 
