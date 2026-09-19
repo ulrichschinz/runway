@@ -211,7 +211,7 @@ section claimed until Step 13, none of which ever existed:
 | `GET /tasks` | `list_tasks_tasks_get` |
 | `POST /tasks` | `create_task_tasks_post` |
 | `POST /tasks/{uuid}/done` | `complete_task_tasks__uuid__done_post` |
-| `POST /inbox` | `add_to_inbox_inbox_post` |
+| `POST /inbox` | `webhook_inbox_inbox_post` |
 
 MCP clients discover tools at connect time, so nothing had to hardcode these — which is
 exactly why the documentation could be wrong for so long without anyone noticing. The full
@@ -221,6 +221,30 @@ reading the tool list, and `RULE-SURF-001` fails the build when it changes.
 
 **Renaming a route handler function renames its MCP tool.** That is a breaking change to a
 public surface — see [`AGENTS.md`](AGENTS.md).
+
+### Use runway from Claude
+
+[`integrations/claude/`](integrations/claude/README.md) is a Claude Code plugin with one skill,
+`runway`, that runs Getting Things Done on this server: capture from any repository, clarify the
+inbox, daily and weekly review, project planning. It needs the MCP connection above, once per
+machine and in user scope, with the key in an environment variable:
+
+```sh
+claude mcp add --scope user --transport http runway https://your-host/api/mcp \
+  --header 'X-Api-Key: ${RUNWAY_API_KEY}'
+```
+
+Then install the plugin from this repository's marketplace:
+
+```sh
+claude plugin marketplace add ulrichschinz/runway
+claude plugin install runway@runway
+```
+
+Updating, the install script for people without plugins, and why nothing is ever symlinked into a
+checkout: [`integrations/claude/README.md`](integrations/claude/README.md). The one-time personal
+setup — permissions, the standing rule that makes Claude offer tasks, a profile — is in
+[`references/setup.md`](integrations/claude/skills/runway/references/setup.md).
 
 ---
 

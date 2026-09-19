@@ -497,6 +497,49 @@ p.write_text(t2)
 BUMPINTENT
 expect_red "DEP-005" "tools/checks/supply-chain.sh" "RULE-DEP-005"
 
+# --- RULE-SURF-003 — the skill names a route the server does not have -----------
+# The realistic break is a route renamed on the server with the skill still naming the old
+# one. Reproduced as a row in the operation table that points nowhere.
+printf '| a renamed route | gtd frobnicate (`gtd/frobnicate`) |\n' \
+	>>"$SANDBOX/integrations/claude/skills/runway/references/conventions.md"
+python3 - "$SANDBOX/integrations/claude/skills/runway/references/conventions.md" <<'ROUTE'
+import pathlib
+import sys
+
+# Move the appended row into the "Which operation for what" table, where the rule looks.
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text().splitlines()
+row = lines.pop()
+at = lines.index("## Status tags")
+lines.insert(at - 1, row)
+p.write_text("\n".join(lines) + "\n")
+ROUTE
+expect_red "SURF-003" "tools/checks/skill.sh" "RULE-SURF-003"
+
+# --- RULE-SURF-003 — an MCP tool name nobody serves -----------------------------
+# In the plugin README, outside skills/, so the arm does not also trip RULE-SURF-004.
+printf '\nAllow `mcp__runway__no_such_operation_get`.\n' >>"$SANDBOX/integrations/claude/README.md"
+expect_red "SURF-003-tool" "tools/checks/skill.sh" "RULE-SURF-003"
+
+# --- RULE-SURF-004 — the skill changes and the version does not ----------------
+printf '\nA sentence added without a version bump.\n' \
+	>>"$SANDBOX/integrations/claude/skills/runway/SKILL.md"
+expect_red "SURF-004" "tools/checks/skill.sh" "RULE-SURF-004"
+
+# --- RULE-TEST-005 — install.sh stops refusing a symlinked target ---------------
+# The refusal that keeps ~/.claude from pointing into a working tree, deleted.
+python3 - "$SANDBOX/integrations/claude/install.sh" <<'UNREFUSE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = 'if [ -L "$TARGET" ]; then'
+assert old in t, "symlink refusal not found"
+p.write_text(t.replace(old, 'if false; then', 1))
+UNREFUSE
+expect_red "TEST-005" "tools/checks/skill.sh" "RULE-TEST-005"
+
 # --- RULE-DOC-001 — the contract claims something untrue --------------------
 printf '\nThe entry point is `tools/checks/does-not-exist.sh`.\n' >>"$SANDBOX/AGENTS.md"
 expect_red "DOC-001" "tools/checks/contract.sh" "RULE-DOC-001"

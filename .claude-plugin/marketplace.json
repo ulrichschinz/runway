@@ -1,0 +1,16 @@
+{
+  "name": "runway",
+  "owner": {
+    "name": "Ulrich Schinz"
+  },
+  "metadata": {
+    "description": "The runway GTD skill for Claude Code, released with the runway server it drives."
+  },
+  "plugins": [
+    {
+      "name": "runway",
+      "source": "./integrations/claude",
+      "description": "GTD task management with a self-hosted runway server: capture, clarify, daily and weekly review, project planning."
+    }
+  ]
+}

@@ -77,6 +77,17 @@ owner = "maintainer"
 paths = ["docs/**", "README.md", "LICENSE", "agent-ready.md", "AGENTS.md", "CLAUDE.md", "backend/AGENTS.md", "frontend/AGENTS.md"]
 
 [[units]]
+id = "integrations"
+scope = "repository"
+owner = "maintainer"
+paths = ["integrations/**", ".claude-plugin/**"]
+note = """
+Clients of the public surface that ship from this repository: today the Claude Code plugin
+with the runway skill. No code dependency in either direction; the coupling is the REST and
+MCP surface, held by RULE-SURF-003. See ADR 0035.
+"""
+
+[[units]]
 id = "tests"
 scope = "repository"
 owner = "maintainer"
