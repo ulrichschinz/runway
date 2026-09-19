@@ -29,7 +29,7 @@ five documents that had quietly stopped being true, and this one is not exempt.
 > connect, so the count gathered before 2026-09-18 says nothing about them. Read the window as starting
 > from that deploy, not from 2026-08-31.
 >
-> **Found while checking Dependabot #26, and not yet fixed:** `requirements.txt` and the `.lock` the image
+> **Found while checking Dependabot #26 — fixed 2026-09-19 as `RULE-DEP-005`** ([ADR 0034](../adr/0034-the-lock-must-match-the-intent.md)): `requirements.txt` and the `.lock` the image
 > actually installs can disagree, and nothing compares them. `tools/checks/pinning.py` checks only that
 > the locks exist and carry hashes. A Dependabot PR that bumps the intent file alone passes `verify` and
 > changes nothing in the built image — #26 would have done exactly that. It wants a rule, with the four
@@ -372,17 +372,16 @@ plan. Everything before it has landed on `main` and is deployed.
 
 Three things are queued behind it, none blocking, in the order they should be taken:
 
-1. **The lock-drift rule** — `requirements.txt` against the `.lock` the image installs. Described in the
-   banner above. It is the same shape of hole as the MCP defect: a check that verifies an artefact's form
-   rather than the claim people read it as making.
+1. ~~**The lock-drift rule**~~ — done 2026-09-19: `RULE-DEP-005`, [ADR 0034](../adr/0034-the-lock-must-match-the-intent.md),
+   [brief 0027](../briefs/0027-the-lock-must-match-the-intent.md). A Dependabot pip PR now goes red until
+   `./run lock` is run on its branch.
 2. **`WAIVER-TYPE-001`**, expiring 2026-11-04 — an unchecked `Row | None` reaching a 500 on `/auth/me`.
    Small enough that fixing it beats renewing it.
 3. **`SHIM-SEC-006`**, expiring 2026-11-25 — decide from `audit.db`, counting only rows written after the
    2026-09-18 deploy, for the reason in the banner.
 
 **Fourteen Dependabot pull requests are open**, oldest from 2026-08-26. #35 (python 3.14) fails `verify`.
-#26 (fastapi-mcp) is superseded by PR #41 and should close itself. Do not merge any Python bump until the
-lock-drift rule exists, or repeat the no-op that #26 would have been.
+#26 (fastapi-mcp) is superseded by PR #41 and should close itself. Python bumps now need `./run lock` on their branch; `RULE-DEP-005` fails them until it is run.
 
 ### If you are the cold session, stop reading here
 

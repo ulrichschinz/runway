@@ -526,6 +526,26 @@ rules:
       what pacman installs — pacman resolves against live mirrors at build time, so without it
       the binary version is still whatever Arch published that day.
 
+  - id: RULE-DEP-005
+    statement: >
+      Every direct dependency in backend/requirements.txt and backend/requirements-dev.txt
+      MUST be an exact pin, and the lock compiled from it MUST install exactly that version;
+      a lock MUST NOT keep a direct dependency no intent file declares.
+    class: executable
+    check: tools/checks/supply-chain.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#make-lock
+    fix: ./run lock
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      RULE-DEP-004 checks the lock's form — present and hashed — and was read as checking
+      that the lock matches the intent. It never did. A bump to requirements.txt alone, the
+      shape every Dependabot pip pull request takes, passed verify and changed nothing in the
+      image, which installs the lock; found on 2026-09-18 while checking Dependabot #26. The
+      same hole as the MCP defect of ADR 0033: an artefact verified by its form rather than
+      by the claim people read it as making. See ADR 0034.
+
   - id: RULE-DOC-001
     statement: "Every factual claim in AGENTS.md MUST hold against the repository."
     class: executable
