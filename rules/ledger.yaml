@@ -159,6 +159,7 @@ rules:
       that tracks the exact number turns every unrelated refactor into a coverage failure,
       and a gate that fails for irrelevant reasons is a gate people learn to bypass.
 
+
   - id: RULE-TEST-004
     statement: "The frontend logic test suite MUST pass."
     class: executable
@@ -173,6 +174,24 @@ rules:
       shipped — c6ce0f2 and 472b673, both context-tag comma-splitting — were in pure
       functions, not in component rendering. Testing where the bugs were beats testing
       where tests are conventional.
+
+  - id: RULE-TEST-005
+    statement: >
+      integrations/claude/install.sh MUST pass integrations/claude/tests/install_test.sh: it
+      installs the committed state of a ref and never an uncommitted edit, reports --check as
+      exit 0 or 1, refuses a symlinked target with 73, and fails on an unknown ref with 66.
+    class: executable
+    check: tools/checks/skill.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#the-claude-skill
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      The script writes into the user's ~/.claude, where what an agent runs on must be a
+      released state somebody chose to install. Its two refusals — the working tree and a
+      symlink into it — are the whole point of it, and a script whose refusals nobody has
+      watched fire is not holding them. See ADR 0035.
 
   - id: RULE-IDX-001
     statement: "The index MUST be current with the working tree."
@@ -469,6 +488,46 @@ rules:
       README documented PORT that way, and this check is what finally caught it. An
       undocumented variable the app does read is a knob nobody can find, which is how
       CORS_ORIGINS, BOOTSTRAP_ADMIN and the rate-limit settings all shipped.
+
+  - id: RULE-SURF-003
+    statement: >
+      Every route the Claude skill names in its operation table
+      (integrations/claude/skills/runway/references/conventions.md, "Which operation for
+      what") MUST exist in ops/surfaces/openapi.json, and every mcp__runway__ tool it names
+      anywhere under integrations/claude/ MUST exist in ops/surfaces/mcp-tools.json. Lines
+      marked "if present" are exempt.
+    class: executable
+    check: tools/checks/skill.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#the-claude-skill
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      The skill is a consumer of the public surface that ships from this repository, so a
+      route rename can break it in the same pull request. RULE-SURF-001 makes the rename
+      visible; this rule makes the consumer it breaks visible too. "If present" is the
+      skill's own convention for operations a newer server may have, and the exemption keeps
+      that graceful degradation possible. See ADR 0035.
+
+  - id: RULE-SURF-004
+    statement: >
+      A change to anything under integrations/claude/skills/ MUST come with a raised
+      `version` in integrations/claude/.claude-plugin/plugin.json, recorded in
+      ops/skill-release.json.
+    class: executable
+    check: tools/checks/skill.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#the-claude-skill
+    fix: ./run surfaces --update
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Claude Code delivers a plugin update only when its version changes, so an edit without
+      a bump reaches nobody who installed the plugin — and nothing says so. The record holds a
+      content hash of the skill, which makes the check independent of any git base: it works
+      the same in CI, locally and in the fixture sandbox. `./run surfaces --update` refuses to
+      rewrite the record when the content changed and the version did not. See ADR 0035.
 
   - id: RULE-DEP-002
     statement: >

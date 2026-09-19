@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib.util
 import json
 import re
 import sqlite3
@@ -211,7 +212,23 @@ def update() -> int:
     for filename, (produce, label) in SURFACES.items():
         (SNAPSHOTS / filename).write_text(produce(), encoding="utf-8")
         print(f"  wrote {filename:<18} {label}")
-    return EX_OK
+    return _skill_release_update()
+
+
+def _skill_release_update() -> int:
+    """The Claude skill's release record — RULE-SURF-004, in tools/checks/skill_surface.py.
+
+    It lives with the snapshots' update because it is the same act: a reviewed change to
+    something outside consumers install. It refuses when the skill changed without a version
+    bump, so this command cannot be used to launder one.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "skill_surface", ROOT / "tools" / "checks" / "skill_surface.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return EX_OK if module.update() == 0 else EX_RULE
 
 
 def check() -> int:

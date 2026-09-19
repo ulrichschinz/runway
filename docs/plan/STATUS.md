@@ -370,7 +370,7 @@ Say *"where are we and how do we go on"*. The answer should be: read this file, 
 pick up at **16d's second half** — the Cold-Agent tests — which is the only implementation work left in the
 plan. Everything before it has landed on `main` and is deployed.
 
-Three things are queued behind it, none blocking, in the order they should be taken:
+Four things are queued behind it, none blocking, in the order they should be taken:
 
 1. ~~**The lock-drift rule**~~ — done 2026-09-19: `RULE-DEP-005`, [ADR 0034](../adr/0034-the-lock-must-match-the-intent.md),
    [brief 0027](../briefs/0027-the-lock-must-match-the-intent.md). A Dependabot pip PR now goes red until
@@ -380,8 +380,13 @@ Three things are queued behind it, none blocking, in the order they should be ta
 3. **`SHIM-SEC-006`**, expiring 2026-11-25 — decide from `audit.db`, counting only rows written after the
    2026-09-18 deploy, for the reason in the banner.
 
-**Fourteen Dependabot pull requests are open**, oldest from 2026-08-26. #35 (python 3.14) fails `verify`.
-#26 (fastapi-mcp) is superseded by PR #41 and should close itself. Python bumps now need `./run lock` on their branch; `RULE-DEP-005` fails them until it is run.
+4. **The Claude skill's follow-up** ([ADR 0035](../adr/0035-the-skill-lives-with-the-api-it-drives.md)) — a
+   download route serving the skill as a zip that matches the running server version, and a "Connect Claude"
+   block on the settings page (MCP command, skill download, standing rule to copy). Not started.
+
+**Dependabot is cleared as of 2026-09-19.** The small bumps were merged or taken by hand with their locks
+(#44, #45); node 26, pinia 4 and python 3.14 were closed as deferred major moves. Python bumps need
+`./run lock` on their branch; `RULE-DEP-005` fails them until it is run. Frontend locks: `tools/npm-lock.sh`.
 
 ### If you are the cold session, stop reading here
 

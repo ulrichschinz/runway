@@ -196,6 +196,9 @@ documented variable is unread or a read variable is undocumented.
 Updating a snapshot is not a way around the rule; it is the rule working. The diff is what makes a
 public-surface change something a human commits rather than something that happens.
 
+`--update` also rewrites `ops/skill-release.json`, the release record of the Claude skill, and refuses to
+when the skill changed without a raised version — see [The Claude skill](#the-claude-skill).
+
 ### `make lock`
 Regenerates `backend/requirements.lock` and `backend/requirements-dev.lock` from the `.txt` files, with
 artefact hashes. Requires `uv`.
@@ -497,6 +500,29 @@ it should be. Raising a number is allowed; doing it silently is not.
 design decision: `AppShell` reads the tasks and auth stores directly instead of receiving what it displays.
 Each carries an owner and a teardown path, and the ratchet fails if either is fixed but left declared.
 
+## The Claude skill
+
+`RULE-SURF-003`, `RULE-SURF-004`, `RULE-TEST-005`, all in `tools/checks/skill.sh`.
+[`integrations/claude/`](../integrations/claude/README.md) is a Claude Code plugin with one skill, `runway`,
+that drives this server over MCP. It is a consumer of the public surface that ships from this repository,
+so the gate holds it to that surface. Why it lives here: [ADR 0035](adr/0035-the-skill-lives-with-the-api-it-drives.md).
+
+| Rule | Fails when |
+|---|---|
+| `RULE-SURF-003` | a route in the skill's operation table (`references/conventions.md`, "Which operation for what") is not in `ops/surfaces/openapi.json`, or an `mcp__runway__…` name anywhere under `integrations/claude/` is not in `ops/surfaces/mcp-tools.json`. A line containing "if present" is exempt: that is how the skill names an operation a newer server may have |
+| `RULE-SURF-004` | anything under `integrations/claude/skills/` changed and `version` in `integrations/claude/.claude-plugin/plugin.json` did not rise. Plugin users receive an update only when the version changes |
+| `RULE-TEST-005` | `integrations/claude/install.sh` fails its test: it must install the committed state of a ref and never an uncommitted edit, answer `--check` with 0 or 1, refuse a symlinked target with 73, and fail on an unknown ref with 66 |
+
+`RULE-SURF-004` compares against `ops/skill-release.json` — the released version and a hash of `skills/` —
+rather than against a git base, so it gives the same answer in CI, locally and in the fixture sandbox. To
+ship a skill change: raise `version` (patch for wording, minor for a new mode or a newly used operation,
+major when older servers stop working), then `./run surfaces --update`, and commit both.
+
+**When a GTD API change lands, the skill changes in the same commit**: drop the matching "if present" or
+"older servers cannot" caveat, add the operation to the table, extend the permission allow-list in
+`references/setup.md`, and raise the version. Installation and updates for users:
+[`integrations/claude/README.md`](../integrations/claude/README.md).
+
 ## Gate conformance
 
 `RULE-GATE-002`. `tools/fixtures/negative.sh` constructs a genuine violation of every executable rule and
@@ -509,8 +535,8 @@ changes in flight.
 It reports two numbers, and they are not the same number:
 
 ```
-  49 fixture arm(s) passed, 0 failed
-  43 of 46 executable rules proven able to fail; 3 declare no automated fixture (…)
+  53 fixture arm(s) passed, 0 failed
+  46 of 49 executable rules proven able to fail; 3 declare no automated fixture (…)
 ```
 
 Several rules have more than one arm — `RULE-OPS-001` is proven twice, once for the subprocess and once for

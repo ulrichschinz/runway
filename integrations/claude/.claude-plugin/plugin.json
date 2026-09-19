@@ -1,0 +1,6 @@
+{
+  "name": "runway",
+  "description": "GTD task management with a self-hosted runway server: capture, clarify, daily and weekly review, project planning.",
+  "version": "0.2.1",
+  "author": { "name": "Ulrich Schinz" }
+}
