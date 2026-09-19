@@ -30,7 +30,7 @@ what they do.
 | duplicate check, overdue, "in no list" | list tasks (pending), filtered by project or tag where the server allows it |
 | capture unclarified | inbox post (description, optional note) |
 | counters for reviews and hooks | gtd summary, if present |
-| hidden ticklers | gtd tickler, if present |
+| hidden ticklers (future `wait`, soonest first) | gtd tickler (`gtd/tickler`) |
 | project plan | get plan / upsert plan |
 | change tags without reading first | modify task (`tasks/{uuid}`), `tags_add` / `tags_remove` |
 
@@ -101,17 +101,19 @@ gets one of: done, a new honest date, or no due date at all.
 
 Description states the expected thing ("Rückmeldung von Frau Berg zum Workshop-Termin").
 Annotation: who, what was asked, when, what counts as an answer. `scheduled` = the day to
-follow up. Do not use `wait` on waiting-for tasks: the weekly review needs the complete
-list of what others owe the user, including items that are not due yet.
+follow up. Do not use `wait` on waiting-for tasks: `scheduled` carries the follow-up;
+`wait` would hide the task from the project list and the daily review.
 
 ## Tickler
 
-Only `description` + `wait`. No tag, no project. When the date arrives the item shows up
-in the inbox and gets clarified like anything new — by then the user knows more.
+Only `description` + `wait`. No tag, no project. Listed by `gtd/tickler` until then. When
+the date arrives the item is back in the inbox and gets clarified like anything new — by
+then the user knows more.
 
 ## Recurring
 
-`recur` needs a `due` date; this is the one place where a due date on a routine is fine.
+`recur` needs a `due` date (the server answers 400 otherwise); this is the one place where a
+due date on a routine is fine.
 Do not create a recurring "do daily review" task: missed instances pile up and turn a
 habit into guilt.
 

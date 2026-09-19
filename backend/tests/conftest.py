@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings  # noqa: E402
-from app.services import task_runner  # noqa: E402
+from app.services import task_runner, task_service  # noqa: E402
 from tests.fake_task import FakeTaskCLI  # noqa: E402
 
 
@@ -85,6 +85,9 @@ def fake_task(monkeypatch: pytest.MonkeyPatch) -> FakeTaskCLI:
     """
     fake = FakeTaskCLI()
     monkeypatch.setattr(task_runner, "_run", fake.run)
+    # One clock for both sides: what the fake calls "now" is what the service calls "now".
+    # Read at call time, so a test can move `fake.now` forward.
+    monkeypatch.setattr(task_service, "_now", lambda: fake.now)
     return fake
 
 

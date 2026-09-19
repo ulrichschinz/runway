@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from typing import Literal
 
 from app.models import Task, TaskCreate, TaskModify
@@ -22,6 +23,33 @@ TAG_RE = re.compile(r"^(?:@|[^\W\d])[\w@.-]*$")
 # `-.x`, `-/a/`, `-[a]` and the like as description text, so `modify -1abc` would overwrite the
 # description and keep the tag (verified). Such a tag cannot be removed through runway (400).
 EXISTING_TAG_RE = re.compile(r"^(?:[^\W\d]|[@$#])[^\s():\"']*$")
+
+# Which tasks a list sees, against Taskwarrior 3.5 (ADR 0036). A task whose `wait` lies in the
+# future is hidden: `status:pending` no longer matches it, `status:waiting` does, and its export
+# still says "pending". So PENDING means visible, HIDDEN means parked until a future date, and
+# OPEN is both. Module constants, never interpolated: nothing a caller sends reaches them.
+PENDING = ["status:pending"]
+HIDDEN = ["status:waiting"]
+OPEN = ["(", "status:pending", "or", "status:waiting", ")"]
+
+# The GTD lists. The inbox is "no tag and no project": `project:` (empty) is "has no project";
+# `-project` would mean "not tagged `project`" on 3.5 and let every untagged project task in.
+GtdView = Literal["inbox", "next", "waiting", "someday", "tickler"]
+_VIEW_FILTERS: dict[str, list[str]] = {
+    "inbox": [*PENDING, "-TAGGED", "project:"],
+    "next": [*PENDING, "+next"],
+    "waiting": [*OPEN, "+waiting"],
+    "someday": [*PENDING, "+someday"],
+    "tickler": HIDDEN,
+}
+
+# At most this many tags in one list filter.
+MAX_FILTER_TAGS = 10
+
+
+def _now() -> datetime:
+    """The one clock (D10): the server's local time, aware. Tests replace it with the fake's."""
+    return datetime.now().astimezone()
 
 
 def _validate_uuid(uuid: str) -> str:
@@ -89,6 +117,14 @@ def _raw_to_task(raw: dict) -> Task:
         entry=raw.get("entry"),
         modified=raw.get("modified"),
     )
+
+
+def _tag_filters(tags: list[str] | None) -> list[str]:
+    """`+tag` filter tokens, AND-ed; each tag validated like one we would write (D3)."""
+    tags = list(tags or [])
+    if len(tags) > MAX_FILTER_TAGS:
+        raise ValueError(f"At most {MAX_FILTER_TAGS} tags per filter")
+    return [f"+{_validate_tag(t)}" for t in tags]
 
 
 def list_tasks(username: str, filter_args: list[str] | None = None) -> list[Task]:
@@ -275,8 +311,29 @@ def annotate_task(username: str, uuid: str, text: str) -> Task:
     return get_task(username, uuid)
 
 
+def gtd_list(username: str, view: GtdView, tags: list[str] | None = None) -> list[Task]:
+    """One GTD list, sorted by urgency; the tickler by `wait`, soonest first.
+
+    The tickler sorts on the stored `wait` string: Taskwarrior exports every date in the same
+    UTC basic format (`20300101T000000Z`), so string order is date order.
+    """
+    filters = [*_VIEW_FILTERS[view], *_tag_filters(tags)]
+    tasks = list_tasks(username, filters)
+    if view == "tickler":
+        tasks.sort(key=lambda t: t.wait or "")
+    return tasks
+
+
+def project_tasks(username: str, name: str, tags: list[str] | None = None) -> list[Task]:
+    """A project's visible tasks. `project:` is still Taskwarrior's prefix match here."""
+    return list_tasks(username, [*PENDING, f"project:{name}", *_tag_filters(tags)])
+
+
 def project_names(username: str) -> list[str]:
-    """Distinct project names across a user's pending tasks, in first-seen order.
+    """Distinct project names across a user's open tasks, in first-seen order.
+
+    Open includes tasks hidden by a future `wait`, so parking a project's only task in the
+    tickler no longer drops the project from the list.
 
     Exists so routers never reach the Taskwarrior adapter directly: every call to the
     subprocess goes through this layer, which is where validation lives. The GTD router
@@ -284,7 +341,7 @@ def project_names(username: str) -> list[str]:
     RULE-ARCH-001 now forbids.
     """
     seen: dict[str, None] = {}
-    for raw in task_runner.export_tasks(username, ["status:pending"]):
+    for raw in task_runner.export_tasks(username, OPEN):
         project = raw.get("project")
         if project:
             seen[project] = None

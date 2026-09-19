@@ -185,8 +185,10 @@ class TestStillUnvalidated:
         task_service.create_task("alice", TaskCreate(description="t", project="a b; c"))
         assert "project:a b; c" in _args_of(fake_task)
 
-    def test_date_fields_are_unvalidated(self, fake_task):
-        task_service.create_task("alice", TaskCreate(description="t", due="not a date at all"))
+    def test_date_fields_are_validated_by_taskwarrior_not_by_us(self, fake_task):
+        """The value reaches argv unvalidated; Taskwarrior is the validator (rc 2 → 400)."""
+        with pytest.raises(ValueError):
+            task_service.create_task("alice", TaskCreate(description="t", due="not a date at all"))
         assert "due:not a date at all" in _args_of(fake_task)
 
 
@@ -461,3 +463,156 @@ class TestEmptyStringClears:
         seeded = _seed(fake_task)
         with pytest.raises(ValueError, match="Invalid priority"):
             task_service.modify_task("alice", seeded["uuid"], TaskModify(priority="X"))
+
+
+class TestListFilters:
+    """The filters each GTD list sends (ADR 0036): constants, never caller input."""
+
+    @pytest.mark.parametrize(
+        "view,expected",
+        [
+            ("inbox", ["status:pending", "-TAGGED", "project:", "export"]),
+            ("next", ["status:pending", "+next", "export"]),
+            ("waiting", ["(", "status:pending", "or", "status:waiting", ")", "+waiting", "export"]),
+            ("someday", ["status:pending", "+someday", "export"]),
+            ("tickler", ["status:waiting", "export"]),
+        ],
+    )
+    def test_each_view_sends_its_filter(self, fake_task, view, expected):
+        task_service.gtd_list("alice", view)
+        assert _args_of(fake_task) == expected
+
+    def test_the_inbox_never_sends_minus_project(self, fake_task):
+        """`-project` is the tag `project` on 3.5 (D1), not "no project"."""
+        task_service.gtd_list("alice", "inbox")
+        assert "-project" not in _args_of(fake_task)
+
+    def test_the_constants_are_not_shared_mutable_state(self, fake_task):
+        before = list(task_service.OPEN)
+        task_service.gtd_list("alice", "waiting", tags=["@home"])
+        assert task_service.OPEN == before
+
+    def test_tags_narrow_a_list_and_are_anded(self, fake_task):
+        _seed(fake_task, description="both", tags=["next", "@home", "ar"])
+        _seed(fake_task, description="one", tags=["next", "@home"])
+        tasks = task_service.gtd_list("alice", "next", tags=["@home", "ar"])
+        assert [t.description for t in tasks] == ["both"]
+        assert _args_of(fake_task)[-3:] == ["+@home", "+ar", "export"]
+
+    @pytest.mark.parametrize("tag", ["-next", "a b", "rc.data.location=x", "1abc"])
+    def test_a_filter_tag_is_validated(self, fake_task, tag):
+        with pytest.raises(ValueError, match="Invalid tag"):
+            task_service.gtd_list("alice", "next", tags=[tag])
+        assert fake_task.calls == []
+
+    def test_at_most_ten_filter_tags(self, fake_task):
+        with pytest.raises(ValueError, match="At most 10"):
+            task_service.gtd_list("alice", "next", tags=[f"t{i}" for i in range(11)])
+
+    def test_project_tasks_is_still_the_prefix_filter(self, fake_task):
+        """Exact match (`project.is:`) and name validation arrive in P1-5 (D2)."""
+        task_service.project_tasks("alice", "alpha", tags=["next"])
+        assert _args_of(fake_task) == ["status:pending", "project:alpha", "+next", "export"]
+
+    def test_project_names_sees_open_tasks(self, fake_task):
+        _seed(fake_task, description="parked", project="dormant", wait="20261001T000000Z")
+        _seed(fake_task, description="done", project="closed", status="completed")
+        assert task_service.project_names("alice") == ["dormant"]
+        assert _args_of(fake_task)[:-1] == task_service.OPEN
+
+    def test_the_tickler_sorts_by_wait(self, fake_task):
+        for wait in ("20270105T000000Z", "20261231T000000Z", "20261001T080000Z"):
+            _seed(fake_task, description=wait, wait=wait, tags=["next"])
+        assert [t.wait for t in task_service.gtd_list("alice", "tickler")] == [
+            "20261001T080000Z",
+            "20261231T000000Z",
+            "20270105T000000Z",
+        ]
+
+    def test_the_clock_is_the_fakes(self, fake_task):
+        assert task_service._now() == fake_task.now
+
+
+class TestTheFakeRefusesWhatTheBinaryRefuses:
+    """The fake's refusals, each pinned against the binary in tests/container."""
+
+    def test_recur_without_due_is_a_rejection_and_changes_nothing(self, fake_task):
+        from app.services import task_runner
+
+        with pytest.raises(task_runner.TaskwarriorRejected, match="due"):
+            task_service.create_task("alice", TaskCreate(description="r", recur="weekly"))
+        assert fake_task.stores["alice"] == []
+
+        task = _seed(fake_task, description="r", recur="weekly", due="20261001T000000Z")
+        with pytest.raises(task_runner.TaskwarriorRejected):
+            task_service.modify_task("alice", task["uuid"], TaskModify(due=""))
+        assert task["due"] == "20261001T000000Z"
+
+    def test_a_bad_priority_is_a_rejection(self, fake_task):
+        from app.services import task_runner
+
+        with pytest.raises(task_runner.TaskwarriorRejected, match="priority"):
+            task_runner.add_task("alice", ["priority:X"], ["t"])
+
+    def test_a_tag_the_binary_would_read_as_text_is_refused(self, fake_task):
+        from app.services import task_runner
+
+        with pytest.raises(FakeTaskError):
+            task_runner.add_task("alice", ["+1abc"], ["t"])
+
+    @pytest.mark.parametrize(
+        "value,stored",
+        [
+            ("2026-10-01", "20261001T000000Z"),
+            ("2026-10-01T08:30", "20261001T083000Z"),
+            ("20261001T083000Z", "20261001T083000Z"),
+        ],
+    )
+    def test_the_date_forms(self, fake_task, value, stored):
+        task = task_service.create_task("alice", TaskCreate(description="t", until=value))
+        assert task.until == stored
+
+    def test_done_and_delete_set_end_to_the_clock(self, fake_task):
+        from app.services import task_runner
+
+        done = _seed(fake_task, description="done")
+        gone = _seed(fake_task, description="gone")
+        task_runner.done_task("alice", done["uuid"])
+        task_runner.delete_task("alice", gone["uuid"])
+        assert done["end"] == gone["end"] == "20260919T100000Z"
+
+    def test_project_prefix_exact_and_empty(self, fake_task):
+        from app.services import task_runner
+
+        for project in ("alpha", "alpha.sub", "alphabet", "beta"):
+            _seed(fake_task, description=project, project=project)
+        _seed(fake_task, description="none")
+
+        def names(filters):
+            return sorted(t["description"] for t in task_runner.export_tasks("alice", filters))
+
+        assert names(["project:alpha"]) == ["alpha", "alpha.sub", "alphabet"]
+        assert names(["project.is:alpha"]) == ["alpha"]
+        assert names(["project:"]) == ["none"]
+
+    def test_the_all_group_and_completed(self, fake_task):
+        from app.services import task_runner
+        from tests.fake_task import ALL
+
+        _seed(fake_task, description="open")
+        _seed(fake_task, description="hidden", wait="20261001T000000Z")
+        _seed(fake_task, description="done", status="completed")
+        _seed(fake_task, description="gone", status="deleted")
+
+        def names(filters):
+            return sorted(t["description"] for t in task_runner.export_tasks("alice", filters))
+
+        assert names(ALL) == ["done", "hidden", "open"]
+        assert names(["status:completed"]) == ["done"]
+        assert names(["+WAITING"]) == ["hidden"]
+
+    def test_an_unknown_filter_is_still_loud(self, fake_task):
+        from app.services import task_runner
+
+        with pytest.raises(FakeTaskError):
+            task_runner.export_tasks("alice", ["due.before:today"])

@@ -1843,6 +1843,65 @@
         ]
       }
     },
+    "/gtd/tickler": {
+      "get": {
+        "description": "Tasks hidden by a future wait date, soonest first. They return to their list (untagged ones to the inbox) when the date passes.",
+        "operationId": "tickler_gtd_tickler_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Task"
+                  },
+                  "title": "Response Tickler Gtd Tickler Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tickler",
+        "tags": [
+          "gtd"
+        ]
+      }
+    },
     "/gtd/waiting": {
       "get": {
         "description": "List tasks tagged +waiting \u2014 things delegated or blocked on someone/something else.",

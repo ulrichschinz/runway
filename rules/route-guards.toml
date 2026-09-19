@@ -94,6 +94,10 @@ route = "GET /gtd/someday"
 guard = "user"
 
 [[routes]]
+route = "GET /gtd/tickler"
+guard = "user"
+
+[[routes]]
 route = "GET /gtd/waiting"
 guard = "user"
 

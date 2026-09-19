@@ -392,6 +392,14 @@ error mapping. The container tier covers what only the binary can answer — urg
 coefficients, the storage format, and **cross-tenant isolation**, which rests entirely on three environment
 variables handed to a subprocess.
 
+The fake models what the GTD lists depend on, and nothing more (ADR 0036): a clock (`FakeTaskCLI(now=...)`,
+the same instant the fixture hands to `task_service._now`), three date forms stored in Taskwarrior's UTC basic
+format, **virtual waiting** (a pending task whose `wait` is after `now` is `status:waiting` / `+WAITING` and no
+longer `status:pending`, yet exports "pending"), the project filters (`project:` none, `project:X` prefix,
+`project.is:X` exact), `-word` as a tag exclusion, and the refusals Taskwarrior answers with exit code 2. Every
+one of those claims is pinned against the binary in `tests/container` (`TestWhatTheFakeClaims`,
+`TestListSemantics`); a filter it does not know still raises.
+
 The container tier **cannot run on arm64**: archlinux publishes no arm64 image and `pacman` fails under
 emulation. The check says so and passes; CI is x86_64 and runs it for real (`RISK-TEST-001`).
 

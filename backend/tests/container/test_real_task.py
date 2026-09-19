@@ -434,3 +434,192 @@ class TestRecurringInstances:
             if t.recur == "weekly" and t.uuid != target
         ]
         assert others and all("next" not in t.tags for t in others)
+
+
+class TestListSemantics:
+    """What the GTD lists mean on the real binary (ADR 0036).
+
+    A future `wait` hides a task: `status:pending` no longer matches it, `status:waiting` and
+    `+WAITING` do, and its export still says "pending". Every list used to filter on
+    `status:pending` alone, so a +waiting task with a future wait vanished from `/gtd/waiting`
+    and a project whose only task was parked vanished from `/gtd/projects`. The inbox used
+    `-project`, which on 3.5 means "not tagged `project`", so untagged project tasks landed in
+    the inbox.
+    """
+
+    FUTURE = "2030-06-01"
+    PAST = "2020-01-01"
+
+    @staticmethod
+    def _create(client, headers, **body):
+        body.setdefault("description", "a task")
+        r = client.post("/tasks", json=body, headers=headers)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    @staticmethod
+    def _names(client, headers, path):
+        r = client.get(path, headers=headers)
+        assert r.status_code == 200, r.text
+        return [t["description"] for t in r.json()]
+
+    def test_the_inbox_excludes_an_untagged_project_task(self, real_client):
+        """The D1 regression: `-project` let this task into the inbox."""
+        client, headers = real_client
+        self._create(client, headers, description="loose")
+        self._create(client, headers, description="planned", project="alpha")
+        self._create(client, headers, description="tagged", tags=["next"])
+        assert self._names(client, headers, "/gtd/inbox") == ["loose"]
+
+    def test_a_future_wait_hides_a_task_from_every_visible_list(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="inbox later", wait=self.FUTURE)
+        self._create(client, headers, description="next later", tags=["next"], wait=self.FUTURE)
+        self._create(
+            client, headers, description="someday later", tags=["someday"], wait=self.FUTURE
+        )
+        self._create(client, headers, description="alpha later", project="alpha", wait=self.FUTURE)
+        self._create(client, headers, description="alpha now", project="alpha")
+        assert self._names(client, headers, "/gtd/inbox") == []
+        assert self._names(client, headers, "/gtd/next") == []
+        assert self._names(client, headers, "/gtd/someday") == []
+        assert self._names(client, headers, "/gtd/projects/alpha") == ["alpha now"]
+
+    def test_a_past_wait_shows_the_task_normally(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="back", wait=self.PAST)
+        self._create(client, headers, description="back next", tags=["next"], wait=self.PAST)
+        assert self._names(client, headers, "/gtd/inbox") == ["back"]
+        assert self._names(client, headers, "/gtd/next") == ["back next"]
+        assert self._names(client, headers, "/gtd/tickler") == []
+
+    def test_waiting_includes_a_waiting_task_with_a_future_wait(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="reply due", tags=["waiting"])
+        self._create(client, headers, description="reply later", tags=["waiting"], wait=self.FUTURE)
+        self._create(client, headers, description="parked", wait=self.FUTURE)
+        assert sorted(self._names(client, headers, "/gtd/waiting")) == ["reply due", "reply later"]
+
+    def test_a_project_whose_only_task_is_hidden_is_still_listed(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="parked", project="dormant", wait=self.FUTURE)
+        assert "dormant" in client.get("/gtd/projects", headers=headers).json()
+
+    def test_the_tickler_lists_hidden_tasks_soonest_first(self, real_client):
+        """Across month and year boundaries, and whatever the urgency says."""
+        client, headers = real_client
+        self._create(client, headers, description="jan 2031", wait="2031-01-05")
+        self._create(client, headers, description="dec 2030", tags=["next"], wait="2030-12-31")
+        self._create(client, headers, description="feb 2030", priority="L", wait="2030-02-01")
+        self._create(client, headers, description="visible")
+        self._create(client, headers, description="over", wait=self.PAST)
+        r = client.get("/gtd/tickler", headers=headers)
+        assert r.status_code == 200, r.text
+        assert [t["description"] for t in r.json()] == ["feb 2030", "dec 2030", "jan 2031"]
+        assert {t["status"] for t in r.json()} == {"pending"}, "status stays Taskwarrior's"
+
+    def test_a_future_scheduled_date_does_not_hide_a_task(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="start later", scheduled=self.FUTURE)
+        assert self._names(client, headers, "/gtd/inbox") == ["start later"]
+        assert self._names(client, headers, "/gtd/tickler") == []
+
+    def test_a_recurring_task_without_a_due_date_is_refused(self, real_client):
+        client, headers = real_client
+        with pytest.raises(ValueError, match="due"):
+            task_service.create_task("alice", TaskCreate(description="r", recur="weekly"))
+        r = client.post("/tasks", json={"description": "r", "recur": "weekly"}, headers=headers)
+        assert r.status_code == 400, r.text
+
+
+class TestWhatTheFakeClaims:
+    """Each claim ``tests/fake_task.py`` makes about the binary, pinned against the binary.
+
+    Written against `task_runner` directly, so the filter tokens are exactly the ones the fake
+    interprets; the unit tier trusts the fake only as far as this class reaches.
+    """
+
+    @staticmethod
+    def _add(mods, text="t"):
+        from app.services import task_runner
+
+        task_runner.add_task("alice", mods, [text])
+        return task_runner.export_latest("alice")[0]
+
+    @staticmethod
+    def _descriptions(filters):
+        from app.services import task_runner
+
+        return sorted(t["description"] for t in task_runner.export_tasks("alice", filters))
+
+    def test_hidden_is_status_waiting_and_plus_waiting_yet_exports_pending(self):
+        hidden = self._add(["wait:2030-01-01"], "hidden")
+        self._add([], "visible")
+        assert hidden["status"] == "pending"
+        assert self._descriptions(["status:pending"]) == ["visible"]
+        assert self._descriptions(["status:waiting"]) == ["hidden"]
+        assert self._descriptions(["+WAITING"]) == ["hidden"]
+        assert self._descriptions(task_service.OPEN) == ["hidden", "visible"]
+
+    def test_project_colon_is_a_prefix_match_and_project_is_exact(self):
+        for project in ("alpha", "alpha.sub", "alphabet", "beta"):
+            self._add([f"project:{project}"], project)
+        self._add([], "none")
+        assert self._descriptions(["project:alpha"]) == ["alpha", "alpha.sub", "alphabet"]
+        assert self._descriptions(["project.is:alpha"]) == ["alpha"]
+        assert self._descriptions(["project:"]) == ["none"]
+
+    def test_minus_word_excludes_a_tag_and_minus_project_is_not_the_project(self):
+        self._add(["+foo"], "foo")
+        self._add(["project:p"], "in p")
+        self._add([], "plain")
+        assert self._descriptions(["-foo"]) == ["in p", "plain"]
+        assert self._descriptions(["-project"]) == ["foo", "in p", "plain"]
+        assert self._descriptions(["-TAGGED"]) == ["in p", "plain"]
+
+    def test_completed_and_the_all_group(self):
+        from app.services import task_runner
+
+        done = self._add([], "done")
+        gone = self._add([], "gone")
+        self._add(["wait:2030-01-01"], "hidden")
+        task_runner.done_task("alice", done["uuid"])
+        task_runner.delete_task("alice", gone["uuid"])
+        assert self._descriptions(["status:completed"]) == ["done"]
+        all_group = ["(", "status:pending", "or", "status:waiting", "or", "status:completed", ")"]
+        assert self._descriptions(all_group) == ["done", "hidden"]
+
+    def test_done_and_delete_set_end(self):
+        from app.services import task_runner
+
+        done = self._add([], "done")
+        gone = self._add([], "gone")
+        task_runner.done_task("alice", done["uuid"])
+        task_runner.delete_task("alice", gone["uuid"])
+        for uuid in (done["uuid"], gone["uuid"]):
+            assert task_runner.export_tasks("alice", [uuid])[0]["end"]
+
+    @pytest.mark.parametrize(
+        "value,stored",
+        [
+            ("2030-01-01", "20300101T000000Z"),
+            ("2030-01-01T10:30", "20300101T103000Z"),
+            ("20300101T120000Z", "20300101T120000Z"),
+        ],
+    )
+    def test_the_date_forms_the_fake_accepts(self, value, stored):
+        """Under TZ=UTC, which is what the shipped image runs and what the fake assumes."""
+        for field in ("due", "scheduled", "wait", "until"):
+            task = self._add([f"{field}:{value}"], field)
+            assert task[field] == stored, field
+
+    def test_a_bad_priority_is_a_rejection(self):
+        from app.services import task_runner
+
+        with pytest.raises(task_runner.TaskwarriorRejected, match="priority"):
+            task_runner.add_task("alice", ["priority:X"], ["t"])
+
+    def test_a_tag_with_a_leading_digit_becomes_text(self):
+        """Why the fake refuses `+1abc` rather than storing it as a tag."""
+        task = self._add(["+1abc"], "t")
+        assert task.get("tags", []) == []

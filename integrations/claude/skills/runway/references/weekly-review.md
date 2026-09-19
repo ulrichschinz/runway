@@ -12,7 +12,7 @@ steps below where it calls for them.
 
 ## Prepare (you, silently)
 
-Summary (if available), inbox, next, waiting, someday, projects, tickler (if available),
+Summary (if available), inbox, next, waiting, someday, projects, tickler,
 tasks completed in the last seven days (only if the server can filter by completion date —
 do not pull the whole history).
 

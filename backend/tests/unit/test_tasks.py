@@ -50,7 +50,8 @@ class TestCreate:
         assert task["project"] == "runway"
         assert set(task["tags"]) == {"next", "work"}
         assert task["priority"] == "H"
-        assert task["due"] == "2026-09-01"
+        # Stored as Taskwarrior stores it: UTC basic format (the fake models the TZ=UTC image).
+        assert task["due"] == "20260901T000000Z"
         assert task["status"] == "pending"
 
     @pytest.mark.parametrize("priority", ["X", "high", "h"])
@@ -74,7 +75,14 @@ class TestCreate:
 
     @pytest.mark.parametrize("recur", ["daily", "weekly", "2d", "3 weeks"])
     def test_accepts_recognised_recurrence_values(self, client, auth, recur):
-        assert _create(client, auth, description=f"r {recur}", recur=recur)["uuid"]
+        task = _create(client, auth, description=f"r {recur}", recur=recur, due="2026-10-01")
+        assert task["uuid"]
+
+    def test_a_recurring_task_without_a_due_date_is_a_400(self, client, auth):
+        """Taskwarrior refuses it (rc 2); it used to be a 500."""
+        r = client.post("/tasks", json={"description": "r", "recur": "weekly"}, headers=auth)
+        assert r.status_code == 400, r.text
+        assert "due" in r.json()["detail"]
 
     @pytest.mark.parametrize("recur", ["whenever", "1 fortnight", "; rm -rf /"])
     def test_rejects_an_unrecognised_recurrence_value(self, client, auth, recur):
@@ -220,12 +228,17 @@ class TestTagsAreAFullSet:
 
 class TestEmptyStringClears:
     @pytest.mark.parametrize(
-        "field,value",
-        [("project", "p"), ("priority", "H"), ("due", "2026-09-01"), ("wait", "2026-09-01")],
+        "field,value,stored",
+        [
+            ("project", "p", "p"),
+            ("priority", "H", "H"),
+            ("due", "2026-09-01", "20260901T000000Z"),
+            ("wait", "2026-09-01", "20260901T000000Z"),
+        ],
     )
-    def test_an_empty_string_clears_the_field(self, client, auth, field, value):
+    def test_an_empty_string_clears_the_field(self, client, auth, field, value, stored):
         task = _create(client, auth, **{field: value})
-        assert task[field] == value
+        assert task[field] == stored
         r = client.put(f"/tasks/{task['uuid']}", json={field: ""}, headers=auth)
         assert r.status_code == 200, r.text
         assert r.json()[field] is None

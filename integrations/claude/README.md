@@ -136,12 +136,13 @@ Design decisions worth knowing before changing anything:
 - **It refers to operations by what they do**, with today's route next to it
   (`references/conventions.md`, "Which operation for what"). MCP tool names are FastAPI
   operation ids and a public surface; every route named there has to exist.
-- **It degrades gracefully.** Newer operations (summary, tickler, filters)
+- **It degrades gracefully.** Newer operations (summary, filters)
   are used "if present"; on older servers the skill falls back or says plainly what the
   server cannot do. It never works around a gap by deleting and recreating tasks.
 - **Server semantics it depends on**: inbox = no project and no tag; `next`, `waiting`,
-  `someday` as plain tags; contexts as `@tags`; `wait` hides a task (tickler), `scheduled`
-  carries follow-up dates; empty string clears a field; projects cannot be renamed and
+  `someday` as plain tags; contexts as `@tags`; `wait` hides a task from every task list but
+  waiting until the date (the tickler, `gtd/tickler`, lists it), `scheduled` carries
+  follow-up dates; empty string clears a field; projects cannot be renamed and
   unknown project names are accepted silently. If one of these changes, the skill changes
   in the same commit.
 - **Contexts are the main filter.** There is deliberately no work/private split; GTD keeps
