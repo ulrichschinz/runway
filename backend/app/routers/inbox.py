@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.dependencies import get_current_user
@@ -28,15 +28,22 @@ async def webhook_inbox(
 ):
     from app.models import TaskCreate
 
-    task = task_service.create_task(
-        username,
-        TaskCreate(
-            description=item.description,
-            priority=item.priority,
-        ),
-    )
+    # Same mapping as the other task routers: a bad priority or a value Taskwarrior refuses
+    # (rc 2) is the caller's error, 400; a failing binary is a 500. Unmapped, both were 500.
+    try:
+        task = task_service.create_task(
+            username,
+            TaskCreate(
+                description=item.description,
+                priority=item.priority,
+            ),
+        )
 
-    if item.note:
-        task_service.annotate_task(username, task.uuid, item.note)
+        if item.note:
+            task_service.annotate_task(username, task.uuid, item.note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     return {"uuid": task.uuid, "description": task.description}

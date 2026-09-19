@@ -190,6 +190,23 @@ Three controls, in order of how much they are relied on:
    point only works while it stays the only door, and a second caller would bypass both
    controls above with nothing going red.
 
+**How the boundary reports failure.** `_run` reads Taskwarrior's exit code: 0 and 1 are
+success (1 is "nothing matched"). **2 is Taskwarrior's generic error code.** Mostly it is
+Taskwarrior refusing the input — an unparseable date, a priority outside `H`/`M`/`L`, `recur`
+without `due`, stripping `recur` or `due` from a recurring task — and `_run` raises
+`TaskwarriorRejected`, a `ValueError`, so every router answers 400 with Taskwarrior's stderr as
+the detail. But 3.5.0 also exits 2 when it cannot reach its own store: a missing rc file, a
+data directory it cannot create, and every sqlite failure (unable to open, read-only, corrupt,
+locked), which it reports with sqlite's `Error code N`. Those are the server's fault and their
+stderr can name the absolute data path, so when the stderr matches `_SYSTEM_FAULT` `_run` logs
+it and raises a `RuntimeError` with a generic message: 500, no path. Any other code stays a
+`RuntimeError`, 500. Until this, all of them were 500. The stderr of the input refusals checked
+names the offending value and nothing about the server, no data path (checked on 3.5.0, pinned
+in `tests/container`); the no-path claim covers those refusals only. The
+binary never inherits the server's stdin (`/dev/null`), and `rc.recurrence.confirmation=no`
+is one of `_run`'s own overrides: modifying one instance of a recurring task otherwise asks
+whether to modify all of them and, on a terminal, waited for an answer until the timeout.
+
 Reading back a created task uses Taskwarrior's `+LATEST` virtual tag rather than re-querying
 by description. The old form put user text into a *filter* position — the one place `--`
 cannot protect — so the same string was an injection surface twice, and it returned the wrong

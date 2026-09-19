@@ -91,7 +91,8 @@ it has one.
 | `wait` | hide completely until this date | tickler only |
 | `until` | task expires by itself | rarely |
 
-Use ISO dates (`2026-09-25`). To clear a date, send an empty string.
+Use ISO dates (`2026-09-25`). An empty string clears project, priority, due, scheduled,
+wait, until and recur; a recurring task keeps its recur and due.
 
 A pile of overdue `due` dates is a symptom of wish dates. In a review, each overdue item
 gets one of: done, a new honest date, or no due date at all.
@@ -122,5 +123,5 @@ agent" stamps.
 
 ## Priority
 
-New tasks get priority `M` from the server by default. Do not set priorities unless the
-user asks; GTD chooses by context, time and energy first.
+New tasks have no priority. Do not set one unless the user asks; clear it with an empty
+string. GTD chooses by context, time and energy first.

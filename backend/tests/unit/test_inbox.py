@@ -84,3 +84,40 @@ class TestWebhook:
         r = client.get("/auth/me", headers={"Authorization": f"Bearer {registered['api_key']}"})
         assert r.status_code == 200
         assert r.json()["username"] == registered["username"]
+
+
+class TestWebhookErrors:
+    """The route had no error mapping: an invalid priority was a 500 (D6)."""
+
+    def test_an_invalid_priority_is_a_400(self, client, registered):
+        r = client.post(
+            "/inbox",
+            json={"description": "x", "priority": "X"},
+            headers={"X-Api-Key": registered["api_key"]},
+        )
+        assert r.status_code == 400
+        assert "Invalid priority" in r.json()["detail"]
+
+    def test_a_rejection_by_taskwarrior_is_a_400(self, client, registered, fake_task, monkeypatch):
+        from app.services import task_runner
+
+        def run(username, args, text=None):
+            raise task_runner.TaskwarriorRejected("rejected")
+
+        monkeypatch.setattr(task_runner, "_run", run)
+        r = client.post(
+            "/inbox", json={"description": "x"}, headers={"X-Api-Key": registered["api_key"]}
+        )
+        assert r.status_code == 400
+
+    def test_a_failure_of_the_binary_is_a_500(self, client, registered, fake_task, monkeypatch):
+        from app.services import task_runner
+
+        def run(username, args, text=None):
+            raise RuntimeError("database is locked")
+
+        monkeypatch.setattr(task_runner, "_run", run)
+        r = client.post(
+            "/inbox", json={"description": "x"}, headers={"X-Api-Key": registered["api_key"]}
+        )
+        assert r.status_code == 500

@@ -636,6 +636,20 @@ What would have caught it: a test that removes something. The unit fake removed 
 correctly, but no test ever sent a shorter set and looked at the result. Both tiers now do
 ([brief 0030](briefs/0030-tags-are-a-full-set.md)).
 
+## Defect fixed 2026-09-19: the web UI could not clear a field, nor anyone a priority
+
+Until this date, emptying a date, the project or the priority in the web UI and saving returned 200 and
+changed nothing: the form sent `null` for every empty field, which the API reads as "unchanged". Over REST
+and MCP an empty string cleared dates and the project, but a priority could not be cleared at all (`""` was
+an invalid priority, 400), and on create `project: ""` was sent through to Taskwarrior. Separately, every
+input Taskwarrior itself refused (exit code 2: a bad date, `recur` without `due`) came back as a 500, and
+the inbox webhook turned an invalid priority into a 500. In production from the first release; no data was
+lost.
+
+What would have caught it: a test that clears something through the same payload the UI builds. The payload
+is now a pure, tested function (`frontend/src/shared/taskPayload.js`), and both backend tiers clear every
+field ([brief 0031](briefs/0031-empty-string-clears.md)).
+
 ## Incident 2026-08-25
 
 Every container test failed on a backend nobody had touched:

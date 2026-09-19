@@ -461,6 +461,7 @@
         "properties": {
           "depends": {
             "default": [],
+            "description": "UUIDs of tasks that must be done first.",
             "items": {
               "type": "string"
             },
@@ -468,6 +469,7 @@
             "type": "array"
           },
           "description": {
+            "description": "What the task is, as free text. Never parsed for tags or attributes.",
             "title": "Description",
             "type": "string"
           },
@@ -480,6 +482,7 @@
                 "type": "null"
               }
             ],
+            "description": "Hard deadline only: the date by which it must be done. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
             "title": "Due"
           },
           "priority": {
@@ -491,6 +494,7 @@
                 "type": "null"
               }
             ],
+            "description": "`H`, `M` or `L`. New tasks have no priority unless one is given. Empty means none.",
             "title": "Priority"
           },
           "project": {
@@ -502,6 +506,7 @@
                 "type": "null"
               }
             ],
+            "description": "Project name; dots nest subprojects (`home.garden`). Empty means none.",
             "title": "Project"
           },
           "recur": {
@@ -513,6 +518,7 @@
                 "type": "null"
               }
             ],
+            "description": "Repeat interval: `daily`, `weekly`, `monthly`, `yearly`, or e.g. `2d`, `3 weeks`. Needs `due`.",
             "title": "Recur"
           },
           "scheduled": {
@@ -524,10 +530,12 @@
                 "type": "null"
               }
             ],
+            "description": "Earliest start, or the day to follow up; does not hide the task. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
             "title": "Scheduled"
           },
           "tags": {
             "default": [],
+            "description": "Tags, written without `+`. Status tags are `next`, `waiting`, `someday`; contexts are `@name` (`@home`).",
             "items": {
               "type": "string"
             },
@@ -543,6 +551,7 @@
                 "type": "null"
               }
             ],
+            "description": "The task expires and is deleted after this date. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
             "title": "Until"
           },
           "wait": {
@@ -554,6 +563,7 @@
                 "type": "null"
               }
             ],
+            "description": "Hides the task from every list until this date (tickler). `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
             "title": "Wait"
           }
         },
@@ -577,6 +587,7 @@
                 "type": "null"
               }
             ],
+            "description": "The complete set of UUIDs of tasks that must be done first: a UUID not listed is dropped. An empty list clears it; null or omitted leaves it unchanged.",
             "title": "Depends"
           },
           "description": {
@@ -588,6 +599,7 @@
                 "type": "null"
               }
             ],
+            "description": "What the task is, as free text. Never parsed for tags or attributes. Null or omitted leaves it unchanged.",
             "title": "Description"
           },
           "due": {
@@ -599,6 +611,7 @@
                 "type": "null"
               }
             ],
+            "description": "Hard deadline only: the date by which it must be done. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged. A recurring task cannot lose it (400).",
             "title": "Due"
           },
           "priority": {
@@ -610,6 +623,7 @@
                 "type": "null"
               }
             ],
+            "description": "`H`, `M` or `L`. New tasks have no priority unless one is given. On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Priority"
           },
           "project": {
@@ -621,6 +635,7 @@
                 "type": "null"
               }
             ],
+            "description": "Project name; dots nest subprojects (`home.garden`). On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Project"
           },
           "recur": {
@@ -632,6 +647,7 @@
                 "type": "null"
               }
             ],
+            "description": "Repeat interval: `daily`, `weekly`, `monthly`, `yearly`, or e.g. `2d`, `3 weeks`. Needs `due`. On modify, an empty string clears it; null or omitted leaves it unchanged. A recurring task cannot lose it (400).",
             "title": "Recur"
           },
           "scheduled": {
@@ -643,6 +659,7 @@
                 "type": "null"
               }
             ],
+            "description": "Earliest start, or the day to follow up; does not hide the task. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Scheduled"
           },
           "tags": {
@@ -657,6 +674,7 @@
                 "type": "null"
               }
             ],
+            "description": "The complete tag set, written without `+`: tags not listed are removed, so this overwrites changes made elsewhere. To change single tags use `tags_add` / `tags_remove`.",
             "title": "Tags"
           },
           "tags_add": {
@@ -700,6 +718,7 @@
                 "type": "null"
               }
             ],
+            "description": "The task expires and is deleted after this date. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Until"
           },
           "wait": {
@@ -711,6 +730,7 @@
                 "type": "null"
               }
             ],
+            "description": "Hides the task from every list until this date (tickler). `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Wait"
           }
         },

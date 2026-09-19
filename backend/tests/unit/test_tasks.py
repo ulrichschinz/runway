@@ -53,11 +53,18 @@ class TestCreate:
         assert task["due"] == "2026-09-01"
         assert task["status"] == "pending"
 
-    @pytest.mark.parametrize("priority", ["X", "high", "h", ""])
+    @pytest.mark.parametrize("priority", ["X", "high", "h"])
     def test_rejects_an_unknown_priority(self, client, auth, priority):
         r = client.post("/tasks", json={"description": "x", "priority": priority}, headers=auth)
         assert r.status_code == 400
         assert "Invalid priority" in r.json()["detail"]
+
+    def test_an_empty_priority_means_none_given(self, client, auth):
+        """On create `""` is "not given" for every field (D7); it used to be a 400."""
+        task = _create(client, auth, priority="", project="", due="")
+        assert task["priority"] is None
+        assert task["project"] is None
+        assert task["due"] is None
 
     @pytest.mark.parametrize("tag", ["has space", "semi;colon", "pipe|char", "$(whoami)"])
     def test_rejects_a_tag_outside_the_allowed_character_set(self, client, auth, tag):
@@ -209,3 +216,56 @@ class TestTagsAreAFullSet:
         many = [f"t{i}" for i in range(51)]
         r = client.put(f"/tasks/{task['uuid']}", json={"tags_add": many}, headers=auth)
         assert r.status_code == 422
+
+
+class TestEmptyStringClears:
+    @pytest.mark.parametrize(
+        "field,value",
+        [("project", "p"), ("priority", "H"), ("due", "2026-09-01"), ("wait", "2026-09-01")],
+    )
+    def test_an_empty_string_clears_the_field(self, client, auth, field, value):
+        task = _create(client, auth, **{field: value})
+        assert task[field] == value
+        r = client.put(f"/tasks/{task['uuid']}", json={field: ""}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json()[field] is None
+
+    def test_null_still_means_unchanged(self, client, auth):
+        task = _create(client, auth, priority="H")
+        r = client.put(f"/tasks/{task['uuid']}", json={"priority": None}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json()["priority"] == "H"
+
+
+class TestTaskwarriorRejections:
+    """Exit code 2 is Taskwarrior refusing the input: the caller's error, so 400 (D6)."""
+
+    @staticmethod
+    def _rejecting(fake_task, monkeypatch, message):
+        from app.services import task_runner
+
+        real = fake_task.run
+
+        def run(username, args, text=None):
+            if "modify" in args or "add" in args:
+                raise task_runner.TaskwarriorRejected(message)
+            return real(username, args, text)
+
+        monkeypatch.setattr(task_runner, "_run", run)
+
+    def test_a_rejected_modify_is_a_400_with_the_reason(self, client, auth, fake_task, monkeypatch):
+        task = _create(client, auth)
+        self._rejecting(
+            fake_task, monkeypatch, "You cannot remove the recurrence from a recurring task."
+        )
+        r = client.put(f"/tasks/{task['uuid']}", json={"recur": ""}, headers=auth)
+        assert r.status_code == 400
+        assert r.json()["detail"] == "You cannot remove the recurrence from a recurring task."
+
+    def test_a_rejected_create_is_a_400(self, client, auth, fake_task, monkeypatch):
+        self._rejecting(
+            fake_task, monkeypatch, "'notadate' is not a valid date in the 'Y-M-D' format."
+        )
+        r = client.post("/tasks", json={"description": "x", "due": "notadate"}, headers=auth)
+        assert r.status_code == 400
+        assert "not a valid date" in r.json()["detail"]

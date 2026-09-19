@@ -33,30 +33,64 @@ class Task(BaseModel):
     modified: str | None = None
 
 
+# Field descriptions reach MCP clients through the OpenAPI schema, so they are the only
+# documentation an agent sees. Generic on purpose (RISK-MCP-002): what a field means and
+# accepts, nothing about the deployment.
+_DATE_FORMAT = "`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time."
+_CLEARS = "On modify, an empty string clears it; null or omitted leaves it unchanged."
+_RECURRING_KEEPS = "A recurring task cannot lose it (400)."
+
+_D_DESCRIPTION = "What the task is, as free text. Never parsed for tags or attributes."
+_D_PROJECT = "Project name; dots nest subprojects (`home.garden`)."
+_D_PRIORITY = "`H`, `M` or `L`. New tasks have no priority unless one is given."
+_D_DUE = f"Hard deadline only: the date by which it must be done. {_DATE_FORMAT}"
+_D_SCHEDULED = f"Earliest start, or the day to follow up; does not hide the task. {_DATE_FORMAT}"
+_D_WAIT = f"Hides the task from every list until this date (tickler). {_DATE_FORMAT}"
+_D_UNTIL = f"The task expires and is deleted after this date. {_DATE_FORMAT}"
+_D_RECUR = (
+    "Repeat interval: `daily`, `weekly`, `monthly`, `yearly`, or e.g. `2d`, `3 weeks`. Needs `due`."
+)
+_D_TAGS_CREATE = (
+    "Tags, written without `+`. Status tags are `next`, `waiting`, `someday`; contexts are "
+    "`@name` (`@home`)."
+)
+_D_TAGS_MODIFY = (
+    "The complete tag set, written without `+`: tags not listed are removed, so this "
+    "overwrites changes made elsewhere. To change single tags use `tags_add` / `tags_remove`."
+)
+_D_DEPENDS = "UUIDs of tasks that must be done first."
+
+
 class TaskCreate(BaseModel):
-    description: str
-    project: str | None = None
-    tags: list[str] = []
-    priority: str | None = None  # H, M, L
-    due: str | None = None
-    scheduled: str | None = None
-    wait: str | None = None
-    until: str | None = None
-    recur: str | None = None
-    depends: list[str] = []
+    description: str = Field(description=_D_DESCRIPTION)
+    project: str | None = Field(default=None, description=f"{_D_PROJECT} Empty means none.")
+    tags: list[str] = Field(default=[], description=_D_TAGS_CREATE)
+    priority: str | None = Field(default=None, description=f"{_D_PRIORITY} Empty means none.")
+    due: str | None = Field(default=None, description=_D_DUE)
+    scheduled: str | None = Field(default=None, description=_D_SCHEDULED)
+    wait: str | None = Field(default=None, description=_D_WAIT)
+    until: str | None = Field(default=None, description=_D_UNTIL)
+    recur: str | None = Field(default=None, description=_D_RECUR)
+    depends: list[str] = Field(default=[], description=_D_DEPENDS)
 
 
 class TaskModify(BaseModel):
-    description: str | None = None
-    project: str | None = None
-    tags: list[str] | None = None
-    priority: str | None = None
-    due: str | None = None
-    scheduled: str | None = None
-    wait: str | None = None
-    until: str | None = None
-    recur: str | None = None
-    depends: list[str] | None = None
+    description: str | None = Field(
+        default=None, description=f"{_D_DESCRIPTION} Null or omitted leaves it unchanged."
+    )
+    project: str | None = Field(default=None, description=f"{_D_PROJECT} {_CLEARS}")
+    tags: list[str] | None = Field(default=None, description=_D_TAGS_MODIFY)
+    priority: str | None = Field(default=None, description=f"{_D_PRIORITY} {_CLEARS}")
+    due: str | None = Field(default=None, description=f"{_D_DUE} {_CLEARS} {_RECURRING_KEEPS}")
+    scheduled: str | None = Field(default=None, description=f"{_D_SCHEDULED} {_CLEARS}")
+    wait: str | None = Field(default=None, description=f"{_D_WAIT} {_CLEARS}")
+    until: str | None = Field(default=None, description=f"{_D_UNTIL} {_CLEARS}")
+    recur: str | None = Field(default=None, description=f"{_D_RECUR} {_CLEARS} {_RECURRING_KEEPS}")
+    depends: list[str] | None = Field(
+        default=None,
+        description="The complete set of UUIDs of tasks that must be done first: a UUID not "
+        "listed is dropped. An empty list clears it; null or omitted leaves it unchanged.",
+    )
     tags_add: list[str] | None = Field(
         default=None,
         max_length=50,

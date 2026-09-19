@@ -317,3 +317,120 @@ class TestTagsAreAFullSet:
             "alice", task.uuid, TaskModify(tags_remove=["someday"], tags_add=["next"])
         )
         assert task.tags == ["next"]
+
+
+class TestEmptyStringClears:
+    """`""` on modify emits `field:`, and the real binary removes the attribute (D7).
+
+    Also pins what the rc 2 mapping rests on: Taskwarrior refuses to strip a recurring task
+    of `recur` or `due`, and refuses a date it cannot parse, with exit code 2.
+    """
+
+    FULL = {
+        "project": "p",
+        "priority": "H",
+        "due": "2030-01-01",
+        "scheduled": "2029-12-01",
+        "wait": "2020-01-01",
+        "until": "2030-02-01",
+    }
+
+    @pytest.mark.parametrize("field", list(FULL))
+    def test_each_field_is_cleared_for_real(self, real_client, field):
+        client, headers = real_client
+        r = client.post("/tasks", json={"description": "full", **self.FULL}, headers=headers)
+        assert r.status_code == 201, r.text
+        task = r.json()
+        assert task[field], f"{field} was not set to begin with"
+        r = client.put(f"/tasks/{task['uuid']}", json={field: ""}, headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json()[field] is None
+        kept = {k for k in self.FULL if k != field and r.json()[k]}
+        assert kept == set(self.FULL) - {field}, "clearing one field touched another"
+        assert r.json()["description"] == "full"
+
+    def test_create_with_empty_strings_sets_nothing(self, real_client):
+        client, headers = real_client
+        body = {"description": "bare", **dict.fromkeys(self.FULL, ""), "recur": ""}
+        r = client.post("/tasks", json=body, headers=headers)
+        assert r.status_code == 201, r.text
+        for field in [*self.FULL, "recur"]:
+            assert r.json()[field] is None, field
+
+    def test_clearing_recur_on_a_plain_task_is_a_no_op(self, real_client):
+        client, headers = real_client
+        task = client.post("/tasks", json={"description": "plain"}, headers=headers).json()
+        r = client.put(f"/tasks/{task['uuid']}", json={"recur": ""}, headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["recur"] is None
+
+    @pytest.mark.parametrize("field", ["recur", "due"])
+    def test_a_recurring_task_cannot_lose_recur_or_due(self, field):
+        from app.models import TaskModify
+
+        task_service.create_task(
+            "alice", TaskCreate(description="rent", recur="monthly", due="2030-01-01")
+        )
+        instance = task_service.list_tasks("alice", ["status:pending"])[0]
+        assert instance.recur == "monthly"
+        with pytest.raises(ValueError, match="recurring task"):
+            task_service.modify_task("alice", instance.uuid, TaskModify(**{field: ""}))
+
+    def test_an_unparseable_date_is_a_rejection_that_names_no_path(self, real_data_root):
+        from app.services import task_runner
+
+        with pytest.raises(task_runner.TaskwarriorRejected) as exc:
+            task_service.create_task("alice", TaskCreate(description="t", due="notadate"))
+        assert "notadate" in str(exc.value)
+        assert str(real_data_root) not in str(exc.value)
+        assert "/" not in str(exc.value)
+
+    def test_an_unparseable_date_is_a_400_over_http(self, real_client):
+        client, headers = real_client
+        r = client.post("/tasks", json={"description": "t", "due": "notadate"}, headers=headers)
+        assert r.status_code == 400, r.text
+        assert "not a valid date" in r.json()["detail"]
+
+
+class TestRecurringInstances:
+    """Modifying one instance of a recurring task asks "modify all pending recurrences?"
+    unless `rc.recurrence.confirmation=no`; on a terminal it waited for the 10 s timeout."""
+
+    def test_an_instance_is_retagged_alone_and_quickly(self, real_client):
+        import datetime
+        import time
+
+        from app.services import task_runner
+
+        client, headers = real_client
+        start = (datetime.date.today() - datetime.timedelta(days=15)).isoformat()
+        r = client.post(
+            "/tasks",
+            json={"description": "water plants", "recur": "weekly", "due": start},
+            headers=headers,
+        )
+        assert r.status_code == 201, r.text
+        # Any report generates the instances; the pending export is one.
+        instances = [
+            t for t in task_service.list_tasks("alice", ["status:pending"]) if t.recur == "weekly"
+        ]
+        assert len(instances) >= 2, "expected several generated instances"
+        parent_before = task_runner.export_tasks("alice", ["status:recurring"])
+        assert len(parent_before) == 1
+
+        target = instances[0].uuid
+        began = time.monotonic()
+        r = client.put(f"/tasks/{target}", json={"tags_add": ["next"]}, headers=headers)
+        elapsed = time.monotonic() - began
+        assert r.status_code == 200, r.text
+        assert elapsed < 2, f"modify took {elapsed:.1f}s: a confirmation prompt waited"
+        assert r.json()["tags"] == ["next"]
+
+        parent_after = task_runner.export_tasks("alice", ["status:recurring"])
+        assert parent_after[0].get("tags", []) == parent_before[0].get("tags", [])
+        others = [
+            t
+            for t in task_service.list_tasks("alice", ["status:pending"])
+            if t.recur == "weekly" and t.uuid != target
+        ]
+        assert others and all("next" not in t.tags for t in others)

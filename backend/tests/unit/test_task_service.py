@@ -426,3 +426,38 @@ class TestDependsIsAFullSet:
         seeded = _seed(fake_task)
         with pytest.raises(ValueError, match="Invalid UUID"):
             task_service.modify_task("alice", seeded["uuid"], TaskModify(depends=["../x"]))
+
+
+_CLEARABLE = ["project", "priority", "due", "scheduled", "wait", "until", "recur"]
+
+
+class TestEmptyStringClears:
+    """One clear semantic for every scalar field (D7).
+
+    On modify, `""` emits `field:`, which Taskwarrior reads as "remove the attribute". On
+    create there is nothing to clear, so `""` means "not given". Before this, priority could
+    not be cleared at all (`""` was an invalid priority), and create emitted `project:`.
+    """
+
+    @pytest.mark.parametrize("field", _CLEARABLE)
+    def test_modify_with_an_empty_string_emits_a_bare_attribute(self, fake_task, field):
+        seeded = _seed(fake_task)
+        task_service.modify_task("alice", seeded["uuid"], TaskModify(**{field: ""}))
+        args, text = _modify_call(fake_task)
+        assert args[args.index("modify") + 1 :] == [f"{field}:"]
+        assert text == []
+
+    @pytest.mark.parametrize("field", _CLEARABLE)
+    def test_create_with_an_empty_string_emits_nothing_for_it(self, fake_task, field):
+        task_service.create_task("alice", TaskCreate(description="t", **{field: ""}))
+        assert not [a for a in _args_of(fake_task) if a.startswith(f"{field}:")]
+
+    def test_a_cleared_priority_is_gone_after_modify(self, fake_task):
+        seeded = _seed(fake_task, priority="H")
+        task = task_service.modify_task("alice", seeded["uuid"], TaskModify(priority=""))
+        assert task.priority is None
+
+    def test_a_non_empty_priority_is_still_validated_on_modify(self, fake_task):
+        seeded = _seed(fake_task)
+        with pytest.raises(ValueError, match="Invalid priority"):
+            task_service.modify_task("alice", seeded["uuid"], TaskModify(priority="X"))

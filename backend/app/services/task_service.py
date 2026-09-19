@@ -138,24 +138,31 @@ def _build_args(
     mods: list[str] = []
     text: list[str] = [description] if description is not None else []
     args = mods  # modifiers only, from here down
-    if project is not None:
-        args.append(f"project:{project}")
-    if priority is not None:
-        if priority not in VALID_PRIORITIES:
-            raise ValueError(f"Invalid priority: {priority}")
-        args.append(f"priority:{priority}")
-    if due is not None:
-        args.append(f"due:{due}")
-    if scheduled is not None:
-        args.append(f"scheduled:{scheduled}")
-    if wait is not None:
-        args.append(f"wait:{wait}")
-    if until is not None:
-        args.append(f"until:{until}")
-    if recur is not None and recur != "":
-        if not VALID_RECUR_RE.match(recur.strip()):
-            raise ValueError(f"Invalid recur value: {recur}")
-        args.append(f"recur:{recur.strip()}")
+    # One clear semantic for every scalar field (D7): on modify `""` emits `field:`, which
+    # Taskwarrior reads as "remove it"; on create there is nothing to clear, so `""` is "not
+    # given". Clearing recur or due on a recurring task is refused by Taskwarrior (rc 2, 400).
+    fields = {
+        "project": project,
+        "priority": priority,
+        "due": due,
+        "scheduled": scheduled,
+        "wait": wait,
+        "until": until,
+        "recur": recur,
+    }
+    for name, value in fields.items():
+        if value is None or (value == "" and mode == "create"):
+            continue
+        if value == "":
+            args.append(f"{name}:")
+            continue
+        if name == "priority" and value not in VALID_PRIORITIES:
+            raise ValueError(f"Invalid priority: {value}")
+        if name == "recur":
+            if not VALID_RECUR_RE.match(value.strip()):
+                raise ValueError(f"Invalid recur value: {value}")
+            value = value.strip()
+        args.append(f"{name}:{value}")
     if mode == "create":
         for tag in tags or []:
             args.append(f"+{_validate_tag(tag)}")
@@ -217,10 +224,6 @@ def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
         None,
         mode="modify",
     )
-    # Clear fields when explicitly set to empty
-    if task.recur == "":
-        mods.append("recur:")
-
     if task.tags is not None or tags_add or tags_remove or task.depends is not None:
         # Read by uuid, which matches regardless of status, so a task hidden by a future
         # `wait` is re-tagged like any other.

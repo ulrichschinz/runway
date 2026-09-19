@@ -9,9 +9,13 @@ router = APIRouter(prefix="/gtd", tags=["gtd"])
 
 
 def _tasks(username: str, filter_args: list[str]) -> list[Task]:
+    # ValueError is the caller's (including Taskwarrior refusing a filter, rc 2); a
+    # RuntimeError is the binary failing. The first used to be a 500 here as well.
     try:
         return task_service.list_tasks(username, filter_args)
-    except (ValueError, RuntimeError) as e:
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -64,6 +68,8 @@ def someday(username: str = Depends(get_current_user)):
 async def projects(username: str = Depends(get_current_user), db=Depends(get_db)):
     try:
         names = task_service.project_names(username)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     seen: dict[str, None] = dict.fromkeys(names)
