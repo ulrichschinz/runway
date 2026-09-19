@@ -490,7 +490,8 @@ import sys
 
 p = pathlib.Path(sys.argv[1])
 t = p.read_text()
-t2 = re.sub(r"^aiosqlite==\S+", "aiosqlite==0.22.1", t, count=1, flags=re.M)
+# A version no lock can hold, so the arm keeps working whatever aiosqlite is pinned to.
+t2 = re.sub(r"^aiosqlite==\S+", "aiosqlite==999.0.0", t, count=1, flags=re.M)
 assert t2 != t, "aiosqlite pin not found"
 p.write_text(t2)
 BUMPINTENT
