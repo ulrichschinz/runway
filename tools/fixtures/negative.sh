@@ -480,6 +480,22 @@ p.write_text(t.replace(old, "pip install --no-cache-dir -r requirements.txt", 1)
 UNHASHDEPS
 expect_red "DEP-004-hash" "tools/checks/supply-chain.sh" "RULE-DEP-004"
 
+# --- RULE-DEP-005 — the intent file moves and the lock does not ---------------
+# Exactly the shape of a Dependabot pip PR: one line of requirements.txt bumped, the lock the
+# image installs untouched. Before this rule it passed `verify` and changed nothing that ships.
+python3 - "$SANDBOX/backend/requirements.txt" <<'BUMPINTENT'
+import pathlib
+import re
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+t2 = re.sub(r"^aiosqlite==\S+", "aiosqlite==0.22.1", t, count=1, flags=re.M)
+assert t2 != t, "aiosqlite pin not found"
+p.write_text(t2)
+BUMPINTENT
+expect_red "DEP-005" "tools/checks/supply-chain.sh" "RULE-DEP-005"
+
 # --- RULE-DOC-001 — the contract claims something untrue --------------------
 printf '\nThe entry point is `tools/checks/does-not-exist.sh`.\n' >>"$SANDBOX/AGENTS.md"
 expect_red "DOC-001" "tools/checks/contract.sh" "RULE-DOC-001"

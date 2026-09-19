@@ -34,8 +34,8 @@ _ARCHIVE_MIRROR = re.compile(r"archive\.archlinux\.org/repos/\d{4}/\d{2}/\d{2}/"
 problems: list[str] = []
 
 
-def fail(message: str) -> None:
-    problems.append(f"RULE-DEP-004|{message}")
+def fail(message: str, rule: str = "RULE-DEP-004") -> None:
+    problems.append(f"{rule}|{message}")
 
 
 def dockerfiles() -> list[str]:
@@ -111,9 +111,105 @@ def check_python_lock() -> None:
                 )
 
 
+# Each lock and the intent files it is compiled from — the same pairs `tools/lock.sh` runs.
+_LOCKS = {
+    "requirements.lock": ("requirements.txt",),
+    "requirements-dev.lock": ("requirements.txt", "requirements-dev.txt"),
+}
+_PIN = re.compile(
+    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*(?P<op>[=<>!~]=?=?)\s*(?P<ver>[^\s;#\\]+)"
+)
+
+
+def drift(message: str) -> None:
+    fail(message, "RULE-DEP-005")
+
+
+def _normalise(name: str) -> str:
+    """PEP 503: `Pydantic_Settings` and `pydantic-settings` are the same distribution."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _intent(rel: str) -> dict[str, tuple[str, str, int]]:
+    """Direct dependencies declared in an intent file: name -> (operator, version, line)."""
+    pins: dict[str, tuple[str, str, int]] = {}
+    for number, raw in enumerate(
+        (ROOT / "backend" / rel).read_text(encoding="utf-8").splitlines(), 1
+    ):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        match = _PIN.match(line)
+        if match is None:
+            drift(f"backend/{rel}:{number} {line!r} is not a `name==version` pin")
+            continue
+        pins[_normalise(match["name"])] = (match["op"], match["ver"], number)
+    return pins
+
+
+def _locked(rel: str) -> dict[str, tuple[str, list[str]]]:
+    """Every package in a lock: name -> (version, the `# via` sources that pulled it in)."""
+    entries: dict[str, tuple[str, list[str]]] = {}
+    current: str | None = None
+    for raw in (ROOT / "backend" / rel).read_text(encoding="utf-8").splitlines():
+        if raw and not raw[0].isspace() and not raw.startswith("#"):
+            match = _PIN.match(raw)
+            if match is not None:
+                current = _normalise(match["name"])
+                entries[current] = (match["ver"], [])
+            continue
+        comment = raw.strip().lstrip("#").strip()
+        if current is not None and comment:
+            entries[current][1].append(comment.removeprefix("via").strip())
+    return entries
+
+
+def check_lock_matches_intent() -> None:
+    """The lock the image installs says what the intent file says.
+
+    RULE-DEP-004 checks that a lock exists and is hashed — its form. It never checked that
+    the lock was compiled from the `.txt` beside it, so a bump to the intent file alone (the
+    shape every Dependabot pip PR takes) passed `verify` and changed nothing in the image.
+    """
+    backend = ROOT / "backend"
+    for lock, sources in _LOCKS.items():
+        if not (backend / lock).exists() or not all((backend / s).exists() for s in sources):
+            continue  # RULE-DEP-004 reports the missing file
+        declared: dict[str, tuple[str, str, int, str]] = {}
+        for source in sources:
+            for name, (op, ver, number) in _intent(source).items():
+                declared[name] = (op, ver, number, source)
+        locked = _locked(lock)
+
+        for name, (op, ver, number, source) in sorted(declared.items()):
+            where = f"backend/{source}:{number}"
+            if op != "==":
+                drift(
+                    f"{where} declares {name}{op}{ver}, not an exact pin — the intent file pins exactly"
+                )
+            elif name not in locked:
+                drift(
+                    f"{where} declares {name}=={ver}, which backend/{lock} does not contain — run `./run lock`"
+                )
+            elif locked[name][0] != ver:
+                drift(
+                    f"{where} declares {name}=={ver} but backend/{lock} installs {locked[name][0]} — "
+                    "the image ships the lock, not the intent; run `./run lock`"
+                )
+
+        intent_markers = {f"-r {source}" for source in sources}
+        for name, (ver, via) in sorted(locked.items()):
+            if name not in declared and intent_markers & set(via):
+                drift(
+                    f"backend/{lock} still installs {name}=={ver} as a direct dependency, but no "
+                    "intent file declares it — run `./run lock`"
+                )
+
+
 def main() -> int:
     check_images()
     check_python_lock()
+    check_lock_matches_intent()
     for line in problems:
         print(line)
     return 0

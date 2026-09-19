@@ -4,6 +4,7 @@
 # RULE-DEP-003  No credential may be committed.
 # RULE-DEP-004  Every base image MUST be pinned by digest, and Python dependencies MUST be
 #               installed from a hash-pinned lock.
+# RULE-DEP-005  The lock MUST install exactly the versions requirements*.txt pins.
 #
 # This repository publishes container images from a public repository. A dependency's licence
 # is an obligation passed to whoever redeploys them; a committed credential is disclosed the
@@ -28,5 +29,5 @@ if [ -n "$findings" ]; then
 	exit "$EX_RULE"
 fi
 
-ok "licences classified, no committed credentials, base images and Python deps pinned"
+ok "licences classified, no committed credentials, base images and Python deps pinned, locks match intent"
 exit "$EX_OK"

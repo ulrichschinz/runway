@@ -205,6 +205,12 @@ closure: every transitive dependency with its hashes, which is what the images i
 `--require-hashes`, so a substituted artefact is refused rather than trusted. Run this after changing a
 `.txt`; `RULE-DEP-004` fails if a lock is missing or unhashed.
 
+`RULE-DEP-005` fails when the two disagree: a direct dependency whose `.txt` pin is not the version its
+lock installs, one the `.txt` declares and the lock lacks, one the lock still installs as a direct
+dependency after the `.txt` dropped it, or a `.txt` line that is not an exact `==` pin. The image installs
+the lock, so a bump to the `.txt` alone — the shape of every Dependabot pip pull request — changes nothing
+that ships. The rule turns that no-op into a red gate; `./run lock` on the same branch turns it green.
+
 ### `make decay-review`
 Runs the recurring agent-readiness decay review and writes verifiable evidence of the run.
 
@@ -503,8 +509,8 @@ changes in flight.
 It reports two numbers, and they are not the same number:
 
 ```
-  48 fixture arm(s) passed, 0 failed
-  42 of 45 executable rules proven able to fail; 3 declare no automated fixture (…)
+  49 fixture arm(s) passed, 0 failed
+  43 of 46 executable rules proven able to fail; 3 declare no automated fixture (…)
 ```
 
 Several rules have more than one arm — `RULE-OPS-001` is proven twice, once for the subprocess and once for
