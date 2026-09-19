@@ -55,7 +55,7 @@ Typical instructions and what they mean:
 | auf <Datum> | new honest `due`, or `scheduled` if it is not a deadline |
 | nachfassen | you draft the follow-up message; the user sends it; move `scheduled` forward |
 | klären | run `references/clarify.md` for those items, right now if there are few |
-| someday | swap the status tag to `someday` |
+| someday | swap the status tag to `someday` (tags_remove + tags_add) |
 | Fokus n n n | today's focus: three to five `next` actions; just list them back, no tagging |
 
 Overdue items get exactly one of three outcomes: done, a new honest date, or no date.

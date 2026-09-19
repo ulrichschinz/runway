@@ -141,8 +141,8 @@ review cannot fix the lists: show the screen, then propose `reset` and stop ther
   shorthand answer in a daily review counts as that confirmation.
 - Never touch authentication, API-key, user or admin operations, even if the server
   exposes them.
-- If a change fails because the server lacks a capability (older runway versions cannot
-  remove tags), say so plainly. Do not work around it by deleting and recreating tasks;
-  that loses history, annotations and dependencies.
+- If a change fails because the server lacks a capability, say so plainly. Do not work
+  around it by deleting and recreating tasks; that loses history, annotations and
+  dependencies.
 - Prefer the server's summary and filter operations when they exist; fall back to the
   plain lists when they do not.

@@ -173,7 +173,15 @@ Three controls, in order of how much they are relied on:
    after it, so an override is inert *by Taskwarrior's own grammar* rather than by our
    filtering. This is the primary control precisely because it does not depend on us
    enumerating dangerous shapes correctly. Modifiers must precede it, since anything after
-   `--` becomes text.
+   `--` becomes text. That includes tag removals: `-tag` is a modifier, and after `--` it
+   would silently become part of the description. Tag names are therefore shaped so that
+   they cannot turn into something else: a tag written or added must match `TAG_RE`
+   (letter, `_` or `@` first; no leading `+`, `-`, `.` or digit, no comma or whitespace),
+   and a stored tag being removed must match the looser `EXISTING_TAG_RE`, so legacy tags
+   such as `@home,@office` stay removable while nothing that could reshape the modifier gets
+   through. Its first character is still a letter, `_`, `@`, `$` or `#`: Taskwarrior 3.5.0
+   reads `-1abc` or `-.x` as description text, so such a removal would overwrite the
+   description and keep the tag. It is refused (400) instead.
 2. **`reject_structural_tokens`** refuses `rc.`-shaped tokens in the caller-supplied argument
    list — the filter and modifier positions, which must stay parseable and so cannot sit
    behind a separator.

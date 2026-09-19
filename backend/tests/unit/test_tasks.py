@@ -147,3 +147,65 @@ class TestSingleTaskOperations:
         r = client.post(f"/tasks/{created['uuid']}/annotate", json={"text": "a note"}, headers=auth)
         assert r.status_code == 200
         assert [a["description"] for a in r.json()["annotations"]] == ["a note"]
+
+
+class TestTagsAreAFullSet:
+    """The web UI sends the complete tag list on every save and expected removal to work.
+
+    It did not: modify only ever added tags, so a removed tag silently stayed.
+    """
+
+    @staticmethod
+    def _in(client, auth, view):
+        return [t["uuid"] for t in client.get(f"/gtd/{view}", headers=auth).json()]
+
+    def test_someday_to_next_moves_the_task_between_the_lists(self, client, auth):
+        task = _create(client, auth, description="idea", tags=["someday"])
+        r = client.put(f"/tasks/{task['uuid']}", json={"tags": ["next"]}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json()["tags"] == ["next"]
+        assert task["uuid"] in self._in(client, auth, "next")
+        assert task["uuid"] not in self._in(client, auth, "someday")
+
+    def test_the_deltas_move_it_too(self, client, auth):
+        task = _create(client, auth, description="idea", tags=["someday", "@home"])
+        r = client.put(
+            f"/tasks/{task['uuid']}",
+            json={"tags_remove": ["someday"], "tags_add": ["next"]},
+            headers=auth,
+        )
+        assert r.status_code == 200, r.text
+        assert sorted(r.json()["tags"]) == ["@home", "next"]
+
+    def test_the_full_set_and_a_delta_together_are_a_400(self, client, auth):
+        task = _create(client, auth, tags=["someday"])
+        r = client.put(
+            f"/tasks/{task['uuid']}", json={"tags": ["next"], "tags_add": ["x"]}, headers=auth
+        )
+        assert r.status_code == 400
+        assert "not both" in r.json()["detail"]
+
+    def test_removing_the_last_tag_puts_a_project_less_task_back_in_the_inbox(self, client, auth):
+        task = _create(client, auth, description="unclear", tags=["next"])
+        assert task["uuid"] not in self._in(client, auth, "inbox")
+        r = client.put(f"/tasks/{task['uuid']}", json={"tags": []}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert task["uuid"] in self._in(client, auth, "inbox")
+
+    @pytest.mark.parametrize("field,tag", [("tags_remove", "-x"), ("tags_add", "1abc")])
+    def test_a_malformed_delta_is_a_400(self, client, auth, field, tag):
+        task = _create(client, auth)
+        r = client.put(f"/tasks/{task['uuid']}", json={field: [tag]}, headers=auth)
+        assert r.status_code == 400
+
+    def test_a_new_malformed_tag_in_the_full_set_is_a_400(self, client, auth):
+        task = _create(client, auth)
+        r = client.put(f"/tasks/{task['uuid']}", json={"tags": ["a,b"]}, headers=auth)
+        assert r.status_code == 400
+        assert "Invalid tag" in r.json()["detail"]
+
+    def test_a_delta_list_is_bounded(self, client, auth):
+        task = _create(client, auth)
+        many = [f"t{i}" for i in range(51)]
+        r = client.put(f"/tasks/{task['uuid']}", json={"tags_add": many}, headers=auth)
+        assert r.status_code == 422

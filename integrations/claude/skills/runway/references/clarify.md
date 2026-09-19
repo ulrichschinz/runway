@@ -38,6 +38,7 @@ item is not.
 ## Writing the result
 
 One modify call per item: description, project, tags (status + context),
-dates. If the server cannot remove tags, mention it once and carry on with what works.
+dates. Switch status with `tags_remove` + `tags_add` in one modify call; send `tags` only
+when you mean the complete set (it overwrites changes made elsewhere).
 
 End with a one-line tally: clarified, turned into projects, deferred, trashed.

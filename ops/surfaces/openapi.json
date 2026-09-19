@@ -659,6 +659,38 @@
             ],
             "title": "Tags"
           },
+          "tags_add": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tags to add, leaving every other tag as it is. Cannot be combined with `tags`, which is the complete set and replaces the current one.",
+            "title": "Tags Add"
+          },
+          "tags_remove": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tags to remove, leaving every other tag as it is; an absent tag is ignored. Cannot be combined with `tags`.",
+            "title": "Tags Remove"
+          },
           "until": {
             "anyOf": [
               {

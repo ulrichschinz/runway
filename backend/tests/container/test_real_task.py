@@ -201,3 +201,119 @@ class TestCrossTenantIsolation:
 
         with pytest.raises(task_runner.UnsafeArgument):
             task_runner.export_tasks("alice", [f"rc.data.location={settings.data_root / 'bob'}"])
+
+
+class TestTagsAreAFullSet:
+    """`PUT /tasks/{uuid}` against the real binary: the `-tag` modifier and `depends:-uuid`.
+
+    Pins what the unit fake claims about both (see ``tests/fake_task.py``).
+    """
+
+    @staticmethod
+    def _in(client, headers, view):
+        return [t["uuid"] for t in client.get(f"/gtd/{view}", headers=headers).json()]
+
+    @staticmethod
+    def _create(client, headers, **body):
+        body.setdefault("description", "a task")
+        r = client.post("/tasks", json=body, headers=headers)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    def test_someday_to_next_moves_the_task(self, real_client):
+        client, headers = real_client
+        task = self._create(client, headers, description="idea", tags=["someday", "@home"])
+        r = client.put(f"/tasks/{task['uuid']}", json={"tags": ["next", "@home"]}, headers=headers)
+        assert r.status_code == 200, r.text
+        assert sorted(r.json()["tags"]) == ["@home", "next"]
+        assert r.json()["description"] == "idea", "a tag token became description text"
+        assert task["uuid"] in self._in(client, headers, "next")
+        assert task["uuid"] not in self._in(client, headers, "someday")
+
+    def test_the_deltas_move_it_too(self, real_client):
+        client, headers = real_client
+        task = self._create(client, headers, tags=["someday"])
+        r = client.put(
+            f"/tasks/{task['uuid']}",
+            json={"tags_remove": ["someday"], "tags_add": ["next"]},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["tags"] == ["next"]
+
+    def test_removing_the_last_tag_puts_the_task_back_in_the_inbox(self, real_client):
+        client, headers = real_client
+        task = self._create(client, headers, description="unclear", tags=["next"])
+        assert task["uuid"] not in self._in(client, headers, "inbox")
+        r = client.put(f"/tasks/{task['uuid']}", json={"tags": []}, headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["tags"] == []
+        assert task["uuid"] in self._in(client, headers, "inbox")
+
+    def test_a_legacy_comma_tag_is_split(self):
+        """`+@home,@office` is stored as ONE tag; `-@home,@office` removes exactly it."""
+        from app.models import TaskModify
+        from app.services import task_runner
+
+        task_runner.add_task("alice", ["+@home,@office"], ["legacy"])
+        uuid = task_runner.export_latest("alice")[0]["uuid"]
+        assert task_service.get_task("alice", uuid).tags == ["@home,@office"]
+
+        task = task_service.modify_task("alice", uuid, TaskModify(tags=["@home", "@office"]))
+        assert sorted(task.tags) == ["@home", "@office"]
+        assert task.description == "legacy"
+
+    @pytest.mark.parametrize("tag", ["1abc", ".x"])
+    def test_the_binary_reads_a_removal_with_a_leading_digit_or_dot_as_text(self, tag):
+        """Why EXISTING_TAG_RE refuses these: `-1abc` is not a removal on 3.5.0, it replaces
+        the description and keeps the tag. The fake refuses the token for the same reason."""
+        from app.services import task_runner
+
+        task_runner.add_task("alice", [f"tags:{tag}"], ["legacy"])
+        uuid = task_runner.export_latest("alice")[0]["uuid"]
+        task_runner.modify_task("alice", uuid, [f"-{tag}"])
+        raw = task_runner.export_tasks("alice", [uuid])[0]
+        assert raw["tags"] == [tag]
+        assert raw["description"] == f"-{tag}"
+
+    @pytest.mark.parametrize("body", [{"tags_remove": ["1abc"]}, {"tags": ["next"]}])
+    def test_a_tag_the_binary_cannot_remove_is_refused_and_nothing_changes(self, real_client, body):
+        from app.services import task_runner
+
+        client, headers = real_client
+        task_runner.add_task("alice", ["tags:1abc,next"], ["Pay rent"])
+        uuid = task_runner.export_latest("alice")[0]["uuid"]
+        r = client.put(f"/tasks/{uuid}", json=body, headers=headers)
+        assert r.status_code == 400, r.text
+        assert "cannot remove tag" in r.text
+        task = task_service.get_task("alice", uuid)
+        assert task.description == "Pay rent"
+        assert sorted(task.tags) == ["1abc", "next"]
+
+    def test_a_dropped_dependency_is_removed_and_the_rest_kept(self):
+        from app.models import TaskModify
+
+        a = task_service.create_task("alice", TaskCreate(description="a")).uuid
+        b = task_service.create_task("alice", TaskCreate(description="b")).uuid
+        c = task_service.create_task("alice", TaskCreate(description="c")).uuid
+        task = task_service.create_task("alice", TaskCreate(description="t", depends=[a]))
+
+        task = task_service.modify_task("alice", task.uuid, TaskModify(depends=[a, b]))
+        assert sorted(task.depends) == sorted([a, b]), "depends:X must add, not replace"
+
+        task = task_service.modify_task("alice", task.uuid, TaskModify(depends=[b, c]))
+        assert sorted(task.depends) == sorted([b, c])
+
+        task = task_service.modify_task("alice", task.uuid, TaskModify(depends=[]))
+        assert task.depends == []
+
+    def test_a_future_wait_task_can_be_retagged(self):
+        from app.models import TaskModify
+
+        task = task_service.create_task(
+            "alice", TaskCreate(description="later", tags=["someday"], wait="2030-01-01")
+        )
+        task = task_service.modify_task(
+            "alice", task.uuid, TaskModify(tags_remove=["someday"], tags_add=["next"])
+        )
+        assert task.tags == ["next"]

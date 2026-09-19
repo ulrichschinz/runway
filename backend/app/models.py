@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # The complete set of roles. Two is deliberate: `admin` may administer other users and
 # site settings, `user` may not. Every place that writes a role — the API, the bootstrap
@@ -57,6 +57,18 @@ class TaskModify(BaseModel):
     until: str | None = None
     recur: str | None = None
     depends: list[str] | None = None
+    tags_add: list[str] | None = Field(
+        default=None,
+        max_length=50,
+        description="Tags to add, leaving every other tag as it is. Cannot be combined "
+        "with `tags`, which is the complete set and replaces the current one.",
+    )
+    tags_remove: list[str] | None = Field(
+        default=None,
+        max_length=50,
+        description="Tags to remove, leaving every other tag as it is; an absent tag is "
+        "ignored. Cannot be combined with `tags`.",
+    )
 
 
 class AnnotationCreate(BaseModel):

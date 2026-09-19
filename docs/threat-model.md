@@ -121,8 +121,11 @@ Two controls, in order, both in that file:
 that was never the vulnerability, and saying so is worth a line because the linter's `S603` finding
 is about the wrong risk. [ADR 0019](adr/0019-the-taskwarrior-argv-boundary.md) records the whole
 boundary. Structured fields are validated separately before they get near it:
-[`backend/app/services/task_service.py:6-11`](../backend/app/services/task_service.py) pins UUID,
-priority and tag shapes, and line 64-67 pins the recurrence grammar.
+[`backend/app/services/task_service.py:7-24`](../backend/app/services/task_service.py) pins UUID,
+priority and tag shapes (`TAG_RE` for a tag written or added, the looser `EXISTING_TAG_RE` for a
+stored tag being removed, whose first character still excludes a digit or `.`, because the
+binary reads `-1abc` as description text), and lines 107-110 pin the recurrence grammar. A tag removal is a `-tag`
+modifier and goes before `--` like every other modifier; after it, it would be description text.
 
 One historical detail is worth keeping visible: `create_task` used to re-query by
 `["description:" + task.description]`, putting the same user string into a *filter* position, which

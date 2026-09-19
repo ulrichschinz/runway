@@ -104,9 +104,18 @@ def registered(client: TestClient) -> dict[str, str]:
     Registration is enabled by default in a fresh database (``allow_registration`` is
     seeded from settings, which default to False) — so it is enabled explicitly here.
     """
+    return register_user(client)
+
+
+def register_user(client: TestClient, username: str = "alice") -> dict[str, str]:
+    """Register `username` through the API and return credentials, token and API key.
+
+    A plain function so the container tier can register a user against the real binary
+    exactly the way the unit tier does against the fake.
+    """
     client.app.state  # noqa: B018  # touch app state so the lifespan has certainly run
     _enable_registration(client)
-    body = {"username": "alice", "password": "correct horse battery staple"}
+    body = {"username": username, "password": "correct horse battery staple"}
     r = client.post("/auth/register", json=body)
     assert r.status_code == 201, r.text
     token = client.post("/auth/login", json=body).json()["access_token"]

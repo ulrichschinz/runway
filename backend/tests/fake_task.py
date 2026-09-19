@@ -18,6 +18,8 @@ import json
 import uuid as uuidlib
 from typing import Any
 
+from app.services.task_service import EXISTING_TAG_RE
+
 # Coefficients mirroring backend/taskrc_template.txt closely enough that ordering tests
 # are meaningful. This is NOT Taskwarrior's algorithm and does not claim to be.
 _URGENCY = {
@@ -126,11 +128,24 @@ class FakeTaskCLI:
                 if tag not in task["tags"]:
                     task["tags"].append(tag)
             elif arg.startswith("-"):
+                # The real binary reads `-1abc` or `-.x` as description text, not a removal
+                # (pinned in tests/container); refuse loudly rather than pretend it works.
+                if not EXISTING_TAG_RE.fullmatch(arg[1:]):
+                    raise FakeTaskError(f"not a tag removal on Taskwarrior 3.5: {arg!r}")
                 task["tags"] = [t for t in task["tags"] if t != arg[1:]]
             elif ":" in arg:
                 key, _, value = arg.partition(":")
                 if key == "depends":
-                    task["depends"] = [d for d in value.split(",") if d] if value else []
+                    # As on Taskwarrior 3.5 (pinned in tests/container): `depends:X` adds,
+                    # `depends:-X` removes one, `depends:` clears.
+                    if not value:
+                        task["depends"] = []
+                    elif value.startswith("-"):
+                        task["depends"] = [d for d in task["depends"] if d != value[1:]]
+                    else:
+                        for dep in (d for d in value.split(",") if d):
+                            if dep not in task["depends"]:
+                                task["depends"].append(dep)
                 elif value == "":
                     task.pop(key, None)
                 else:

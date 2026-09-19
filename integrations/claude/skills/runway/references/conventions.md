@@ -32,6 +32,7 @@ what they do.
 | counters for reviews and hooks | gtd summary, if present |
 | hidden ticklers | gtd tickler, if present |
 | project plan | get plan / upsert plan |
+| change tags without reading first | modify task (`tasks/{uuid}`), `tags_add` / `tags_remove` |
 
 ## Status tags
 
@@ -40,7 +41,8 @@ what they do.
 - **Later steps without a status tag are allowed inside projects only.** A stand-alone
   task with no status tag is in no GTD list at all. Report it as a finding in reviews
   ("3 tasks are in no list") and let the user decide.
-- Switching status means removing the old tag and adding the new one in the same call.
+- Switching status means removing the old tag and adding the new one in the same call:
+  `tags_remove` + `tags_add`. Combining them with `tags` (the complete set) returns 400.
 - Order later steps with `depends` when the order is real. Do not build dependency chains
   for their own sake.
 

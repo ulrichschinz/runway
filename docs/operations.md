@@ -624,6 +624,18 @@ Nothing compares the checked-in copy against the host. A gate check cannot do it
 deploy host — so the honest options are a scheduled job that reports divergence from somewhere that does, or
 accepting that this file is correct as of the date on it.
 
+## Defect fixed 2026-09-19: removing a tag did nothing
+
+Until this date, removing a tag in the web UI, or sending a shorter `tags` list to `PUT /tasks/{uuid}`
+over REST or MCP, returned 200 and changed nothing: modify only ever emitted `+tag`, so the removed tag
+stayed. A status swap such as someday → next left the task in both lists. `depends` had the same defect
+(`depends:X` only adds). It was in production from the first release. No data was lost; affected tasks
+simply kept extra tags, which users can now remove.
+
+What would have caught it: a test that removes something. The unit fake removed tags on `-tag`
+correctly, but no test ever sent a shorter set and looked at the result. Both tiers now do
+([brief 0030](briefs/0030-tags-are-a-full-set.md)).
+
 ## Incident 2026-08-25
 
 Every container test failed on a backend nobody had touched:
