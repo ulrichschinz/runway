@@ -138,7 +138,7 @@ the slice as a unit:
 | `backend/tests/container/test_<name>.py` | the module is proven present in the shipped image |
 | a `be/feature/<name>` unit in `architecture.toml` | `RULE-ARCH-001` has an edge list to check it against — one that withholds `be/adapters/task` |
 | a line in `rules/route-guards.toml` | `RULE-SEC-001` passes; a route with no declared guard fails the gate |
-| the route counts in `AGENTS.md` | `RULE-DOC-001` checks them against the index, and a new route moves both |
+| the REST route count in `AGENTS.md` | `RULE-DOC-001` checks the REST count against the index and the MCP count against `ops/surfaces/mcp-tools.json`; a new route moves the REST count, and the MCP count only if its tag is on the allowlist (ADR 0037) |
 
 **`KIND=frontend-feature`** emits a view, its pure logic module and a vitest file, registers an `fe/<name>`
 unit whose edges allow `fe/shared` and `fe/layout` only, and adds the SPA route. There is no second test
@@ -392,6 +392,14 @@ error mapping. The container tier covers what only the binary can answer — urg
 coefficients, the storage format, and **cross-tenant isolation**, which rests entirely on three environment
 variables handed to a subprocess.
 
+The fake models what the GTD lists depend on, and nothing more (ADR 0036): a clock (`FakeTaskCLI(now=...)`,
+the same instant the fixture hands to `task_service._now`), three date forms stored in Taskwarrior's UTC basic
+format, **virtual waiting** (a pending task whose `wait` is after `now` is `status:waiting` / `+WAITING` and no
+longer `status:pending`, yet exports "pending"), the project filters (`project:` none, `project:X` prefix,
+`project.is:X` exact), `-word` as a tag exclusion, and the refusals Taskwarrior answers with exit code 2. Every
+one of those claims is pinned against the binary in `tests/container` (`TestWhatTheFakeClaims`,
+`TestListSemantics`); a filter it does not know still raises.
+
 The container tier **cannot run on arm64**: archlinux publishes no arm64 image and `pacman` fails under
 emulation. The check says so and passes; CI is x86_64 and runs it for real (`RISK-TEST-001`).
 
@@ -535,7 +543,7 @@ changes in flight.
 It reports two numbers, and they are not the same number:
 
 ```
-  53 fixture arm(s) passed, 0 failed
+  54 fixture arm(s) passed, 0 failed
   46 of 49 executable rules proven able to fail; 3 declare no automated fixture (…)
 ```
 

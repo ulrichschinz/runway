@@ -8,9 +8,8 @@ changes in one go.
 
 If the server offers a summary operation, call it first and fetch only the lists whose
 counters are not zero. Otherwise two calls are enough: the pending tasks (sections 1, 3,
-4 and 6 are filters over that list) and the project list (section 5). Call the inbox
-separately only if you need to be sure about hidden ticklers. If the user named a context
-("daily @home"), filter section 6 by it.
+4 and 6 are filters over that list) and the project list (section 5). If the user named a
+context ("daily @home"), filter section 6 by it.
 
 ## 2. Show one numbered screen
 
@@ -21,8 +20,9 @@ visible — a count cannot be addressed by shorthand.
    passed and that are not waiting-fors.
 2. **Inbox** — count and age of the oldest item; list titles if there are five or fewer.
 3. **Waiting for — follow-up due**: `scheduled` today or earlier. Older data may carry the
-   follow-up in `due` or `wait` instead; treat a past date there the same way and suggest
-   moving it to `scheduled`.
+   follow-up in `due` instead; treat a past date there the same way and suggest moving it
+   to `scheduled`. A task whose `wait` has passed is shown normally again; suggest moving
+   that date to `scheduled` as well.
 4. **In no list** — stand-alone tasks without `next`/`waiting`/`someday`. Tasks that carry
    only a context tag look clarified to the server but usually are not (no verb, no
    outcome): list them here and offer `clarify`.
@@ -55,7 +55,7 @@ Typical instructions and what they mean:
 | auf <Datum> | new honest `due`, or `scheduled` if it is not a deadline |
 | nachfassen | you draft the follow-up message; the user sends it; move `scheduled` forward |
 | klären | run `references/clarify.md` for those items, right now if there are few |
-| someday | swap the status tag to `someday` |
+| someday | swap the status tag to `someday` (tags_remove + tags_add) |
 | Fokus n n n | today's focus: three to five `next` actions; just list them back, no tagging |
 
 Overdue items get exactly one of three outcomes: done, a new honest date, or no date.

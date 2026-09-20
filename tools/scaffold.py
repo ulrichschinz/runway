@@ -582,15 +582,18 @@ def mount_view(text: str, name: str) -> str:
 
 
 def bump_surface_counts(text: str, added: int) -> str:
-    """AGENTS.md states how many REST routes and MCP tools exist, and RULE-DOC-001 checks
-    both against the index. A new route moves both numbers."""
-    for pattern in (r"REST API \((\d+) routes\)", r"MCP tools \((\d+)\)"):
-        match = re.search(pattern, text)
-        if not match:
-            raise Tooling(f"AGENTS.md no longer states a count matching /{pattern}/")
-        new = str(int(match.group(1)) + added)
-        text = text[: match.start(1)] + new + text[match.end(1) :]
-    return text
+    """AGENTS.md states how many REST routes exist, and RULE-DOC-001 checks it against the
+    index. A new route moves that number.
+
+    The MCP count is not touched: RULE-DOC-001 checks it against the observed snapshot,
+    `ops/surfaces/mcp-tools.json`, and a scaffolded router's tag is not on the MCP allowlist
+    in `backend/app/main.py`, so a new feature adds no tool (ADR 0037)."""
+    pattern = r"REST API \((\d+) routes\)"
+    match = re.search(pattern, text)
+    if not match:
+        raise Tooling(f"AGENTS.md no longer states a count matching /{pattern}/")
+    new = str(int(match.group(1)) + added)
+    return text[: match.start(1)] + new + text[match.end(1) :]
 
 
 # --- finishing the job --------------------------------------------------------

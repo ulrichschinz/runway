@@ -45,8 +45,10 @@ Owner, contract, vertical slice, failure behaviour, tests.
 2. Build a **vertical slice** — surface to storage — rather than a layer at a time.
 3. Decide what happens when it fails, and test that path. A capability with no failure
    behaviour has one anyway; it is just undesigned.
-4. If it adds a REST route, it adds an MCP tool named after the handler function. That is
-   a public surface — see the migration pattern.
+4. If it adds a REST route under a tag on the MCP allowlist in `backend/app/main.py`
+   (`tasks`, `gtd`, `projects`, `inbox`), it also adds an MCP tool named after the route's
+   operation id. That is a public surface — see the migration pattern. A route under any
+   other tag is REST-only until the tag is added to the list (ADR 0037).
 
 ## Behaviour-Preserving Refactor
 
@@ -70,8 +72,8 @@ compatible, observable and rollback-capable.
 4. **Contract** — remove the old form, in its own change, once nothing uses it.
 
 Surfaces are treated as externally consumed (decision F2). That includes **MCP tool names,
-which are route handler function names** — renaming a Python function is a breaking change
-to a public surface, and `./run impact` will tell you which tools are affected.
+which are the operation ids of the allowlisted routes** (ADR 0037) — renaming the Python
+function of an exposed route is a breaking change to a public surface, and `./run impact` will tell you which tools are affected.
 
 Compatibility shims are tracked with a removal step and counted down to zero.
 

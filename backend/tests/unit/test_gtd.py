@@ -8,6 +8,8 @@ def _create(client, auth, **body):
 
 class TestViews:
     def test_inbox_holds_only_tasks_with_no_project_and_no_tags(self, client, auth):
+        """ "has project" is untagged: the old `-project` filter (the tag `project`, D1) let it
+        in on the real binary, and the fake now reads `-project` the same way."""
         _create(client, auth, description="unprocessed")
         _create(client, auth, description="has project", project="p")
         _create(client, auth, description="has tag", tags=["next"])
@@ -37,8 +39,67 @@ class TestViews:
         assert client.get("/gtd/next", headers=auth).json() == []
 
     def test_every_view_requires_authentication(self, client, registered):
-        for view in ("inbox", "next", "waiting", "someday", "projects"):
+        for view in ("inbox", "next", "waiting", "someday", "tickler", "projects", "projects/p"):
             assert client.get(f"/gtd/{view}").status_code == 401, view
+
+
+class TestWaitHidesATask:
+    """A future `wait` hides a task until the date passes (ADR 0036). The fake's clock stands
+    at 2026-09-19T10:00:00Z."""
+
+    FUTURE = "2026-10-01"
+    PAST = "2026-09-01"
+
+    @staticmethod
+    def _names(client, auth, view):
+        r = client.get(f"/gtd/{view}", headers=auth)
+        assert r.status_code == 200, r.text
+        return [t["description"] for t in r.json()]
+
+    def test_a_hidden_task_is_in_no_visible_list(self, client, auth):
+        _create(client, auth, description="inbox later", wait=self.FUTURE)
+        _create(client, auth, description="next later", tags=["next"], wait=self.FUTURE)
+        _create(client, auth, description="someday later", tags=["someday"], wait=self.FUTURE)
+        _create(client, auth, description="alpha later", project="alpha", wait=self.FUTURE)
+        for view in ("inbox", "next", "someday", "projects/alpha"):
+            assert self._names(client, auth, view) == [], view
+
+    def test_a_past_wait_is_shown_normally(self, client, auth):
+        _create(client, auth, description="back", wait=self.PAST)
+        assert self._names(client, auth, "inbox") == ["back"]
+        assert self._names(client, auth, "tickler") == []
+
+    def test_waiting_includes_a_hidden_waiting_task(self, client, auth):
+        _create(client, auth, description="reply due", tags=["waiting"])
+        _create(client, auth, description="reply later", tags=["waiting"], wait=self.FUTURE)
+        _create(client, auth, description="parked", wait=self.FUTURE)
+        assert sorted(self._names(client, auth, "waiting")) == ["reply due", "reply later"]
+
+    def test_the_tickler_lists_hidden_tasks_by_wait_not_by_urgency(self, client, auth):
+        _create(client, auth, description="jan 2027", wait="2027-01-05")
+        _create(client, auth, description="dec 2026", tags=["next"], wait="2026-12-31")
+        _create(client, auth, description="oct 2026", priority="L", wait="2026-10-01T08:00")
+        _create(client, auth, description="visible", tags=["next"])
+        tickler = client.get("/gtd/tickler", headers=auth).json()
+        assert [t["description"] for t in tickler] == ["oct 2026", "dec 2026", "jan 2027"]
+        assert {t["status"] for t in tickler} == {"pending"}, "status stays Taskwarrior's"
+
+    def test_a_task_returns_when_its_wait_passes_between_two_calls(self, client, auth, fake_task):
+        import datetime
+
+        _create(client, auth, description="later", wait=self.FUTURE)
+        assert self._names(client, auth, "tickler") == ["later"]
+        fake_task.now = datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC)
+        assert self._names(client, auth, "tickler") == []
+        assert self._names(client, auth, "inbox") == ["later"]
+
+    def test_a_project_whose_only_task_is_hidden_is_listed(self, client, auth):
+        _create(client, auth, description="parked", project="dormant", wait=self.FUTURE)
+        assert "dormant" in client.get("/gtd/projects", headers=auth).json()
+
+    def test_a_future_scheduled_date_does_not_hide_a_task(self, client, auth):
+        _create(client, auth, description="start later", scheduled=self.FUTURE)
+        assert self._names(client, auth, "inbox") == ["start later"]
 
 
 class TestProjectListing:
@@ -73,3 +134,31 @@ class TestProjectListing:
         _create(client, auth, description="theirs", project="beta")
         r = client.get("/gtd/projects/alpha", headers=auth)
         assert [t["description"] for t in r.json()] == ["mine"]
+
+
+class TestErrorMapping:
+    """A refused filter is the caller's error (400); a failing binary is ours (500). Both
+    used to be 500 here (D6)."""
+
+    @staticmethod
+    def _raising(monkeypatch, exc):
+        from app.services import task_runner
+
+        def run(username, args, text=None):
+            raise exc
+
+        monkeypatch.setattr(task_runner, "_run", run)
+
+    def test_a_rejection_by_taskwarrior_is_a_400(self, client, auth, monkeypatch):
+        from app.services import task_runner
+
+        self._raising(monkeypatch, task_runner.TaskwarriorRejected("Mismatched parentheses"))
+        for path in ("/gtd/next", "/gtd/tickler", "/gtd/projects", "/gtd/projects/p"):
+            r = client.get(path, headers=auth)
+            assert r.status_code == 400, path
+            assert r.json()["detail"] == "Mismatched parentheses"
+
+    def test_a_failure_of_the_binary_is_a_500(self, client, auth, monkeypatch):
+        self._raising(monkeypatch, RuntimeError("database is locked"))
+        for path in ("/gtd/next", "/gtd/tickler", "/gtd/projects"):
+            assert client.get(path, headers=auth).status_code == 500, path

@@ -238,6 +238,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useTaskStore } from '../stores/tasks.js'
 import { allTagParts, parseTagInput } from '../shared/contextTags.js'
+import { buildTaskPayload } from '../shared/taskPayload.js'
 import { useScrollLock } from '../composables/useScrollLock.js'
 import client from '../api/client.js'
 
@@ -283,6 +284,9 @@ const blankForm = () => ({
 })
 
 const form = ref(blankForm())
+// The form as it was when an existing task was opened; null on create. The payload is the
+// difference, so an emptied field clears it and an untouched one is left alone.
+const original = ref(null)
 
 onMounted(async () => {
   try {
@@ -308,8 +312,10 @@ watch(() => props.task, (t) => {
       depends: [...(t.depends || [])],
       annotations: t.annotations || [],
     }
+    original.value = t.uuid ? { ...form.value } : null
   } else {
     form.value = blankForm()
+    original.value = null
   }
   visible.value = true
   nextTick(() => descriptionRef.value?.focus())
@@ -390,18 +396,7 @@ function priorityBtn(p) {
 }
 
 function buildPayload() {
-  return {
-    description: form.value.description.trim(),
-    project: form.value.project?.trim() || null,
-    tags: form.value.tags,
-    priority: form.value.priority,
-    due: form.value.due || null,
-    scheduled: form.value.scheduled || null,
-    wait: form.value.wait || null,
-    until: form.value.until || null,
-    recur: form.value.recur || null,
-    depends: form.value.depends,
-  }
+  return buildTaskPayload(form.value, isEdit.value ? original.value : null)
 }
 
 async function save() {

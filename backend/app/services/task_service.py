@@ -1,4 +1,6 @@
 import re
+from datetime import datetime
+from typing import Literal
 
 from app.models import Task, TaskCreate, TaskModify
 from app.services import task_runner
@@ -8,7 +10,46 @@ UUID_RE = re.compile(
 )
 
 VALID_PRIORITIES = {"H", "M", "L"}
-VALID_TAG_RE = re.compile(r"^[a-zA-Z0-9_@.-]+$")
+# A tag we write or filter on (D3). Letters include umlauts (Python's Unicode `\w`); the first
+# character is a letter, `_` or `@`, because Taskwarrior reads a leading `+`/`-` as a modifier
+# and a leading digit or `.` as description text (`+1abc` becomes text, verified on 3.5.0).
+# A comma is refused: `+@home,@office` is stored as ONE tag, never two.
+TAG_RE = re.compile(r"^(?:@|[^\W\d])[\w@.-]*$")
+
+# A tag Taskwarrior already holds, checked only when it is removed. Looser than TAG_RE after the
+# first character, so legacy tags such as `@home,@office` or `a/b` stay removable, while nothing
+# that could reshape the `-tag` modifier (whitespace, a sign, `:`, parentheses, quotes) gets
+# through. The first character is a letter, `_`, `@`, `$` or `#`: Taskwarrior 3.5.0 reads `-1abc`,
+# `-.x`, `-/a/`, `-[a]` and the like as description text, so `modify -1abc` would overwrite the
+# description and keep the tag (verified). Such a tag cannot be removed through runway (400).
+EXISTING_TAG_RE = re.compile(r"^(?:[^\W\d]|[@$#])[^\s():\"']*$")
+
+# Which tasks a list sees, against Taskwarrior 3.5 (ADR 0036). A task whose `wait` lies in the
+# future is hidden: `status:pending` no longer matches it, `status:waiting` does, and its export
+# still says "pending". So PENDING means visible, HIDDEN means parked until a future date, and
+# OPEN is both. Module constants, never interpolated: nothing a caller sends reaches them.
+PENDING = ["status:pending"]
+HIDDEN = ["status:waiting"]
+OPEN = ["(", "status:pending", "or", "status:waiting", ")"]
+
+# The GTD lists. The inbox is "no tag and no project": `project:` (empty) is "has no project";
+# `-project` would mean "not tagged `project`" on 3.5 and let every untagged project task in.
+GtdView = Literal["inbox", "next", "waiting", "someday", "tickler"]
+_VIEW_FILTERS: dict[str, list[str]] = {
+    "inbox": [*PENDING, "-TAGGED", "project:"],
+    "next": [*PENDING, "+next"],
+    "waiting": [*OPEN, "+waiting"],
+    "someday": [*PENDING, "+someday"],
+    "tickler": HIDDEN,
+}
+
+# At most this many tags in one list filter.
+MAX_FILTER_TAGS = 10
+
+
+def _now() -> datetime:
+    """The one clock (D10): the server's local time, aware. Tests replace it with the fake's."""
+    return datetime.now().astimezone()
 
 
 def _validate_uuid(uuid: str) -> str:
@@ -18,9 +59,41 @@ def _validate_uuid(uuid: str) -> str:
 
 
 def _validate_tag(tag: str) -> str:
-    if not VALID_TAG_RE.match(tag):
+    # fullmatch, not match: `$` also matches before a trailing newline.
+    if not TAG_RE.fullmatch(tag):
         raise ValueError(f"Invalid tag: {tag}")
     return tag
+
+
+def _validate_existing_tag(tag: str) -> str:
+    if not EXISTING_TAG_RE.fullmatch(tag):
+        raise ValueError(f"Invalid tag: cannot remove tag {tag!r}")
+    return tag
+
+
+def _tag_diff(current: list[str], desired: set[str]) -> tuple[list[str], list[str]]:
+    """The (removals, additions) that turn `current` into `desired`.
+
+    Only the difference is validated: a tag the task already carries and keeps is never
+    checked, so a task holding a legacy tag stays editable from the web UI, which resends
+    the full set on every save (D3).
+    """
+    have = set(current)
+    removes = [_validate_existing_tag(t) for t in sorted(have - desired)]
+    adds = [_validate_tag(t) for t in sorted(desired - have)]
+    return removes, adds
+
+
+def _depends_diff(current: list[str], desired: list[str]) -> list[str]:
+    """Modifiers that turn `current` dependencies into `desired`.
+
+    `depends:X` only ever adds on Taskwarrior 3.5; `depends:-X` removes one (verified).
+    """
+    wanted = {_validate_uuid(d) for d in desired}
+    have = set(current)
+    return [f"depends:-{d}" for d in sorted(have - wanted)] + [
+        f"depends:{d}" for d in sorted(wanted - have)
+    ]
 
 
 def _raw_to_task(raw: dict) -> Task:
@@ -44,6 +117,14 @@ def _raw_to_task(raw: dict) -> Task:
         entry=raw.get("entry"),
         modified=raw.get("modified"),
     )
+
+
+def _tag_filters(tags: list[str] | None) -> list[str]:
+    """`+tag` filter tokens, AND-ed; each tag validated like one we would write (D3)."""
+    tags = list(tags or [])
+    if len(tags) > MAX_FILTER_TAGS:
+        raise ValueError(f"At most {MAX_FILTER_TAGS} tags per filter")
+    return [f"+{_validate_tag(t)}" for t in tags]
 
 
 def list_tasks(username: str, filter_args: list[str] | None = None) -> list[Task]:
@@ -78,6 +159,7 @@ def _build_args(
     until: str | None,
     recur: str | None,
     depends: list[str] | None,
+    mode: Literal["create", "modify"],
 ) -> tuple[list[str], list[str]]:
     """Split a change into (modifiers, free text).
 
@@ -85,33 +167,42 @@ def _build_args(
     two cannot be interleaved. Returning them separately makes the trust boundary explicit in
     the type: modifiers are built here from validated values, free text is whatever the user
     typed and never reaches a parsed position (finding SEC-3).
+
+    Tags and dependencies are emitted here only on create. On modify they are a set to
+    reach from the task's current one, which needs a read first; `modify_task` does that.
     """
     mods: list[str] = []
     text: list[str] = [description] if description is not None else []
     args = mods  # modifiers only, from here down
-    if project is not None:
-        args.append(f"project:{project}")
-    if priority is not None:
-        if priority not in VALID_PRIORITIES:
-            raise ValueError(f"Invalid priority: {priority}")
-        args.append(f"priority:{priority}")
-    if due is not None:
-        args.append(f"due:{due}")
-    if scheduled is not None:
-        args.append(f"scheduled:{scheduled}")
-    if wait is not None:
-        args.append(f"wait:{wait}")
-    if until is not None:
-        args.append(f"until:{until}")
-    if recur is not None and recur != "":
-        if not VALID_RECUR_RE.match(recur.strip()):
-            raise ValueError(f"Invalid recur value: {recur}")
-        args.append(f"recur:{recur.strip()}")
-    if tags is not None:
-        for tag in tags:
+    # One clear semantic for every scalar field (D7): on modify `""` emits `field:`, which
+    # Taskwarrior reads as "remove it"; on create there is nothing to clear, so `""` is "not
+    # given". Clearing recur or due on a recurring task is refused by Taskwarrior (rc 2, 400).
+    fields = {
+        "project": project,
+        "priority": priority,
+        "due": due,
+        "scheduled": scheduled,
+        "wait": wait,
+        "until": until,
+        "recur": recur,
+    }
+    for name, value in fields.items():
+        if value is None or (value == "" and mode == "create"):
+            continue
+        if value == "":
+            args.append(f"{name}:")
+            continue
+        if name == "priority" and value not in VALID_PRIORITIES:
+            raise ValueError(f"Invalid priority: {value}")
+        if name == "recur":
+            if not VALID_RECUR_RE.match(value.strip()):
+                raise ValueError(f"Invalid recur value: {value}")
+            value = value.strip()
+        args.append(f"{name}:{value}")
+    if mode == "create":
+        for tag in tags or []:
             args.append(f"+{_validate_tag(tag)}")
-    if depends is not None:
-        for dep in depends:
+        for dep in depends or []:
             args.append(f"depends:{_validate_uuid(dep)}")
     return mods, text
 
@@ -128,6 +219,7 @@ def create_task(username: str, task: TaskCreate) -> Task:
         task.until,
         task.recur,
         task.depends,
+        mode="create",
     )
     task_runner.add_task(username, mods, text)
 
@@ -142,24 +234,49 @@ def create_task(username: str, task: TaskCreate) -> Task:
 
 
 def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
+    """Change the fields that are set; leave the rest alone.
+
+    `tags` is the complete desired set, `tags_add`/`tags_remove` are deltas, and `depends`
+    is a complete set too. Each set is reached from the task's current one by emitting
+    `-tag`/`+tag` and `depends:-uuid`/`depends:uuid` as modifiers, before `--`: after it they
+    would become description text. Before this, modify only ever added, so a tag or a
+    dependency could never be removed.
+    """
     _validate_uuid(uuid)
+    if task.tags is not None and (task.tags_add or task.tags_remove):
+        raise ValueError("Send either tags (full set) or tags_add/tags_remove, not both")
+    tags_add = [_validate_tag(t) for t in task.tags_add or []]
+    tags_remove = [_validate_existing_tag(t) for t in task.tags_remove or []]
     mods, text = _build_args(
         task.description,
         task.project,
-        task.tags,
+        None,
         task.priority,
         task.due,
         task.scheduled,
         task.wait,
         task.until,
         task.recur,
-        task.depends,
+        None,
+        mode="modify",
     )
-    # Clear fields when explicitly set to empty
-    if task.recur == "":
-        mods.append("recur:")
-    if task.depends is not None and len(task.depends) == 0:
-        mods.append("depends:")
+    if task.tags is not None or tags_add or tags_remove or task.depends is not None:
+        # Read by uuid, which matches regardless of status, so a task hidden by a future
+        # `wait` is re-tagged like any other.
+        current = get_task(username, uuid)
+        if task.tags is not None or tags_add or tags_remove:
+            if task.tags is not None:
+                desired = set(task.tags)
+            else:
+                desired = (set(current.tags) | set(tags_add)) - set(tags_remove)
+            removes, adds = _tag_diff(current.tags, desired)
+            mods += [f"-{t}" for t in removes] + [f"+{t}" for t in adds]
+        if task.depends is not None:
+            if not task.depends:
+                mods.append("depends:")
+            else:
+                mods += _depends_diff(current.depends, task.depends)
+
     if not mods and not text:
         return get_task(username, uuid)
     task_runner.modify_task(username, uuid, mods, text)
@@ -194,8 +311,29 @@ def annotate_task(username: str, uuid: str, text: str) -> Task:
     return get_task(username, uuid)
 
 
+def gtd_list(username: str, view: GtdView, tags: list[str] | None = None) -> list[Task]:
+    """One GTD list, sorted by urgency; the tickler by `wait`, soonest first.
+
+    The tickler sorts on the stored `wait` string: Taskwarrior exports every date in the same
+    UTC basic format (`20300101T000000Z`), so string order is date order.
+    """
+    filters = [*_VIEW_FILTERS[view], *_tag_filters(tags)]
+    tasks = list_tasks(username, filters)
+    if view == "tickler":
+        tasks.sort(key=lambda t: t.wait or "")
+    return tasks
+
+
+def project_tasks(username: str, name: str, tags: list[str] | None = None) -> list[Task]:
+    """A project's visible tasks. `project:` is still Taskwarrior's prefix match here."""
+    return list_tasks(username, [*PENDING, f"project:{name}", *_tag_filters(tags)])
+
+
 def project_names(username: str) -> list[str]:
-    """Distinct project names across a user's pending tasks, in first-seen order.
+    """Distinct project names across a user's open tasks, in first-seen order.
+
+    Open includes tasks hidden by a future `wait`, so parking a project's only task in the
+    tickler no longer drops the project from the list.
 
     Exists so routers never reach the Taskwarrior adapter directly: every call to the
     subprocess goes through this layer, which is where validation lives. The GTD router
@@ -203,7 +341,7 @@ def project_names(username: str) -> list[str]:
     RULE-ARCH-001 now forbids.
     """
     seen: dict[str, None] = {}
-    for raw in task_runner.export_tasks(username, ["status:pending"]):
+    for raw in task_runner.export_tasks(username, OPEN):
         project = raw.get("project")
         if project:
             seen[project] = None

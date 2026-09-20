@@ -138,6 +138,16 @@ The previous configuration paired `allow_origins=["*"]` with `allow_credentials=
 makes Starlette reflect the caller's own `Origin` back — every origin held full credentialed
 access (finding SEC-4).
 
+## MCP surface
+
+The MCP server at `/mcp` exposes an **allowlist**, not the whole API: every operation of the
+`tasks`, `gtd`, `projects` and `inbox` routers, plus `health` and `me`
+(`include_tags` and `include_operations` in `backend/app/main.py`). Login, registration, API-key,
+profile, password, user and admin operations are REST-only. An agent holding a key therefore
+cannot read the key back, rotate it, or reach an admin route through MCP, whatever the account's
+role. The list fails closed — a router with a new tag is not a tool until it is added — and
+`backend/tests/unit/test_mcp_session.py` pins it as a client receives it. ADR 0037.
+
 ## Login throttling
 
 `POST /auth/login` allows `LOGIN_RATE_LIMIT` failed attempts per username per
@@ -173,7 +183,15 @@ Three controls, in order of how much they are relied on:
    after it, so an override is inert *by Taskwarrior's own grammar* rather than by our
    filtering. This is the primary control precisely because it does not depend on us
    enumerating dangerous shapes correctly. Modifiers must precede it, since anything after
-   `--` becomes text.
+   `--` becomes text. That includes tag removals: `-tag` is a modifier, and after `--` it
+   would silently become part of the description. Tag names are therefore shaped so that
+   they cannot turn into something else: a tag written or added must match `TAG_RE`
+   (letter, `_` or `@` first; no leading `+`, `-`, `.` or digit, no comma or whitespace),
+   and a stored tag being removed must match the looser `EXISTING_TAG_RE`, so legacy tags
+   such as `@home,@office` stay removable while nothing that could reshape the modifier gets
+   through. Its first character is still a letter, `_`, `@`, `$` or `#`: Taskwarrior 3.5.0
+   reads `-1abc` or `-.x` as description text, so such a removal would overwrite the
+   description and keep the tag. It is refused (400) instead.
 2. **`reject_structural_tokens`** refuses `rc.`-shaped tokens in the caller-supplied argument
    list — the filter and modifier positions, which must stay parseable and so cannot sit
    behind a separator.
@@ -181,6 +199,23 @@ Three controls, in order of how much they are relied on:
    [`backend/app/services/task_runner.py`](../backend/app/services/task_runner.py). A choke
    point only works while it stays the only door, and a second caller would bypass both
    controls above with nothing going red.
+
+**How the boundary reports failure.** `_run` reads Taskwarrior's exit code: 0 and 1 are
+success (1 is "nothing matched"). **2 is Taskwarrior's generic error code.** Mostly it is
+Taskwarrior refusing the input — an unparseable date, a priority outside `H`/`M`/`L`, `recur`
+without `due`, stripping `recur` or `due` from a recurring task — and `_run` raises
+`TaskwarriorRejected`, a `ValueError`, so every router answers 400 with Taskwarrior's stderr as
+the detail. But 3.5.0 also exits 2 when it cannot reach its own store: a missing rc file, a
+data directory it cannot create, and every sqlite failure (unable to open, read-only, corrupt,
+locked), which it reports with sqlite's `Error code N`. Those are the server's fault and their
+stderr can name the absolute data path, so when the stderr matches `_SYSTEM_FAULT` `_run` logs
+it and raises a `RuntimeError` with a generic message: 500, no path. Any other code stays a
+`RuntimeError`, 500. Until this, all of them were 500. The stderr of the input refusals checked
+names the offending value and nothing about the server, no data path (checked on 3.5.0, pinned
+in `tests/container`); the no-path claim covers those refusals only. The
+binary never inherits the server's stdin (`/dev/null`), and `rc.recurrence.confirmation=no`
+is one of `_run`'s own overrides: modifying one instance of a recurring task otherwise asks
+whether to modify all of them and, on a terminal, waited for an answer until the timeout.
 
 Reading back a created task uses Taskwarrior's `+LATEST` virtual tag rather than re-querying
 by description. The old form put user text into a *filter* position — the one place `--`

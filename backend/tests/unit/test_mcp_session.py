@@ -151,3 +151,54 @@ class TestCredentialsReachTheEndpoint:
         _, result = _run({})
         assert result.isError
         assert "401" in result.content[0].text
+
+
+# The eleven operations the allowlist took off the MCP surface (ADR 0037). Each one carries a
+# credential, changes an account, or is admin-only; none had an agent consumer. They stay on
+# REST, where the web UI uses them.
+REMOVED = {
+    "change_password_auth_password_put",
+    "get_apikey_auth_apikey_get",
+    "get_settings_admin_settings_get",
+    "list_users_admin_users_get",
+    "login_auth_login_post",
+    "regenerate_apikey_auth_apikey_regenerate_post",
+    "register_auth_register_post",
+    "registration_status_auth_registration_status_get",
+    "set_user_role_admin_users__target__role_put",
+    "update_profile_auth_me_put",
+    "update_settings_admin_settings_put",
+}
+
+
+class TestTheSurfaceIsAnAllowlist:
+    """No authentication, API-key, user or admin operation is reachable over MCP (ADR 0037).
+
+    The surface is ``include_tags`` plus two named operations. That fails closed: a router
+    with a new tag is not a tool until someone adds it. These tests read the list as a client
+    receives it, not from the server object.
+    """
+
+    def test_no_removed_operation_is_offered(self, api_key):
+        names, _ = _run({"X-Api-Key": api_key})
+        assert REMOVED.isdisjoint(names)
+
+    def test_the_only_auth_or_admin_tool_is_me(self, api_key):
+        names, _ = _run({"X-Api-Key": api_key})
+        assert [n for n in names if "_auth_" in n or "_admin_" in n] == ["me_auth_me_get"]
+
+    def test_the_named_operations_exist(self, api_key):
+        """`include_operations` silently ignores a name that matches nothing.
+
+        A renamed ``health`` or ``me`` handler would drop the tool without an error; this is
+        what notices.
+        """
+        names, _ = _run({"X-Api-Key": api_key})
+        assert {"health_health_get", "me_auth_me_get"} <= set(names)
+
+    def test_a_removed_tool_cannot_be_called_and_leaks_no_key(self, api_key):
+        _, result = _run({"X-Api-Key": api_key}, tool="get_apikey_auth_apikey_get")
+        assert result.isError
+        text = " ".join(getattr(c, "text", "") for c in result.content)
+        assert "Unknown tool" in text
+        assert api_key not in text

@@ -54,8 +54,9 @@ everybody's data.
 **Three actors reach the system, not two.** The browser SPA, which authenticates with a JWT held in
 `localStorage` (`token`, `role`, `username` and three more, snapshotted in
 [`ops/surfaces/spa.json`](../ops/surfaces/spa.json)); agents and MCP clients, which authenticate with
-a permanent API key; and the operator with shell on the deploy host, who is outside every control in
-this repository. The third is the largest trusted actor and there is exactly one of them
+a permanent API key — over MCP they reach only the task, GTD, project and inbox operations plus
+`health` and `me`, never an authentication, API-key, user or admin operation (ADR 0037); and the
+operator with shell on the deploy host, who is outside every control in this repository. The third is the largest trusted actor and there is exactly one of them
 (`RISK-GOV-001`), which is also why nothing here can be enforced by review.
 
 **The frontend's role check is decoration.** `auth.role` is read from `localStorage`, so a viewer can
@@ -73,8 +74,8 @@ both.
 **Enforced**
 - `RULE-SEC-001` — every route in [`backend/app/routers/`](../backend/app/routers) declares its guard
   in [`rules/route-guards.toml`](../rules/route-guards.toml), the declaration must match the guard the
-  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-one
-  routes: twenty-four `user`, four `admin`, three `open`.
+  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-two
+  routes: twenty-five `user`, four `admin`, three `open`.
 - `RULE-GOV-001` — the live branch protection matches [`ops/github/ruleset.json`](../ops/github/ruleset.json),
   so the rule that an unverified commit cannot reach `main` is itself checked-in state.
 - `RULE-TEST-001` and `RULE-TEST-002` — the bootstrap branches, the last-admin refusal and the
@@ -82,8 +83,8 @@ both.
 
 **Asserted**
 - **The route-guard rule does not see the whole surface.** `tools/checks/route_guards.py` globs
-  `backend/app/routers/*.py` only. The served schema has **32** operations
-  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 31: the
+  `backend/app/routers/*.py` only. The served schema has **33** operations
+  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 32: the
   odd one is `GET /health` at [`backend/app/main.py:91-93`](../backend/app/main.py), declared on the
   app object. Harmless in itself, and the proof that the next route added there would need no guard
   declaration. `RISK-SEC-005`.
@@ -121,8 +122,11 @@ Two controls, in order, both in that file:
 that was never the vulnerability, and saying so is worth a line because the linter's `S603` finding
 is about the wrong risk. [ADR 0019](adr/0019-the-taskwarrior-argv-boundary.md) records the whole
 boundary. Structured fields are validated separately before they get near it:
-[`backend/app/services/task_service.py:6-11`](../backend/app/services/task_service.py) pins UUID,
-priority and tag shapes, and line 64-67 pins the recurrence grammar.
+[`backend/app/services/task_service.py:7-24`](../backend/app/services/task_service.py) pins UUID,
+priority and tag shapes (`TAG_RE` for a tag written or added, the looser `EXISTING_TAG_RE` for a
+stored tag being removed, whose first character still excludes a digit or `.`, because the
+binary reads `-1abc` as description text), and lines 107-110 pin the recurrence grammar. A tag removal is a `-tag`
+modifier and goes before `--` like every other modifier; after it, it would be description text.
 
 One historical detail is worth keeping visible: `create_task` used to re-query by
 `["description:" + task.description]`, putting the same user string into a *filter* position, which
@@ -456,6 +460,13 @@ survives a password change. `users.db` is a bind-mounted file and is in every ba
 route, so a stolen key's *use* is reconstructable and rotation is one `POST` away. That is
 observation, not prevention, and it says nothing about a key read from the file directly.
 `WAIVER-SEC-003`, expiring 2027-01-31.
+
+**Mitigated for agent sessions:** the MCP surface is an allowlist (ADR 0037). No authentication,
+API-key, user or admin operation is a tool, so an agent — or a prompt injected into one — holding a
+key over MCP cannot read it back through `GET /auth/apikey`, rotate it, change the password, or reach
+an admin route, even when the account is an admin. `backend/tests/unit/test_mcp_session.py` pins the
+list as a client receives it, and a call to a removed name returns "Unknown tool" without the key.
+REST is unchanged: the same key used directly against the API still reaches every route.
 
 ### The compatibility shim
 

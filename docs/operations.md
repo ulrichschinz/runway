@@ -624,6 +624,47 @@ Nothing compares the checked-in copy against the host. A gate check cannot do it
 deploy host — so the honest options are a scheduled job that reports divergence from somewhere that does, or
 accepting that this file is correct as of the date on it.
 
+## Defect fixed 2026-09-19: removing a tag did nothing
+
+Until this date, removing a tag in the web UI, or sending a shorter `tags` list to `PUT /tasks/{uuid}`
+over REST or MCP, returned 200 and changed nothing: modify only ever emitted `+tag`, so the removed tag
+stayed. A status swap such as someday → next left the task in both lists. `depends` had the same defect
+(`depends:X` only adds). It was in production from the first release. No data was lost; affected tasks
+simply kept extra tags, which users can now remove.
+
+What would have caught it: a test that removes something. The unit fake removed tags on `-tag`
+correctly, but no test ever sent a shorter set and looked at the result. Both tiers now do
+([brief 0030](briefs/0030-tags-are-a-full-set.md)).
+
+## Defect fixed 2026-09-19: the web UI could not clear a field, nor anyone a priority
+
+Until this date, emptying a date, the project or the priority in the web UI and saving returned 200 and
+changed nothing: the form sent `null` for every empty field, which the API reads as "unchanged". Over REST
+and MCP an empty string cleared dates and the project, but a priority could not be cleared at all (`""` was
+an invalid priority, 400), and on create `project: ""` was sent through to Taskwarrior. Separately, every
+input Taskwarrior itself refused (exit code 2: a bad date, `recur` without `due`) came back as a 500, and
+the inbox webhook turned an invalid priority into a 500. In production from the first release; no data was
+lost.
+
+What would have caught it: a test that clears something through the same payload the UI builds. The payload
+is now a pure, tested function (`frontend/src/shared/taskPayload.js`), and both backend tiers clear every
+field ([brief 0031](briefs/0031-empty-string-clears.md)).
+
+## Defect fixed 2026-09-19: the inbox held project tasks, waiting-fors vanished
+
+Until this date `/gtd/inbox` filtered on `-project`, which Taskwarrior 3.5 reads as "not tagged `project`",
+not "has no project": every untagged task of a project showed up in the inbox. And every list filtered on
+`status:pending`, which on 3.5 excludes a task whose `wait` lies in the future — so a `+waiting` task with a
+future wait vanished from `/gtd/waiting`, a project whose only task was parked vanished from `/gtd/projects`,
+and nothing listed parked tasks at all. In production from the first release; no data was lost. The inbox
+now filters `project:` (empty), waiting and the project list read pending and hidden tasks alike, and
+`GET /gtd/tickler` lists the hidden ones.
+
+What would have caught it: the unit fake. It implemented `-project` as "no project" and knew no `wait`, so
+the unit tier agreed with the code and the binary was never asked. The fake now models both, and each
+claim it makes is pinned against the binary ([brief 0032](briefs/0032-list-semantics.md),
+[ADR 0036](adr/0036-list-semantics-against-taskwarrior-3-5.md)).
+
 ## Incident 2026-08-25
 
 Every container test failed on a backend nobody had touched:

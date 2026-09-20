@@ -43,6 +43,7 @@ WAIVERS = ROOT / "rules" / "waivers.yaml"
 SHIMS = ROOT / "rules" / "shims.yaml"
 ADRS = ROOT / "docs" / "adr"
 BRIEFS = ROOT / "docs" / "briefs"
+MCP_SNAPSHOT = ROOT / "ops" / "surfaces" / "mcp-tools.json"
 
 MAX_LINES = 250
 MAX_BYTES = 12_000
@@ -140,28 +141,40 @@ def _declared_identifiers() -> set[str]:
 
 
 def _check_surface_counts(text: str) -> None:
-    """The contract states how many routes and MCP tools exist. Verify against the index."""
+    """The contract states how many routes and MCP tools exist. Verify both.
+
+    The REST count comes from the index. The MCP count comes from the runtime-observed
+    snapshot, `ops/surfaces/mcp-tools.json`, which RULE-SURF-001 holds to the booted server:
+    since the surface became an allowlist (ADR 0037) the index, which derives one tool per
+    route, over-counts it (RISK-MCP-001).
+    """
+    import json
+
+    claimed_tools = re.search(r"MCP tools \((\d+)\)", text)
+    if claimed_tools:
+        if not MCP_SNAPSHOT.exists():
+            fail("RULE-DOC-001", f"{MCP_SNAPSHOT.relative_to(ROOT)} is missing")
+        else:
+            tools = json.loads(MCP_SNAPSHOT.read_text(encoding="utf-8"))["count"]
+            if int(claimed_tools.group(1)) != tools:
+                fail(
+                    "RULE-DOC-001",
+                    f"AGENTS.md claims {claimed_tools.group(1)} MCP tools; "
+                    f"{MCP_SNAPSHOT.relative_to(ROOT)} counts {tools}",
+                )
+
     graph = ROOT / "index" / "graph.jsonl"
     if not graph.exists():
         return
-    import json
-
     rows = [json.loads(line) for line in graph.read_text(encoding="utf-8").splitlines()]
     nodes = [r for r in rows if r["type"] == "node"]
     rest = len([n for n in nodes if n["kind"] == "route" and n["attrs"].get("surface") != "spa"])
-    tools = len([n for n in nodes if n["kind"] == "mcp_tool"])
 
     claimed_routes = re.search(r"REST API \((\d+) routes\)", text)
     if claimed_routes and int(claimed_routes.group(1)) != rest:
         fail(
             "RULE-DOC-001",
             f"AGENTS.md claims {claimed_routes.group(1)} REST routes; the index counts {rest}",
-        )
-    claimed_tools = re.search(r"MCP tools \((\d+)\)", text)
-    if claimed_tools and int(claimed_tools.group(1)) != tools:
-        fail(
-            "RULE-DOC-001",
-            f"AGENTS.md claims {claimed_tools.group(1)} MCP tools; the index counts {tools}",
         )
 
 

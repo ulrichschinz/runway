@@ -202,7 +202,11 @@ Both credential shapes work — `X-Api-Key: <key>` and `Authorization: Bearer <k
 The MCP endpoint itself is open — anyone who can reach it may list the tools — but every tool
 call is authenticated by the REST endpoint behind it (`RISK-MCP-002`).
 
-Available MCP tools mirror the REST API. **The tool names are FastAPI operation ids** — the
+The MCP tools are an **allowlist** of the REST API: every operation of the `tasks`, `gtd`,
+`projects` and `inbox` routers, plus `GET /health` and `GET /auth/me`. Login, registration,
+API-key, profile, password, user and admin operations are **REST-only** — an agent session
+holding a key cannot read the key back or rotate it, and a new router is not a tool until it is
+added to the list in `backend/app/main.py` (ADR 0037). **The tool names are FastAPI operation ids** — the
 handler function name, then the path, then the method — not the bare function names this
 section claimed until Step 13, none of which ever existed:
 
@@ -215,7 +219,7 @@ section claimed until Step 13, none of which ever existed:
 
 MCP clients discover tools at connect time, so nothing had to hardcode these — which is
 exactly why the documentation could be wrong for so long without anyone noticing. The full
-list of all 32 is checked in at
+list of all 22 is checked in at
 [`ops/surfaces/mcp-tools.json`](ops/surfaces/mcp-tools.json), captured by booting the app and
 reading the tool list, and `RULE-SURF-001` fails the build when it changes.
 

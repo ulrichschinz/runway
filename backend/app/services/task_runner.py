@@ -32,17 +32,47 @@ third-party argument grammar, not a control we own, and it could change in any r
 """
 
 import json
+import logging
 import os
 import re
 import subprocess
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+
 # A configuration override. Taskwarrior honours these anywhere in the argument list.
 _RC_OVERRIDE = re.compile(r"^rc\.", re.IGNORECASE)
 
-# The three overrides this module supplies itself. Everything else is refused.
-_OWN_OVERRIDES = ("rc.json.array=on", "rc.confirmation=off", "rc.verbose=nothing")
+# The overrides this module supplies itself. Everything else is refused.
+# `rc.recurrence.confirmation=no`: modifying one instance of a recurring task otherwise asks
+# "modify all pending recurrences? (yes/no)" and waits for an answer (Taskwarrior 3.5.0).
+# With it, only the instance changes (verified); stdin is /dev/null as a second guard.
+_OWN_OVERRIDES = (
+    "rc.json.array=on",
+    "rc.confirmation=off",
+    "rc.verbose=nothing",
+    "rc.recurrence.confirmation=no",
+)
+
+# Exit code 2 is Taskwarrior 3.5.0's generic error code, not only its refusal of input: it
+# also exits 2 when it cannot reach its own store. Each pattern below is stderr observed on
+# 3.5.0 for such a fault (2026-09-19): a missing rc file; a data directory it cannot create
+# ("Task Database Error: Cannot create directory ..."); and every sqlite failure, which it
+# reports with sqlite's "Error code N" — unable to open, read-only, corrupt, locked. These
+# are the server's fault, not the caller's, and their stderr can carry the absolute data path.
+_SYSTEM_FAULT = re.compile(
+    r"Error code \d+"
+    r"|Task Database Error"
+    r"|database is locked"
+    r"|unable to open database"
+    r"|readonly database"
+    r"|Cannot proceed without rc file",
+    re.IGNORECASE,
+)
+
+# What a 500 for such a fault says. The stderr goes to the log, never to the caller.
+_SYSTEM_FAULT_MESSAGE = "Taskwarrior could not access its data store"
 
 # Free text is passed after this. Taskwarrior stops interpreting options at it.
 SEPARATOR = "--"
@@ -50,6 +80,18 @@ SEPARATOR = "--"
 
 class UnsafeArgument(ValueError):
     """A caller tried to put a configuration override into the Taskwarrior argv."""
+
+
+class TaskwarriorRejected(ValueError):
+    """Taskwarrior refused the command: the input, not the system, is wrong.
+
+    A bad date, a priority outside the configured values, `recur` without `due`, clearing
+    `recur` or `due` on a recurring task. Raised for exit code 2 unless the stderr matches
+    `_SYSTEM_FAULT` — 2 is Taskwarrior's generic error code and also covers a locked, corrupt
+    or unreachable store, which stays a RuntimeError. A ValueError, so every router maps it
+    to 400; before this it surfaced as a 500. The message is Taskwarrior's stderr; for the
+    input refusals checked on 3.5.0 it names the offending value and nothing about the server.
+    """
 
 
 def reject_structural_tokens(args: list[str]) -> None:
@@ -96,9 +138,18 @@ def _run(username: str, args: list[str], text: list[str] | None = None) -> str:
         capture_output=True,
         text=True,
         timeout=10,
+        # Never the server's terminal: a prompt must not wait for an answer (see above).
+        stdin=subprocess.DEVNULL,
         # shell=False is the default when passing a list — shell injection is impossible
     )
 
+    if result.returncode == 2:
+        stderr = result.stderr.strip()
+        if _SYSTEM_FAULT.search(stderr):
+            # Not the caller's error, and the stderr may name the data path: log it, 500.
+            logger.error("taskwarrior store fault (rc 2): %s", stderr)
+            raise RuntimeError(_SYSTEM_FAULT_MESSAGE)
+        raise TaskwarriorRejected(stderr or "Taskwarrior rejected the command")
     if result.returncode not in (0, 1):
         raise RuntimeError(result.stderr.strip() or "task command failed")
 

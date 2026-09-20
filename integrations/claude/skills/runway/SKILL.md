@@ -139,10 +139,9 @@ review cannot fix the lists: show the screen, then propose `reset` and stop ther
 - **Deleting** is permanent. Ask every time; prefer completing.
 - **Bulk changes** need one explicit confirmation that lists what will change. The
   shorthand answer in a daily review counts as that confirmation.
-- Never touch authentication, API-key, user or admin operations, even if the server
-  exposes them.
-- If a change fails because the server lacks a capability (older runway versions cannot
-  remove tags), say so plainly. Do not work around it by deleting and recreating tasks;
-  that loses history, annotations and dependencies.
+- Never call authentication, API-key, user or admin operations.
+- If a change fails because the server lacks a capability, say so plainly. Do not work
+  around it by deleting and recreating tasks; that loses history, annotations and
+  dependencies.
 - Prefer the server's summary and filter operations when they exist; fall back to the
   plain lists when they do not.

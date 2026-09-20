@@ -30,8 +30,9 @@ what they do.
 | duplicate check, overdue, "in no list" | list tasks (pending), filtered by project or tag where the server allows it |
 | capture unclarified | inbox post (description, optional note) |
 | counters for reviews and hooks | gtd summary, if present |
-| hidden ticklers | gtd tickler, if present |
+| hidden ticklers (future `wait`, soonest first) | gtd tickler (`gtd/tickler`) |
 | project plan | get plan / upsert plan |
+| change tags without reading first | modify task (`tasks/{uuid}`), `tags_add` / `tags_remove` |
 
 ## Status tags
 
@@ -40,7 +41,8 @@ what they do.
 - **Later steps without a status tag are allowed inside projects only.** A stand-alone
   task with no status tag is in no GTD list at all. Report it as a finding in reviews
   ("3 tasks are in no list") and let the user decide.
-- Switching status means removing the old tag and adding the new one in the same call.
+- Switching status means removing the old tag and adding the new one in the same call:
+  `tags_remove` + `tags_add`. Combining them with `tags` (the complete set) returns 400.
 - Order later steps with `depends` when the order is real. Do not build dependency chains
   for their own sake.
 
@@ -89,7 +91,8 @@ it has one.
 | `wait` | hide completely until this date | tickler only |
 | `until` | task expires by itself | rarely |
 
-Use ISO dates (`2026-09-25`). To clear a date, send an empty string.
+Use ISO dates (`2026-09-25`). An empty string clears project, priority, due, scheduled,
+wait, until and recur; a recurring task keeps its recur and due.
 
 A pile of overdue `due` dates is a symptom of wish dates. In a review, each overdue item
 gets one of: done, a new honest date, or no due date at all.
@@ -98,17 +101,19 @@ gets one of: done, a new honest date, or no due date at all.
 
 Description states the expected thing ("Rückmeldung von Frau Berg zum Workshop-Termin").
 Annotation: who, what was asked, when, what counts as an answer. `scheduled` = the day to
-follow up. Do not use `wait` on waiting-for tasks: the weekly review needs the complete
-list of what others owe the user, including items that are not due yet.
+follow up. Do not use `wait` on waiting-for tasks: `scheduled` carries the follow-up;
+`wait` would hide the task from the project list and the daily review.
 
 ## Tickler
 
-Only `description` + `wait`. No tag, no project. When the date arrives the item shows up
-in the inbox and gets clarified like anything new — by then the user knows more.
+Only `description` + `wait`. No tag, no project. Listed by `gtd/tickler` until then. When
+the date arrives the item is back in the inbox and gets clarified like anything new — by
+then the user knows more.
 
 ## Recurring
 
-`recur` needs a `due` date; this is the one place where a due date on a routine is fine.
+`recur` needs a `due` date (the server answers 400 otherwise); this is the one place where a
+due date on a routine is fine.
 Do not create a recurring "do daily review" task: missed instances pile up and turn a
 habit into guilt.
 
@@ -120,5 +125,5 @@ agent" stamps.
 
 ## Priority
 
-New tasks get priority `M` from the server by default. Do not set priorities unless the
-user asks; GTD chooses by context, time and energy first.
+New tasks have no priority. Do not set one unless the user asks; clear it with an empty
+string. GTD chooses by context, time and energy first.

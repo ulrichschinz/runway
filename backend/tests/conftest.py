@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings  # noqa: E402
-from app.services import task_runner  # noqa: E402
+from app.services import task_runner, task_service  # noqa: E402
 from tests.fake_task import FakeTaskCLI  # noqa: E402
 
 
@@ -85,6 +85,9 @@ def fake_task(monkeypatch: pytest.MonkeyPatch) -> FakeTaskCLI:
     """
     fake = FakeTaskCLI()
     monkeypatch.setattr(task_runner, "_run", fake.run)
+    # One clock for both sides: what the fake calls "now" is what the service calls "now".
+    # Read at call time, so a test can move `fake.now` forward.
+    monkeypatch.setattr(task_service, "_now", lambda: fake.now)
     return fake
 
 
@@ -104,9 +107,18 @@ def registered(client: TestClient) -> dict[str, str]:
     Registration is enabled by default in a fresh database (``allow_registration`` is
     seeded from settings, which default to False) — so it is enabled explicitly here.
     """
+    return register_user(client)
+
+
+def register_user(client: TestClient, username: str = "alice") -> dict[str, str]:
+    """Register `username` through the API and return credentials, token and API key.
+
+    A plain function so the container tier can register a user against the real binary
+    exactly the way the unit tier does against the fake.
+    """
     client.app.state  # noqa: B018  # touch app state so the lifespan has certainly run
     _enable_registration(client)
-    body = {"username": "alice", "password": "correct horse battery staple"}
+    body = {"username": username, "password": "correct horse battery staple"}
     r = client.post("/auth/register", json=body)
     assert r.status_code == 201, r.text
     token = client.post("/auth/login", json=body).json()["access_token"]

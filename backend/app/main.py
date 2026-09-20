@@ -93,8 +93,8 @@ def health():
     return {"status": "ok"}
 
 
-# The MCP surface. Two arguments, each fixing a defect that made the server unusable in
-# production from its first deploy until 2026-09-18 — see ADR 0033.
+# The MCP surface. `headers` and `mount_http` each fix a defect that made the server unusable
+# in production from its first deploy until 2026-09-18 — see ADR 0033.
 #
 # `headers` is the allowlist of request headers forwarded into the tool call. It defaults to
 # ["authorization"] alone, which meant the `X-Api-Key` header the README and the Settings
@@ -109,5 +109,18 @@ def health():
 # server handed out resolved to the SPA, and no client could post a second message. Streamable
 # HTTP is one endpoint that never advertises a path, so it is correct behind the proxy with
 # no root_path to keep in sync.
-mcp = FastApiMCP(app, headers=["authorization", "x-api-key"])
+#
+# `include_tags` + `include_operations` make the tool list an allowlist (ADR 0037): the task,
+# GTD, project and inbox routers, plus `health` (which has no tag) and `me`. Every auth,
+# API-key, user and admin operation stays REST-only, so an agent session holding a key cannot
+# read the key back, rotate it, or reach an admin route. A router with a new tag is not a tool
+# until it is added here — the list fails closed. fastapi-mcp takes the union of the two
+# include kinds, and refuses include with exclude of the same kind. `include_operations`
+# ignores a name that matches nothing, so test_mcp_session.py pins both.
+mcp = FastApiMCP(
+    app,
+    headers=["authorization", "x-api-key"],
+    include_tags=["tasks", "gtd", "projects", "inbox"],
+    include_operations=["health_health_get", "me_auth_me_get"],
+)
 mcp.mount_http()

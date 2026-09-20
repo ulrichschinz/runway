@@ -51,7 +51,7 @@ If an answer says `STALE`, run `make fix`. The answer was not trustworthy.
 | Change | Goes in |
 |---|---|
 | A task operation, or anything touching Taskwarrior | `backend/app/services/task_service.py`. **Only `be/adapters/task` may run the subprocess** — routers reach it through the service, which is where validation lives. |
-| A new REST endpoint | a router in `backend/app/routers/`. It automatically becomes an MCP tool named after the handler function — see §5. |
+| A new REST endpoint | a router in `backend/app/routers/`. It is an MCP tool only if its tag is on the allowlist in `backend/app/main.py` — see §5. |
 | Anything reading or writing a database | `backend/app/database.py`. It is the only module that opens a connection — the users database and the audit log alike. |
 | An audit event | `backend/app/audit.py` — the vocabulary and the writer. It lives in `be/adapters/db` because the line above leaves it nowhere else to live. Reading the log is an operator activity; there is no route for it. |
 | A frontend rule about tags, filtering or sorting | `frontend/src/shared/`. These are pure and tested; components are not. |
@@ -89,8 +89,8 @@ expand → migrate → switch → contract — not a changelog line.
 
 | Surface | Promise |
 |---|---|
-| REST API (32 routes) | Breaking changes go through the migration pattern. The served OpenAPI schema is snapshotted in `ops/surfaces/openapi.json`. |
-| **MCP tools (32)** | Tool names are FastAPI **operation ids** — function name, path, method (`create_task_tasks_post`) — not the bare function names claimed until Step 13. Observed by booting the app; snapshot in `ops/surfaces/mcp-tools.json`, enforced by `RULE-SURF-001`. Renaming a Python function still renames its tool, so it is a breaking public-surface change. Transport is Streamable HTTP at `/mcp` (`/api/mcp` externally); a snapshot cannot prove a client can reach it, and for eleven weeks none could, so `backend/tests/unit/test_mcp_session.py` opens a real one (ADR 0033). |
+| REST API (33 routes) | Breaking changes go through the migration pattern. The served OpenAPI schema is snapshotted in `ops/surfaces/openapi.json`. |
+| **MCP tools (22)** | Allowlist: tags `tasks`, `gtd`, `projects`, `inbox`, plus `health` and `me` (ADR 0037); auth/admin are REST-only. Tool names are FastAPI **operation ids** — function, path, method (`create_task_tasks_post`). Observed at boot; snapshot in `ops/surfaces/mcp-tools.json`, enforced by `RULE-SURF-001`. Renaming an exposed route's function renames its tool: a breaking change. Transport is Streamable HTTP at `/mcp` (`/api/mcp` externally); for eleven weeks no client could connect, so `backend/tests/unit/test_mcp_session.py` opens a real session (ADR 0033). |
 | Auth: `Authorization: Bearer <jwt>`, `X-Api-Key`, and Bearer-as-API-key everywhere | The third form is `SHIM-SEC-006`, a dated compatibility shim in `rules/shims.yaml`, not a design. `RULE-SEC-002` fails the gate when it expires. |
 | SQLite schema | Forward-only, additive. Migrations run in `init_db()` on every start, and the migrated schema is snapshotted in `ops/surfaces/db-schema.sql`. |
 | Taskwarrior data and `backend/taskrc_template.txt` | **Urgency coefficients are a behavioural contract** — changing one re-orders every user's list. Existing users' `.taskrc` files are *not* updated. |

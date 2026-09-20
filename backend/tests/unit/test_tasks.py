@@ -50,14 +50,22 @@ class TestCreate:
         assert task["project"] == "runway"
         assert set(task["tags"]) == {"next", "work"}
         assert task["priority"] == "H"
-        assert task["due"] == "2026-09-01"
+        # Stored as Taskwarrior stores it: UTC basic format (the fake models the TZ=UTC image).
+        assert task["due"] == "20260901T000000Z"
         assert task["status"] == "pending"
 
-    @pytest.mark.parametrize("priority", ["X", "high", "h", ""])
+    @pytest.mark.parametrize("priority", ["X", "high", "h"])
     def test_rejects_an_unknown_priority(self, client, auth, priority):
         r = client.post("/tasks", json={"description": "x", "priority": priority}, headers=auth)
         assert r.status_code == 400
         assert "Invalid priority" in r.json()["detail"]
+
+    def test_an_empty_priority_means_none_given(self, client, auth):
+        """On create `""` is "not given" for every field (D7); it used to be a 400."""
+        task = _create(client, auth, priority="", project="", due="")
+        assert task["priority"] is None
+        assert task["project"] is None
+        assert task["due"] is None
 
     @pytest.mark.parametrize("tag", ["has space", "semi;colon", "pipe|char", "$(whoami)"])
     def test_rejects_a_tag_outside_the_allowed_character_set(self, client, auth, tag):
@@ -67,7 +75,14 @@ class TestCreate:
 
     @pytest.mark.parametrize("recur", ["daily", "weekly", "2d", "3 weeks"])
     def test_accepts_recognised_recurrence_values(self, client, auth, recur):
-        assert _create(client, auth, description=f"r {recur}", recur=recur)["uuid"]
+        task = _create(client, auth, description=f"r {recur}", recur=recur, due="2026-10-01")
+        assert task["uuid"]
+
+    def test_a_recurring_task_without_a_due_date_is_a_400(self, client, auth):
+        """Taskwarrior refuses it (rc 2); it used to be a 500."""
+        r = client.post("/tasks", json={"description": "r", "recur": "weekly"}, headers=auth)
+        assert r.status_code == 400, r.text
+        assert "due" in r.json()["detail"]
 
     @pytest.mark.parametrize("recur", ["whenever", "1 fortnight", "; rm -rf /"])
     def test_rejects_an_unrecognised_recurrence_value(self, client, auth, recur):
@@ -147,3 +162,123 @@ class TestSingleTaskOperations:
         r = client.post(f"/tasks/{created['uuid']}/annotate", json={"text": "a note"}, headers=auth)
         assert r.status_code == 200
         assert [a["description"] for a in r.json()["annotations"]] == ["a note"]
+
+
+class TestTagsAreAFullSet:
+    """The web UI sends the complete tag list on every save and expected removal to work.
+
+    It did not: modify only ever added tags, so a removed tag silently stayed.
+    """
+
+    @staticmethod
+    def _in(client, auth, view):
+        return [t["uuid"] for t in client.get(f"/gtd/{view}", headers=auth).json()]
+
+    def test_someday_to_next_moves_the_task_between_the_lists(self, client, auth):
+        task = _create(client, auth, description="idea", tags=["someday"])
+        r = client.put(f"/tasks/{task['uuid']}", json={"tags": ["next"]}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json()["tags"] == ["next"]
+        assert task["uuid"] in self._in(client, auth, "next")
+        assert task["uuid"] not in self._in(client, auth, "someday")
+
+    def test_the_deltas_move_it_too(self, client, auth):
+        task = _create(client, auth, description="idea", tags=["someday", "@home"])
+        r = client.put(
+            f"/tasks/{task['uuid']}",
+            json={"tags_remove": ["someday"], "tags_add": ["next"]},
+            headers=auth,
+        )
+        assert r.status_code == 200, r.text
+        assert sorted(r.json()["tags"]) == ["@home", "next"]
+
+    def test_the_full_set_and_a_delta_together_are_a_400(self, client, auth):
+        task = _create(client, auth, tags=["someday"])
+        r = client.put(
+            f"/tasks/{task['uuid']}", json={"tags": ["next"], "tags_add": ["x"]}, headers=auth
+        )
+        assert r.status_code == 400
+        assert "not both" in r.json()["detail"]
+
+    def test_removing_the_last_tag_puts_a_project_less_task_back_in_the_inbox(self, client, auth):
+        task = _create(client, auth, description="unclear", tags=["next"])
+        assert task["uuid"] not in self._in(client, auth, "inbox")
+        r = client.put(f"/tasks/{task['uuid']}", json={"tags": []}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert task["uuid"] in self._in(client, auth, "inbox")
+
+    @pytest.mark.parametrize("field,tag", [("tags_remove", "-x"), ("tags_add", "1abc")])
+    def test_a_malformed_delta_is_a_400(self, client, auth, field, tag):
+        task = _create(client, auth)
+        r = client.put(f"/tasks/{task['uuid']}", json={field: [tag]}, headers=auth)
+        assert r.status_code == 400
+
+    def test_a_new_malformed_tag_in_the_full_set_is_a_400(self, client, auth):
+        task = _create(client, auth)
+        r = client.put(f"/tasks/{task['uuid']}", json={"tags": ["a,b"]}, headers=auth)
+        assert r.status_code == 400
+        assert "Invalid tag" in r.json()["detail"]
+
+    def test_a_delta_list_is_bounded(self, client, auth):
+        task = _create(client, auth)
+        many = [f"t{i}" for i in range(51)]
+        r = client.put(f"/tasks/{task['uuid']}", json={"tags_add": many}, headers=auth)
+        assert r.status_code == 422
+
+
+class TestEmptyStringClears:
+    @pytest.mark.parametrize(
+        "field,value,stored",
+        [
+            ("project", "p", "p"),
+            ("priority", "H", "H"),
+            ("due", "2026-09-01", "20260901T000000Z"),
+            ("wait", "2026-09-01", "20260901T000000Z"),
+        ],
+    )
+    def test_an_empty_string_clears_the_field(self, client, auth, field, value, stored):
+        task = _create(client, auth, **{field: value})
+        assert task[field] == stored
+        r = client.put(f"/tasks/{task['uuid']}", json={field: ""}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json()[field] is None
+
+    def test_null_still_means_unchanged(self, client, auth):
+        task = _create(client, auth, priority="H")
+        r = client.put(f"/tasks/{task['uuid']}", json={"priority": None}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json()["priority"] == "H"
+
+
+class TestTaskwarriorRejections:
+    """Exit code 2 is Taskwarrior refusing the input: the caller's error, so 400 (D6)."""
+
+    @staticmethod
+    def _rejecting(fake_task, monkeypatch, message):
+        from app.services import task_runner
+
+        real = fake_task.run
+
+        def run(username, args, text=None):
+            if "modify" in args or "add" in args:
+                raise task_runner.TaskwarriorRejected(message)
+            return real(username, args, text)
+
+        monkeypatch.setattr(task_runner, "_run", run)
+
+    def test_a_rejected_modify_is_a_400_with_the_reason(self, client, auth, fake_task, monkeypatch):
+        task = _create(client, auth)
+        self._rejecting(
+            fake_task, monkeypatch, "You cannot remove the recurrence from a recurring task."
+        )
+        r = client.put(f"/tasks/{task['uuid']}", json={"recur": ""}, headers=auth)
+        assert r.status_code == 400
+        assert r.json()["detail"] == "You cannot remove the recurrence from a recurring task."
+
+    def test_a_rejected_create_is_a_400(self, client, auth, fake_task, monkeypatch):
+        self._rejecting(
+            fake_task, monkeypatch, "'notadate' is not a valid date in the 'Y-M-D' format."
+        )
+        r = client.post("/tasks", json={"description": "x", "due": "notadate"}, headers=auth)
+        assert r.status_code == 400
+        assert "not a valid date" in r.json()["detail"]
