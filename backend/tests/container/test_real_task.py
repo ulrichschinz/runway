@@ -856,6 +856,66 @@ class TestTheSummaryCounters:
         assert summary["stalled_projects"] == ["alpha"]
 
 
+class TestTheProjectOverview:
+    """The overview's counts against the real binary (D14, D15, ADR 0039).
+
+    The arithmetic is Python over one export and the fake covers it. What the fake cannot
+    cover is the export itself: that a task parked by a future `wait` still reaches the
+    rollup at all (it is `status:waiting`, not `status:pending`, on 3.5), and that a
+    subproject is a project of its own here rather than part of its parent — the binary's
+    `project:` is a hierarchical prefix match, which is the defect ADR 0038 removed.
+    """
+
+    @staticmethod
+    def _create(client, headers, **body):
+        r = client.post("/tasks", json=body, headers=headers)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    @staticmethod
+    def _rows(client, headers):
+        r = client.get("/gtd/projects/overview", headers=headers)
+        assert r.status_code == 200, r.text
+        return {row["name"]: row for row in r.json()}
+
+    def test_parked_and_waiting_tasks_are_counted_and_stop_a_project_being_stalled(
+        self, real_client
+    ):
+        client, headers = real_client
+        future = (datetime.now(UTC) + timedelta(days=30)).strftime("%Y-%m-%d")
+        self._create(client, headers, description="go", project="alpha", tags=["next"])
+        self._create(client, headers, description="later", project="alpha", wait=future)
+        self._create(client, headers, description="chase", project="patient", tags=["waiting"])
+        self._create(client, headers, description="parked", project="dormant", wait=future)
+        self._create(client, headers, description="plain", project="stuck")
+        rows = self._rows(client, headers)
+        assert (rows["alpha"]["pending"], rows["alpha"]["hidden"]) == (1, 1)
+        assert rows["alpha"]["next"] == 1
+        assert rows["patient"]["waiting"] == 1
+        assert (rows["dormant"]["pending"], rows["dormant"]["hidden"]) == (0, 1)
+        assert [name for name, row in rows.items() if row["stalled"]] == ["stuck"]
+
+    def test_a_subproject_is_a_project_of_its_own(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="parent step", project="alpha", tags=["next"])
+        self._create(client, headers, description="child step", project="alpha.sub")
+        rows = self._rows(client, headers)
+        assert sorted(rows) == ["alpha", "alpha.sub"]
+        assert rows["alpha"]["stalled"] is False
+        assert rows["alpha.sub"]["stalled"] is True, "the parent's next action is not its own"
+
+    def test_a_stored_status_reaches_the_overview_and_the_summary(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="plain", project="Haus Umbau")
+        assert client.get("/gtd/summary", headers=headers).json()["stalled_projects"] == [
+            "Haus Umbau"
+        ]
+        r = client.put("/projects/Haus Umbau/status", json={"status": "on_hold"}, headers=headers)
+        assert r.status_code == 200, r.text
+        assert self._rows(client, headers)["Haus Umbau"]["status"] == "on_hold"
+        assert client.get("/gtd/summary", headers=headers).json()["stalled_projects"] == []
+
+
 class TestWhatTheFakeClaims:
     """Each claim ``tests/fake_task.py`` makes about the binary, pinned against the binary.
 

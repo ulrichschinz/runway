@@ -32,9 +32,13 @@ completed in the last seven days: list tasks with `status=completed` and
    anything to prepare? (You ask; the user looks.) Results become tasks.
 5. **Waiting for — the complete list.** For each: still waiting? follow up now (you draft,
    the user sends)? give up? Move `scheduled` forward.
-6. **Projects, one by one.** Is the outcome still wanted? Is there a `next` action? Is it
-   really active, or on hold? For every stalled project: define the next action now, or
-   plan it (`references/planning.md`), or put it on hold, or close it.
+6. **Projects, one by one.** `gtd/projects/overview` gives every project with its counts,
+   its status and whether it is stalled. It takes no `tag`: in a scoped repository do not
+   call it — work from the scoped summary's `stalled_projects` and the scoped lists
+   instead. Is the outcome still wanted? Is there a `next` action? Is it really active, or
+   on hold? For every stalled project: define the next action now, or plan it
+   (`references/planning.md`), or put it on hold (status `on_hold`), or close it (status
+   `done`) — `projects/{name}/status`.
 7. **Date hygiene.** Overdue items: done, new honest date, or no date. Question every
    `due` that is not a hard deadline.
 8. **In no list.** Stand-alone tasks without a status tag: `next`, `someday`, or gone.
@@ -72,7 +76,7 @@ Offer a fifteen-minute reset; numbers only, neutral tone:
 2. **Overdue**: done, new honest date, or no date — in one shorthand round like the daily
    review.
 3. **One `next` action per active project.** Projects nobody wants to think about go on
-   hold.
+   hold: status `on_hold`, so the next review stops reporting them as stalled.
 
 Then record a `weekly` review and suggest a fixed weekly slot in the calendar. A calendar
 appointment is the most reliable reminder there is, and it needs no infrastructure.

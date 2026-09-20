@@ -7,10 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 # `record_review` is the name of the handler below, because the handler name is half of the
 # MCP tool name and `record_review_gtd_review_post` is what an agent reads. The storage
 # function keeps its own name behind an alias rather than the route giving up a good one.
-from app.database import get_db, get_reviews
+from app.database import get_db, get_project_statuses, get_reviews
 from app.database import record_review as store_review
 from app.dependencies import get_current_user
-from app.models import GtdSummary, LastReview, Review, ReviewCreate, Task
+from app.models import GtdSummary, LastReview, ProjectOverview, Review, ReviewCreate, Task
 from app.services import task_service
 
 router = APIRouter(prefix="/gtd", tags=["gtd"])
@@ -134,14 +134,16 @@ async def summary(
     ),
 ):
     # Explicitly created projects are the rows this router already reads for `/gtd/projects`;
-    # a project that exists only because tasks name it is active by definition. Stored
-    # statuses arrive later and change these values, never the shape (D17).
+    # they are projects whether or not a task names one, which is what makes an empty one a
+    # finding. The statuses are separate and cover any name at all, including one no project
+    # carries (D15) — the summary names only the projects (`summarize`).
     async with db.execute(
         "SELECT name FROM projects WHERE username=? ORDER BY created_at",
         (username,),
     ) as cur:
         rows = await cur.fetchall()
-    statuses = {row["name"]: "active" for row in rows}
+    explicit = {row["name"] for row in rows}
+    statuses = await get_project_statuses(db, username)
     # The scope the caller is asking about, resolved to the same canonical key POST /gtd/review
     # stores (D16, D17). Asking for `?tag=ar` and getting the unscoped review back would read
     # as "this area was reviewed" when only the whole system ever was — and the other way
@@ -150,7 +152,7 @@ async def summary(
     rows = await get_reviews(db, username)
     at = {row["kind"]: row["reviewed_at"] for row in rows if row["scope"] == key}
     last_review = LastReview(daily=at.get("daily"), weekly=at.get("weekly"))
-    return _mapped(task_service.summarize, username, tag, statuses, last_review)
+    return _mapped(task_service.summarize, username, tag, explicit, statuses, last_review)
 
 
 @router.get(
@@ -204,6 +206,46 @@ async def projects(username: str = Depends(get_current_user), db=Depends(get_db)
     for row in rows:
         seen.setdefault(row["name"], None)
     return list(seen.keys())
+
+
+def _has_plan(row) -> bool:
+    """Whether an explicitly known project carries a plan at all.
+
+    Read off the row the project list already fetches rather than asked for separately: the
+    two list columns are stored as JSON text and are `''` or `'[]'` when empty, which is the
+    only reason this is not a plain truth test.
+    """
+    if any(row[field] for field in ("purpose", "principles", "vision")):
+        return True
+    return any((row[field] or "") not in ("", "[]") for field in ("brainstorm", "organized"))
+
+
+# Declared before `/projects/{name}`: FastAPI matches in declaration order, so the other way
+# round this path would be read as a project called `overview` and answer with its tasks.
+# The name is reserved for creation (D4) so that the two can never both exist as intended
+# targets — but a project called `overview` may already exist, and it is reachable through
+# the task list, which is why the order here is the fix and not the reservation.
+@router.get(
+    "/projects/overview",
+    response_model=list[ProjectOverview],
+    summary="Projects overview",
+    description="Every project with its open task counts, its status and whether it is "
+    "stalled — active, with no `next` action, nothing `waiting` and nothing parked in the "
+    "tickler. Projects that exist only because tasks name them are included and marked "
+    "`explicit: false`. Names and numbers only, no task descriptions.",
+)
+async def projects_overview(
+    username: str = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    async with db.execute(
+        "SELECT * FROM projects WHERE username=? ORDER BY created_at",
+        (username,),
+    ) as cur:
+        rows = await cur.fetchall()
+    explicit = {row["name"]: _has_plan(row) for row in rows}
+    statuses = await get_project_statuses(db, username)
+    return _mapped(task_service.project_overview, username, explicit, statuses)
 
 
 @router.get(

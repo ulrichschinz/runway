@@ -263,6 +263,68 @@
         "title": "ProjectCreate",
         "type": "object"
       },
+      "ProjectOverview": {
+        "properties": {
+          "explicit": {
+            "description": "True when the project was created on purpose or has a plan; false when it exists only because tasks name it. Both are real projects.",
+            "title": "Explicit",
+            "type": "boolean"
+          },
+          "has_plan": {
+            "description": "True when any plan field (purpose, principles, vision, brainstorm, organized) is filled.",
+            "title": "Has Plan",
+            "type": "boolean"
+          },
+          "hidden": {
+            "description": "Tasks parked in the tickler by a future `wait` date.",
+            "title": "Hidden",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The project name, spelled as tasks spell it.",
+            "title": "Name",
+            "type": "string"
+          },
+          "next": {
+            "description": "Visible tasks tagged `next`: the project's next actions.",
+            "title": "Next",
+            "type": "integer"
+          },
+          "pending": {
+            "description": "Open tasks that are visible \u2014 not parked by a future `wait` date.",
+            "title": "Pending",
+            "type": "integer"
+          },
+          "stalled": {
+            "description": "True when the project is `active` and has no `next` action, nothing `waiting` and nothing parked in the tickler. Nothing is moving it.",
+            "title": "Stalled",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "`active` \u2014 it is running and needs a next action; `on_hold` \u2014 deliberately parked, so it is never reported as stalled; `done` \u2014 the outcome was reached or dropped. A project nobody has said anything about is `active`.",
+            "title": "Status",
+            "type": "string"
+          },
+          "waiting": {
+            "description": "Open tasks tagged `waiting`, hidden ones included.",
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "explicit",
+          "has_plan",
+          "pending",
+          "next",
+          "waiting",
+          "hidden",
+          "stalled"
+        ],
+        "title": "ProjectOverview",
+        "type": "object"
+      },
       "ProjectPlan": {
         "properties": {
           "brainstorm": {
@@ -388,6 +450,45 @@
           }
         },
         "title": "ProjectPlanUpdate",
+        "type": "object"
+      },
+      "ProjectStatus": {
+        "properties": {
+          "name": {
+            "description": "The project the status belongs to, spelled as tasks spell it.",
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "description": "`active` \u2014 it is running and needs a next action; `on_hold` \u2014 deliberately parked, so it is never reported as stalled; `done` \u2014 the outcome was reached or dropped. A project nobody has said anything about is `active`.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "title": "ProjectStatus",
+        "type": "object"
+      },
+      "ProjectStatusUpdate": {
+        "properties": {
+          "status": {
+            "description": "`active` \u2014 it is running and needs a next action; `on_hold` \u2014 deliberately parked, so it is never reported as stalled; `done` \u2014 the outcome was reached or dropped. A project nobody has said anything about is `active`.",
+            "enum": [
+              "active",
+              "on_hold",
+              "done"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ProjectStatusUpdate",
         "type": "object"
       },
       "Review": {
@@ -1966,6 +2067,65 @@
         ]
       }
     },
+    "/gtd/projects/overview": {
+      "get": {
+        "description": "Every project with its open task counts, its status and whether it is stalled \u2014 active, with no `next` action, nothing `waiting` and nothing parked in the tickler. Projects that exist only because tasks name them are included and marked `explicit: false`. Names and numbers only, no task descriptions.",
+        "operationId": "projects_overview_gtd_projects_overview_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectOverview"
+                  },
+                  "title": "Response Projects Overview Gtd Projects Overview Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Projects overview",
+        "tags": [
+          "gtd"
+        ]
+      }
+    },
     "/gtd/projects/{name}": {
       "get": {
         "description": "List all pending tasks belonging to a specific project.",
@@ -2774,6 +2934,80 @@
           }
         ],
         "summary": "Update a project plan",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/projects/{name}/status": {
+      "put": {
+        "description": "Say whether a project is `active`, `on_hold` or `done`. Only that is stored: no task is touched, and no project is created \u2014 a project exists because a task names it or because it was created explicitly. An `on_hold` or `done` project is never reported as stalled, which is what makes 'nothing is moving here' a finding worth acting on rather than a list of everything the user has parked.",
+        "operationId": "set_project_status_projects__name__status_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectStatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set a project's status",
         "tags": [
           "projects"
         ]

@@ -43,7 +43,8 @@ denied. Tool names are `mcp__runway__<operation id>`. Merge these entries into t
       "mcp__runway__summary_gtd_summary_get",
       "mcp__runway__last_reviews_gtd_review_get",
       "mcp__runway__record_review_gtd_review_post",
-      "mcp__runway__get_plan_projects_plans__name__get"
+      "mcp__runway__get_plan_projects_plans__name__get",
+      "mcp__runway__projects_overview_gtd_projects_overview_get"
     ],
     "ask": [
       "mcp__runway__create_task_tasks_post",
@@ -54,6 +55,7 @@ denied. Tool names are `mcp__runway__<operation id>`. Merge these entries into t
       "mcp__runway__stop_task_tasks__uuid__stop_post",
       "mcp__runway__create_project_projects_post",
       "mcp__runway__upsert_plan_projects_plans__name__put",
+      "mcp__runway__set_project_status_projects__name__status_put",
       "mcp__runway__webhook_inbox_inbox_post"
     ],
     "deny": [

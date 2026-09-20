@@ -311,3 +311,58 @@ async def test_the_reviews_table_keeps_one_row_per_kind_and_scope(isolated_stora
             )
     finally:
         connection.close()
+
+
+@pytest.mark.anyio
+async def test_a_database_from_before_the_project_status_table_gains_it_quietly(
+    isolated_storage: Path,
+):
+    """The same shape as the reviews table, and for the same reason (D15).
+
+    Project status could have been a column on `projects`, which every deployment already
+    has. It is a table instead because the migration loop runs before the CREATE statements:
+    an ALTER against a table a fresh database does not have yet fails on the first boot and
+    succeeds on the second. A CREATE is one statement with one meaning on both.
+    """
+    path = str(isolated_storage / "users.db")
+    await init_db()
+    connection = sqlite3.connect(path)
+    connection.execute("DROP TABLE project_status")
+    connection.commit()
+    connection.close()
+    assert "project_status" not in tables(path)
+
+    with migration_lines() as buffer:
+        await init_db()
+
+    assert buffer.getvalue() == ""
+    assert "project_status" in tables(path)
+
+
+@pytest.mark.anyio
+async def test_the_project_status_table_holds_one_row_per_project_and_checks_the_status(
+    isolated_storage: Path,
+):
+    """The UNIQUE the upsert depends on, and the CHECK that keeps a third status out."""
+    await init_db()
+    connection = sqlite3.connect(str(isolated_storage / "users.db"))
+    try:
+        connection.execute(
+            "INSERT INTO project_status (username, name, status) VALUES ('alice','website','done')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO project_status (username, name, status)"
+                " VALUES ('alice','website','active')"
+            )
+        # Another user's project of the same name is a different row.
+        connection.execute(
+            "INSERT INTO project_status (username, name, status) VALUES ('bob','website','active')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO project_status (username, name, status)"
+                " VALUES ('alice','other','paused')"
+            )
+    finally:
+        connection.close()

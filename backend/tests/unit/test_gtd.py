@@ -57,6 +57,7 @@ class TestViews:
             "summary",
             "review",
             "projects",
+            "projects/overview",
             "projects/p",
         )
         for view in views:
@@ -571,3 +572,145 @@ class TestSummaryLastReview:
         client.post("/gtd/review", json={"kind": "daily"}, headers=auth)
         scoped = client.get("/gtd/summary", params={"tag": "ar"}, headers=auth).json()
         assert scoped["last_review"]["daily"] is None
+
+
+class TestProjectsOverview:
+    """Every project the user has, with its counts, its status and whether it is stalled.
+
+    The counts come from the same rollup the summary uses and the stalled test is the same
+    predicate (D14), so the one-line finding in a review and the list behind it cannot
+    disagree. Explicit rows and projects that exist only because a task names them are both
+    here; `explicit` says which is which.
+    """
+
+    @staticmethod
+    def _rows(client, auth):
+        r = client.get("/gtd/projects/overview", headers=auth)
+        assert r.status_code == 200, r.text
+        return {row["name"]: row for row in r.json()}
+
+    def test_the_route_is_not_shadowed_by_the_project_tasks_route(self, client, auth):
+        """`/gtd/projects/{name}` is declared after it. The other way round, this call would
+        return the tasks of a project called `overview` — and a project can be called that,
+        because `overview` is refused only where a name is created."""
+        _create(client, auth, description="in the overview project", project="overview")
+        r = client.get("/gtd/projects/overview", headers=auth)
+        assert r.status_code == 200, r.text
+        assert [row["name"] for row in r.json()] == ["overview"]
+        assert r.json()[0]["stalled"] is True
+
+    def test_it_names_no_task(self, client, auth):
+        _create(client, auth, description="a secret step", project="alpha")
+        assert "a secret step" not in client.get("/gtd/projects/overview", headers=auth).text
+
+    def test_the_counts_separate_visible_waiting_and_parked_tasks(self, client, auth):
+        _create(client, auth, description="go", project="alpha", tags=["next"])
+        _create(client, auth, description="chase", project="alpha", tags=["waiting"])
+        _create(client, auth, description="later", project="alpha", wait=HIDDEN)
+        _create(client, auth, description="plain", project="alpha")
+        row = self._rows(client, auth)["alpha"]
+        assert (row["pending"], row["next"], row["waiting"], row["hidden"]) == (3, 1, 1, 1)
+        assert row["stalled"] is False
+
+    def test_a_project_only_waiting_or_only_parked_is_not_stalled(self, client, auth):
+        _create(client, auth, description="chase", project="patient", tags=["waiting"])
+        _create(client, auth, description="later", project="dormant", wait=HIDDEN)
+        _create(client, auth, description="plain", project="stuck")
+        rows = self._rows(client, auth)
+        assert [name for name, row in rows.items() if row["stalled"]] == ["stuck"]
+
+    def test_an_inferred_project_is_not_explicit_and_has_no_plan(self, client, auth):
+        _create(client, auth, description="step", project="inferred")
+        row = self._rows(client, auth)["inferred"]
+        assert (row["explicit"], row["has_plan"], row["status"]) == (False, False, "active")
+
+    def test_an_explicit_project_with_no_task_at_all_is_listed_and_stalled(self, client, auth):
+        client.post("/projects", json={"name": "empty"}, headers=auth)
+        row = self._rows(client, auth)["empty"]
+        assert (row["explicit"], row["pending"], row["stalled"]) == (True, 0, True)
+
+    def test_has_plan_is_true_for_any_filled_plan_field(self, client, auth):
+        client.post("/projects", json={"name": "bare"}, headers=auth)
+        client.put("/projects/plans/written", json={"purpose": "ship it"}, headers=auth)
+        client.put(
+            "/projects/plans/sketched",
+            json={"brainstorm": [{"id": "1", "text": "an idea"}]},
+            headers=auth,
+        )
+        rows = self._rows(client, auth)
+        assert rows["bare"]["has_plan"] is False
+        assert rows["written"]["has_plan"] is True
+        assert rows["sketched"]["has_plan"] is True
+
+    @pytest.mark.parametrize("status", ["on_hold", "done"])
+    def test_a_project_that_is_not_active_is_never_stalled(self, client, auth, status):
+        _create(client, auth, description="plain", project="parked")
+        assert self._rows(client, auth)["parked"]["stalled"] is True
+        client.put("/projects/parked/status", json={"status": status}, headers=auth)
+        row = self._rows(client, auth)["parked"]
+        assert (row["status"], row["stalled"]) == (status, False)
+
+    def test_a_status_on_an_inferred_project_leaves_it_inferred(self, client, auth):
+        _create(client, auth, description="plain", project="inferred")
+        client.put("/projects/inferred/status", json={"status": "on_hold"}, headers=auth)
+        row = self._rows(client, auth)["inferred"]
+        assert (row["status"], row["explicit"]) == ("on_hold", False)
+
+    @pytest.mark.parametrize("status", ["active", "on_hold"])
+    def test_a_status_on_a_name_no_project_carries_is_listed_but_never_stalled(
+        self, client, auth, status
+    ):
+        """The third source is listed and is never a finding (ADR 0039).
+
+        A status can be set before the first task exists, and nothing deletes the row again.
+        Listed, so a status set ahead of time — or a mistyped name — can be seen and
+        corrected; never stalled, because `active` with three zero counts is exactly the
+        stalled shape, and one typo would otherwise be reported in every review from then on.
+        """
+        client.put("/projects/websight/status", json={"status": status}, headers=auth)
+        row = self._rows(client, auth)["websight"]
+        assert (row["explicit"], row["pending"], row["stalled"]) == (False, 0, False)
+
+    def test_projects_with_tasks_come_before_the_explicitly_created_ones(self, client, auth):
+        client.post("/projects", json={"name": "declared"}, headers=auth)
+        _create(client, auth, description="step", project="working")
+        names = [row["name"] for row in client.get("/gtd/projects/overview", headers=auth).json()]
+        assert names == ["working", "declared"]
+
+
+class TestSummaryReadsTheStatus:
+    """The summary's `stalled_projects` and the overview's `stalled` are one definition."""
+
+    def test_an_on_hold_project_drops_out_of_the_summary(self, client, auth):
+        _create(client, auth, description="plain", project="parked")
+        _create(client, auth, description="plain", project="stuck")
+        assert client.get("/gtd/summary", headers=auth).json()["stalled_projects"] == [
+            "parked",
+            "stuck",
+        ]
+        client.put("/projects/parked/status", json={"status": "on_hold"}, headers=auth)
+        assert client.get("/gtd/summary", headers=auth).json()["stalled_projects"] == ["stuck"]
+
+    def test_a_done_explicit_project_is_no_longer_a_finding(self, client, auth):
+        client.post("/projects", json={"name": "shipped"}, headers=auth)
+        assert client.get("/gtd/summary", headers=auth).json()["stalled_projects"] == ["shipped"]
+        client.put("/projects/shipped/status", json={"status": "done"}, headers=auth)
+        assert client.get("/gtd/summary", headers=auth).json()["stalled_projects"] == []
+
+    def test_a_name_that_only_the_status_table_knows_is_not_a_finding(self, client, auth):
+        """Until a task names it, it is a decision about a project rather than a project. The
+        moment one does, it is judged like any other — the status does not suppress it."""
+        client.put("/projects/websight/status", json={"status": "active"}, headers=auth)
+        assert "websight" not in client.get("/gtd/summary", headers=auth).text
+        _create(client, auth, description="pick a domain", project="websight")
+        assert client.get("/gtd/summary", headers=auth).json()["stalled_projects"] == ["websight"]
+
+    def test_the_two_routes_agree(self, client, auth):
+        _create(client, auth, description="plain", project="stuck")
+        _create(client, auth, description="go", project="moving", tags=["next"])
+        client.put("/projects/held/status", json={"status": "on_hold"}, headers=auth)
+        _create(client, auth, description="plain", project="held")
+        rows = client.get("/gtd/projects/overview", headers=auth).json()
+        stalled = [row["name"] for row in rows if row["stalled"]]
+        assert stalled == client.get("/gtd/summary", headers=auth).json()["stalled_projects"]
+        assert stalled == ["stuck"]

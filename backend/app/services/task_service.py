@@ -4,7 +4,15 @@ from datetime import UTC, date, datetime, tzinfo
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.models import GtdSummary, LastReview, Task, TaskCreate, TaskModify, validate_project_name
+from app.models import (
+    GtdSummary,
+    LastReview,
+    ProjectOverview,
+    Task,
+    TaskCreate,
+    TaskModify,
+    validate_project_name,
+)
 from app.services import task_runner
 
 UUID_RE = re.compile(
@@ -607,9 +615,87 @@ def project_rollup(raw: list[dict], now: datetime) -> dict[str, dict[str, int]]:
 _NO_TASKS = {"pending": 0, "next": 0, "waiting": 0, "hidden": 0}
 
 
+def _is_stalled(status: str, counts: dict[str, int], exists: bool) -> bool:
+    """Nothing is moving this project (D14, ADR 0039).
+
+    An **active** project with no `next` action, nothing `waiting` and nothing parked in the
+    tickler. The three zeros are one idea: a project waiting on someone else, or deliberately
+    parked until a date, is not stalled — the user already decided what happens next and the
+    review has nothing to offer. `on_hold` and `done` are never stalled, which is the whole
+    reason a status is stored at all: without it, the most valuable finding a review makes
+    would name every project the user has consciously set aside, every single day.
+
+    `exists` says whether the name is one a task carries or an explicit row holds. A name
+    known only from the status table is not a project yet — the status route creates none —
+    so it is never a finding: a mistyped name in one `PUT` would otherwise become a stalled
+    project forever, and nothing deletes a status row. The overview still lists it, with
+    `stalled: false`, so the typo is visible where it can be looked at rather than in the one
+    line a review reports.
+
+    One predicate for the summary and the overview, so the one-line finding and the list
+    behind it cannot disagree.
+    """
+    return (
+        exists
+        and status == "active"
+        and counts["next"] == 0
+        and counts["waiting"] == 0
+        and counts["hidden"] == 0
+    )
+
+
+def project_overview(
+    username: str,
+    explicit: dict[str, bool] | None = None,
+    statuses: dict[str, str] | None = None,
+) -> list[ProjectOverview]:
+    """Every project the user has, with its counts, its status and whether it is stalled.
+
+    Three sources, because a project can exist in three ways and a review has to see all of
+    them: tasks name it (the rollup), somebody created it or gave it a plan (`explicit`), or
+    somebody set a status on it (`statuses`). Order is first-seen: the projects with tasks
+    first, in the order the export returns them, then the table's own rows by creation — a
+    project nobody has touched in months should not lead the list.
+
+    `explicit` maps each explicitly known project to whether it has a plan; a project missing
+    from it is inferred, which is a fact worth reporting rather than hiding, because an
+    inferred project has no purpose written down anywhere.
+
+    A name that only the status table knows is listed too — that is how a status set before
+    the first task, or a mistyped one, is ever seen again — but it is never stalled: it is a
+    stored decision about a project, not a project (`_is_stalled`).
+    """
+    explicit = explicit or {}
+    statuses = statuses or {}
+    now = _now()
+    rollup = project_rollup(_open_raw(username), now)
+    names: dict[str, None] = dict.fromkeys(rollup)
+    for name in (*explicit, *statuses):
+        names.setdefault(name, None)
+    out: list[ProjectOverview] = []
+    for name in names:
+        counts = rollup.get(name, _NO_TASKS)
+        status = statuses.get(name, "active")
+        out.append(
+            ProjectOverview(
+                name=name,
+                status=status,
+                explicit=name in explicit,
+                has_plan=explicit.get(name, False),
+                pending=counts["pending"],
+                next=counts["next"],
+                waiting=counts["waiting"],
+                hidden=counts["hidden"],
+                stalled=_is_stalled(status, counts, name in rollup or name in explicit),
+            )
+        )
+    return out
+
+
 def summarize(
     username: str,
     tags: list[str] | None = None,
+    explicit: set[str] | None = None,
     statuses: dict[str, str] | None = None,
     last_review: LastReview | None = None,
 ) -> GtdSummary:
@@ -626,15 +712,19 @@ def summarize(
     no tags by definition, so a scoped inbox count would always be zero and would hide the
     one thing GTD asks about first.
 
-    `statuses` maps every explicitly known project to its status; a project that exists only
-    because tasks name it counts as `active`. Its keys are what makes an explicit project
-    with no open task at all visible as stalled. Under a scope, explicit projects without a
-    single matching open task are dropped before the stalled test rather than reported: the
-    point of a scope is that another area's project names never reach the transcript. The
-    scope chooses which projects are named; each of them is then judged by all of its open
-    tasks, because "has a next action" is a fact about the project, not about the scope.
+    `explicit` names the projects that exist as a row; it is what makes an explicit project
+    with no open task at all visible as stalled. `statuses` maps the projects a status was
+    stored for — explicit or inferred — to it; a project missing from it counts as `active`.
+    A name that appears in `statuses` alone is a decision about a project rather than a
+    project, so it is never stalled (`_is_stalled`); the overview lists it, the summary does
+    not name it. Under a scope, projects without a single matching open task are dropped
+    before the stalled test rather than reported: the point of a scope is that another area's
+    project names never reach the transcript. The scope chooses which projects are named;
+    each of them is then judged by all of its open tasks, because "has a next action" is a
+    fact about the project, not about the scope.
     """
     wanted = {token[1:] for token in _tag_filters(tags)}
+    explicit = explicit or set()
     statuses = statuses or {}
     now = _now()
     today = now.date()
@@ -658,15 +748,14 @@ def summarize(
     rollup = project_rollup(raw, now)
     # An explicit project with no task of its own is stalled, so the names have to come from
     # the rows as well as from the tasks — except under a scope, where a project with no
-    # matching task is another area's business and is not named at all.
-    names = set(project_rollup(scoped, now)) if wanted else set(rollup) | set(statuses)
+    # matching task is another area's business and is not named at all. A name that carries
+    # nothing but a stored status is not a project here either; `_is_stalled` drops it.
+    known = set(rollup) | explicit
+    names = set(project_rollup(scoped, now)) if wanted else known | set(statuses)
     stalled = sorted(
         name
         for name in names
-        if statuses.get(name, "active") == "active"
-        and rollup.get(name, _NO_TASKS)["next"] == 0
-        and rollup.get(name, _NO_TASKS)["waiting"] == 0
-        and rollup.get(name, _NO_TASKS)["hidden"] == 0
+        if _is_stalled(statuses.get(name, "active"), rollup.get(name, _NO_TASKS), name in known)
     )
 
     return GtdSummary(

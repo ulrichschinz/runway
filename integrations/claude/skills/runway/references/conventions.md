@@ -34,6 +34,8 @@ what they do.
 | hidden ticklers (future `wait`, soonest first) | gtd tickler (`gtd/tickler`) |
 | project plan | get plan / upsert plan |
 | change tags without reading first | modify task (`tasks/{uuid}`), `tags_add` / `tags_remove` |
+| projects with status and counts | gtd projects overview (`gtd/projects/overview`) |
+| put a project on hold / done / active | project status (`projects/{name}/status`) |
 | duplicate check | list tasks (`tasks`) with `q` = a distinctive word, once with `status=pending` and once with `status=waiting` (hidden ticklers are not pending) |
 
 ## Status tags
@@ -71,10 +73,12 @@ exists for repositories whose conversations are logged or shared with others. An
 request by name always wins. Without the declaration, nothing is hidden.
 
 When `runway_scope` is set, pass its tags as `tag` on **every** task list call, so other
-areas' titles never reach the transcript. The project-name list takes no `tag` and returns
-every area's projects: derive the project names you need from a scoped task list instead of
-calling it. Do not list the inbox in a scoped repository; report its count instead (the
-summary gives it, and a scoped summary names no other area's project). Capture in a scoped
+areas' titles never reach the transcript. The project-name list and the projects overview
+take no `tag` and return every area's projects: do not call them in a scoped repository —
+the scoped summary already names the stalled projects of this area, and any other project
+name you need comes from a scoped task list. Do not list the inbox in a scoped repository;
+report its count instead (the summary gives it, and a scoped summary names no other area's
+project). Capture in a scoped
 repository stays untagged — it goes to the inbox, and adding the scope tag would mark it
 clarified.
 
@@ -89,10 +93,13 @@ summary, or its `last_review` will report the whole system's review instead of t
   case-insensitively and write them exactly as listed.
 - Always check the name against the project list before creating a task; unknown names
   are accepted silently and projects cannot be renamed.
-- **On hold**: move its open tasks to `someday` and note "ON HOLD" in the plan (or set
-  the project status if the server supports it). An on-hold project is not stalled.
-- **Stalled**: an active project with no `next` action and nothing in `waiting`. Finding
-  these is the most valuable thing a review does.
+- **On hold**: set status `on_hold` (`projects/{name}/status`). Moving its open tasks to
+  `someday` is optional and says the same thing about each task. An on-hold project is not
+  stalled; a finished one gets status `done`.
+- **Stalled**: an active project with no `next` action, nothing in `waiting` and nothing
+  parked in the tickler (hidden by a future `wait`). The server computes it as `stalled`
+  (overview) and `stalled_projects` (summary), so it already leaves out what is on hold or
+  done. Finding these is the most valuable thing a review does.
 
 ## Dates
 

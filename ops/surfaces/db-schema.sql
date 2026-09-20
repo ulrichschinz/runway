@@ -12,6 +12,16 @@ CREATE TABLE project_plans (
     UNIQUE(username, project_name)
 );
 
+-- table project_status
+CREATE TABLE project_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'on_hold', 'done')),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(username, name)
+);
+
 -- table projects
 CREATE TABLE projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

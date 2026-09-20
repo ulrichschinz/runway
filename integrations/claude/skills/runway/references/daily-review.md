@@ -8,7 +8,8 @@ changes in one go.
 
 Call the summary first. It is the entry path: it names no task, and it says which lists are
 worth fetching at all. **Fetch a list only when its counter is above zero.** In a scoped
-repository pass the scope tags as `tag` to the summary and to every list call below.
+repository pass the scope tags as `tag` to the summary and to every list call below that
+takes one; the calls that do not are named in the table, and they are not made when scoped.
 
 | Section | Counter | Call, only if the counter is above zero |
 |---|---|---|
@@ -16,7 +17,7 @@ repository pass the scope tags as `tag` to the summary and to every list call be
 | 2 Inbox | `inbox`, `inbox_oldest_entry` | `gtd/inbox`, only if `inbox` is five or fewer and the repository is not scoped; otherwise report count and age and stop there |
 | 3 Waiting for | `waiting_followup_due` | `gtd/waiting`, keep those whose `scheduled` is today or earlier |
 | 4 In no list | `unclarified` | list tasks with `status=pending`, filtered locally (no project, none of `next`/`waiting`/`someday`). This is the one permitted full pending fetch, and only when the counter says there is something to find |
-| 5 Stalled projects | `stalled_projects` | none — the summary gives the names |
+| 5 Stalled projects | `stalled_projects` | none — the summary gives the names; `gtd/projects/overview` only if the user asks what is in them, and never in a scoped repository: it takes no `tag` and would list every area's projects |
 | 6 Next actions | `next` | `gtd/next`, scoped by the area tags only |
 
 If the user named a context ("daily @home"), filter section 6 by it yourself — a task
@@ -37,9 +38,10 @@ visible — a count cannot be addressed by shorthand.
 4. **In no list** — stand-alone tasks without `next`/`waiting`/`someday`. Tasks that carry
    only a context tag look clarified to the server but usually are not (no verb, no
    outcome): list them here and offer `clarify`.
-5. **Stalled projects** — active projects without a `next` action and nothing waiting
-   (names only). If the server has no project status, check the plan
-   for an "ON HOLD" note, for at most five candidates.
+5. **Stalled projects** — active projects without a `next` action, nothing waiting and
+   nothing in the tickler (names only). Projects the user set to `on_hold` or `done` are
+   already out of this list; offer that status for anything they have consciously parked
+   (`projects/{name}/status`).
 6. **Next actions** — the candidates for today, at most ten, numbered on.
 
 Two zeros are worth a line of their own because they are findings, not emptiness:

@@ -1,5 +1,5 @@
 {
-  "count": 25,
+  "count": 27,
   "tools": [
     {
       "name": "annotate_task_tasks__uuid__annotate_post",
@@ -66,8 +66,16 @@
       "summary": "List projects"
     },
     {
+      "name": "projects_overview_gtd_projects_overview_get",
+      "summary": "Projects overview"
+    },
+    {
       "name": "record_review_gtd_review_post",
       "summary": "Record a review"
+    },
+    {
+      "name": "set_project_status_projects__name__status_put",
+      "summary": "Set a project's status"
     },
     {
       "name": "someday_gtd_someday_get",

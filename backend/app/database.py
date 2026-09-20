@@ -82,6 +82,29 @@ CREATE TABLE IF NOT EXISTS reviews (
 )
 """
 
+# What the user decided about a project, where the decision is not visible in the tasks
+# themselves (D15). "On hold" and "done" are the two states a GTD review has to be able to
+# express and Taskwarrior cannot: a project with no next action is either stalled — the most
+# valuable finding a review makes — or deliberately parked, and nothing in the task data can
+# tell the two apart. No row means `active`, which is what every project is until somebody
+# says otherwise.
+#
+# Separate from `projects`, which means "created explicitly": a project that exists only
+# because tasks name it can be put on hold without being created, and one created explicitly
+# starts active without a row here. It is also a table rather than a column on `projects` for
+# the reason the reviews table gives — the migration loop runs before the CREATE statements,
+# so an ALTER against a table a fresh database does not have yet fails on the first boot.
+CREATE_PROJECT_STATUS = """
+CREATE TABLE IF NOT EXISTS project_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'on_hold', 'done')),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(username, name)
+)
+"""
+
 # The additive schema migrations, applied on every start. There is no migrations/ directory
 # and no version table: with four statements against two shapes of database, re-running an
 # idempotent list is cheaper than a framework, and the point at which that stops being true
@@ -212,6 +235,42 @@ async def record_review(db, username: str, kind: str, scope: str, at: str) -> No
     await db.commit()
 
 
+async def get_project_statuses(db, username: str) -> dict[str, str]:
+    """Every project this user has said something about, mapped to what they said.
+
+    Only the projects with a row: a project with none is `active`, and writing that out for
+    every project a user has would make "nobody has decided anything about this yet" and
+    "somebody decided it is running" the same fact. The caller defaults.
+    """
+    async with db.execute(
+        "SELECT name, status FROM project_status WHERE username=? ORDER BY id",
+        (username,),
+    ) as cur:
+        return {row["name"]: row["status"] for row in await cur.fetchall()}
+
+
+async def set_project_status(db, username: str, name: str, status: str) -> None:
+    """Record what a project's status is now. State, not history, so this upserts.
+
+    It deliberately does not create the project: a project exists because a task names it or
+    because somebody created it explicitly, and saying "this one is on hold" is a statement
+    about a project, not a way of making one. A status set on a name no project carries is
+    listed by `GET /gtd/projects/overview` with zero counts, so it can be seen and corrected,
+    and it is never reported as stalled — a typo must not become a permanent finding.
+    """
+    await db.execute(
+        """
+        INSERT INTO project_status (username, name, status, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(username, name) DO UPDATE SET
+            status=excluded.status,
+            updated_at=CURRENT_TIMESTAMP
+        """,
+        (username, name, status),
+    )
+    await db.commit()
+
+
 async def bootstrap_admin(db) -> str:
     """Ensure the instance has an administrator, without ever overriding a decision.
 
@@ -298,6 +357,7 @@ async def init_db() -> str:
         await db.execute(CREATE_PROJECTS)
         await db.execute(CREATE_SITE_SETTINGS)
         await db.execute(CREATE_REVIEWS)
+        await db.execute(CREATE_PROJECT_STATUS)
         # seed allow_registration from env if not set
         await db.execute(
             "INSERT OR IGNORE INTO site_settings (key, value) VALUES ('allow_registration', ?)",

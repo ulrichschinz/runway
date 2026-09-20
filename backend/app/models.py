@@ -333,5 +333,48 @@ class Review(BaseModel):
     reviewed_at: str = Field(description="When this review was recorded, `YYYYMMDDTHHMMSSZ` (UTC).")
 
 
+# A project's status, and the counts a review reads it with. Taskwarrior holds no notion of a
+# project beyond the string on a task, so "this one is deliberately parked" has nowhere to
+# live in the task data — and without it every project without a next action looks stalled,
+# which is the finding a review exists to produce and therefore the one that must be right.
+_D_PROJECT_STATUS = (
+    "`active` — it is running and needs a next action; `on_hold` — deliberately parked, so "
+    "it is never reported as stalled; `done` — the outcome was reached or dropped. A project "
+    "nobody has said anything about is `active`."
+)
+
+
+class ProjectStatusUpdate(BaseModel):
+    status: Literal["active", "on_hold", "done"] = Field(description=_D_PROJECT_STATUS)
+
+
+class ProjectStatus(BaseModel):
+    name: str = Field(description="The project the status belongs to, spelled as tasks spell it.")
+    status: str = Field(description=_D_PROJECT_STATUS)
+
+
+class ProjectOverview(BaseModel):
+    name: str = Field(description="The project name, spelled as tasks spell it.")
+    status: str = Field(description=_D_PROJECT_STATUS)
+    explicit: bool = Field(
+        description="True when the project was created on purpose or has a plan; false when "
+        "it exists only because tasks name it. Both are real projects."
+    )
+    has_plan: bool = Field(
+        description="True when any plan field (purpose, principles, vision, brainstorm, "
+        "organized) is filled."
+    )
+    pending: int = Field(
+        description="Open tasks that are visible — not parked by a future `wait` date."
+    )
+    next: int = Field(description="Visible tasks tagged `next`: the project's next actions.")
+    waiting: int = Field(description="Open tasks tagged `waiting`, hidden ones included.")
+    hidden: int = Field(description="Tasks parked in the tickler by a future `wait` date.")
+    stalled: bool = Field(
+        description="True when the project is `active` and has no `next` action, nothing "
+        "`waiting` and nothing parked in the tickler. Nothing is moving it."
+    )
+
+
 class ApiKeyInfo(BaseModel):
     api_key: str
