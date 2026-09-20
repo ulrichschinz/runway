@@ -29,14 +29,17 @@ describe('mcpSnippets', () => {
   })
 
   it('declares the http transport, never the deprecated sse one', () => {
-    const config = JSON.parse(snippets['Claude Code'])
-    expect(config.mcpServers.runway.type).toBe('http')
-    expect(config.mcpServers.runway.url).toBe('https://runway.example.com/api/mcp')
+    expect(snippets['Claude Code']).toContain('--transport http')
+    expect(snippets['Claude Code']).toContain('https://runway.example.com/api/mcp')
+    expect(snippets['Claude Code']).not.toContain('sse')
   })
 
-  it('sends the API key in the header the backend forwards', () => {
-    const config = JSON.parse(snippets['Claude Code'])
-    expect(config.mcpServers.runway.headers).toEqual({ 'X-Api-Key': 'k3y' })
+  it('sends the API key in the header the backend forwards — as a placeholder', () => {
+    expect(snippets['Claude Code']).toContain("--header 'X-Api-Key: ${RUNWAY_API_KEY}'")
+  })
+
+  it('never inlines the key into the Claude Code tab, which lands in ~/.claude.json', () => {
+    expect(snippets['Claude Code']).not.toContain('k3y')
   })
 
   it('wraps the remote server for Claude Desktop, which takes a command and not a URL', () => {
@@ -56,6 +59,9 @@ describe('mcpSnippets', () => {
 
   it('falls back to a visible placeholder before the key has loaded', () => {
     const pending = mcpSnippets('https://runway.example.com', null)
-    expect(pending['Claude Code']).toContain('<your-api-key>')
+    // The Claude Code tab never carries a key at all, so the placeholder is only needed by
+    // the tabs that still inline one.
+    expect(pending['Claude Desktop']).toContain('<your-api-key>')
+    expect(pending.curl).toContain('<your-api-key>')
   })
 })

@@ -108,6 +108,54 @@
         <p v-else class="text-sm text-gray-400">Loading…</p>
       </div>
 
+      <!-- Connect Claude -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
+        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Connect Claude</h3>
+        <p class="text-sm text-gray-400 dark:text-gray-500 mb-4">
+          Four steps, once per machine. Afterwards Claude reaches this Runway over MCP, and the skill
+          knows how to run a daily or weekly review.
+        </p>
+
+        <ol class="space-y-4">
+          <li v-for="(step, i) in connectSteps" :key="step.id">
+            <p class="text-sm text-gray-700 dark:text-gray-200 mb-1">
+              <span class="text-gray-400 dark:text-gray-500">{{ i + 1 }}.</span> {{ step.title }}
+            </p>
+            <div class="relative">
+              <pre class="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-600 rounded-lg p-3 pr-10 text-xs font-mono text-gray-700 dark:text-gray-200 overflow-x-auto whitespace-pre">{{ stepText(step) }}</pre>
+              <button @click="copy(step.text, step.id)" class="absolute top-2 right-2 p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 bg-gray-50 dark:bg-gray-900 rounded" title="Copy">
+                <svg v-if="copiedKey !== step.id" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                <svg v-else class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              </button>
+            </div>
+            <p v-if="step.id === 'key' && !revealed" class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+              The key is hidden above; copying takes the real one. Reveal it with the eye in the API Key card.
+            </p>
+            <p v-if="step.id === 'skill'" class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+              Or, for any other client that can send a fixed <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">X-Api-Key</code> header:
+              <a :href="skillZip" download class="text-indigo-600 dark:text-indigo-400 hover:underline">download the skill (.zip)</a> —
+              the copy that matches the version this server speaks. The skill is useless without the Runway
+              MCP server connected in the same client.
+            </p>
+          </li>
+        </ol>
+
+        <div class="mt-5 pt-4 border-t border-gray-100 dark:border-gray-700 space-y-2 text-xs text-gray-400 dark:text-gray-500">
+          <p>
+            Permissions and the optional profile: section 2 and 5 of
+            <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">references/setup.md</code> in the skill.
+          </p>
+          <p>
+            Tell a repository which project it is — one line in its CLAUDE.md or AGENTS.md:
+            <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">{{ projectLine }}</code>
+          </p>
+          <p>
+            Later, to update the skill:
+            <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">{{ pluginUpdate }}</code>
+          </p>
+        </div>
+      </div>
+
       <!-- MCP Setup -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
         <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">MCP Server</h3>
@@ -134,7 +182,6 @@
             <svg v-else class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
           </button>
         </div>
-        <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">Replace <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">https://your-host</code> with your Runway URL.</p>
       </div>
 
       <!-- Admin -->
@@ -197,6 +244,7 @@ import AppShell from '../components/AppShell.vue'
 import { useAuthStore } from '../stores/auth.js'
 import client from '../api/client.js'
 import { mcpSnippets, mcpUrl } from '../shared/mcpSnippets.js'
+import { PLUGIN_UPDATE, RUNWAY_PROJECT_LINE, connectClaudeSteps, skillZipUrl } from '../shared/claudeConnect.js'
 
 const auth = useAuthStore()
 
@@ -267,6 +315,27 @@ function copyKey() {
   navigator.clipboard.writeText(apiKey.value)
   copied.value = true
   setTimeout(() => (copied.value = false), 2000)
+}
+
+// --- Connect Claude ---
+// The steps come from the shared layer so they are tested and pinned against the skill's
+// own setup.md; this component only renders them and masks the one that holds the key.
+const copiedKey = ref('')
+const connectSteps = computed(() => connectClaudeSteps(window.location.origin, apiKey.value))
+const skillZip = computed(() => skillZipUrl(window.location.origin))
+const projectLine = RUNWAY_PROJECT_LINE
+const pluginUpdate = PLUGIN_UPDATE.split('\n').join(' && ')
+
+function copy(text, key) {
+  navigator.clipboard.writeText(text)
+  copiedKey.value = key
+  setTimeout(() => { if (copiedKey.value === key) copiedKey.value = '' }, 2000)
+}
+
+/** What is shown. Copying always takes `step.text`; only the display is masked. */
+function stepText(step) {
+  if (!step.containsSecret || revealed.value || !apiKey.value) return step.text
+  return step.text.split(apiKey.value).join('•'.repeat(32))
 }
 
 // --- MCP snippets ---

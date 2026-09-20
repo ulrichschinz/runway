@@ -104,6 +104,13 @@ anonymous call is refused. It fails against the old configuration.
 `window.location.origin` rather than printing `your-host`. A user copying from Settings now gets a URL
 that is correct for the deployment they are looking at.
 
+> *Note added 2026-09-20.* The snippet described here still substituted the user's own API key into
+> the Claude Code tab, which is a live credential in a clipboard, in screenshots, and in
+> `~/.claude.json`. That tab is now the `claude mcp add … --header 'X-Api-Key: ${RUNWAY_API_KEY}'`
+> command, which stores the placeholder and leaves the key in the shell. The decision above —
+> snippets belong in the tested shared layer — is what made that a three-line change with a test.
+> See [brief 0042](../briefs/0042-connect-claude-from-the-settings-page.md).
+
 ## Verified through the proxy, not only in-process
 
 The in-process test proves the protocol; it does not prove the deployment, and this repository
