@@ -112,7 +112,9 @@ class TaskCreate(BaseModel):
 
 class TaskModify(BaseModel):
     description: str | None = Field(
-        default=None, description=f"{_D_DESCRIPTION} Null or omitted leaves it unchanged."
+        default=None,
+        description=f"{_D_DESCRIPTION} Null, omitted or empty leaves it unchanged: a "
+        "description can be replaced, never cleared.",
     )
     project: str | None = Field(default=None, description=f"{_D_PROJECT} {_CLEARS}")
     tags: list[str] | None = Field(default=None, description=_D_TAGS_MODIFY)
@@ -185,13 +187,23 @@ class RoleUpdate(BaseModel):
     role: str  # validated against VALID_ROLES in the handler
 
 
+# A project plan follows the GTD Natural Planning Model, and the five fields only make sense
+# under those names. An agent reads them from here, so each says what belongs in it; the two
+# lists say that they are replaced whole, because "update the plan" otherwise reads as "append".
+_D_PLAN_LIST = "The complete list: what you send replaces the stored one. Omitted or null keeps it."
+_D_PLAN_TEXT = "Omitted or null keeps the stored text; an empty string clears it."
+
+
 class BrainstormItem(BaseModel):
-    id: str
-    text: str
+    id: str = Field(description="Identifier of the item, unique within the list. Any string.")
+    text: str = Field(description="One idea, or one organized step, as free text.")
 
 
 class ProjectCreate(BaseModel):
-    name: str
+    name: str = Field(
+        description="Project name, spelled exactly as tasks spell it; dots nest subprojects "
+        "(`home.garden`). Surrounding whitespace is removed."
+    )
 
 
 class ProjectPlan(BaseModel):
@@ -205,11 +217,27 @@ class ProjectPlan(BaseModel):
 
 
 class ProjectPlanUpdate(BaseModel):
-    purpose: str | None = None
-    principles: str | None = None
-    vision: str | None = None
-    brainstorm: list[BrainstormItem] | None = None
-    organized: list[BrainstormItem] | None = None
+    purpose: str | None = Field(
+        default=None,
+        description=f"Why the project exists — the outcome it serves. {_D_PLAN_TEXT}",
+    )
+    principles: str | None = Field(
+        default=None,
+        description=f"The standards and constraints the work has to hold to. {_D_PLAN_TEXT}",
+    )
+    vision: str | None = Field(
+        default=None,
+        description="What success looks like, described as if it had already happened. "
+        f"{_D_PLAN_TEXT}",
+    )
+    brainstorm: list[BrainstormItem] | None = Field(
+        default=None,
+        description=f"Unsorted ideas, in no particular order. {_D_PLAN_LIST}",
+    )
+    organized: list[BrainstormItem] | None = Field(
+        default=None,
+        description=f"The ideas worth keeping, in the order they will be acted on. {_D_PLAN_LIST}",
+    )
 
 
 class ApiKeyInfo(BaseModel):

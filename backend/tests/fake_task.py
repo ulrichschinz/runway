@@ -22,6 +22,8 @@ the binary in ``tests/container`` (``TestWhatTheFakeClaims`` and ``TestListSeman
 - ``project:`` (no project), ``project:X`` (prefix match), ``project.is:X`` (exact), ``-word``
   (tag exclusion; ``-project`` is the tag ``project``), ``status:completed`` and the exact
   ``OPEN`` / ``ALL`` token groups;
+- free text after ``--``: an empty word is dropped, because the binary takes ``modify -- ""``
+  with rc 0 and leaves the description alone — a description is replaced, never cleared;
 - refusals: a priority outside H/M/L and ``recur`` without ``due`` are ``TaskwarriorRejected``
   and change nothing; a ``+tag`` failing ``TAG_RE`` is a ``FakeTaskError``, because the binary
   would silently turn it into description text.
@@ -155,7 +157,10 @@ class FakeTaskCLI:
     def _change(self, task: dict[str, Any], args: list[str], text: list[str]) -> None:
         # Free text is description, verbatim. It is never inspected for tags, attributes
         # or rc. overrides — that is exactly what `--` buys from the real binary.
-        words: list[str] = list(text)
+        # An empty word is dropped: `task <uuid> modify -- ""` is rc 0 on 3.5.0 and leaves
+        # the description as it was (pinned in tests/container), so a description can be
+        # replaced but never cleared.
+        words: list[str] = [word for word in text if word]
         for arg in args:
             if arg.startswith("+"):
                 tag = arg[1:]

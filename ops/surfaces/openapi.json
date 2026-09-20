@@ -30,10 +30,12 @@
       "BrainstormItem": {
         "properties": {
           "id": {
+            "description": "Identifier of the item, unique within the list. Any string.",
             "title": "Id",
             "type": "string"
           },
           "text": {
+            "description": "One idea, or one organized step, as free text.",
             "title": "Text",
             "type": "string"
           }
@@ -114,6 +116,7 @@
       "ProjectCreate": {
         "properties": {
           "name": {
+            "description": "Project name, spelled exactly as tasks spell it; dots nest subprojects (`home.garden`). Surrounding whitespace is removed.",
             "title": "Name",
             "type": "string"
           }
@@ -193,6 +196,7 @@
                 "type": "null"
               }
             ],
+            "description": "Unsorted ideas, in no particular order. The complete list: what you send replaces the stored one. Omitted or null keeps it.",
             "title": "Brainstorm"
           },
           "organized": {
@@ -207,6 +211,7 @@
                 "type": "null"
               }
             ],
+            "description": "The ideas worth keeping, in the order they will be acted on. The complete list: what you send replaces the stored one. Omitted or null keeps it.",
             "title": "Organized"
           },
           "principles": {
@@ -218,6 +223,7 @@
                 "type": "null"
               }
             ],
+            "description": "The standards and constraints the work has to hold to. Omitted or null keeps the stored text; an empty string clears it.",
             "title": "Principles"
           },
           "purpose": {
@@ -229,6 +235,7 @@
                 "type": "null"
               }
             ],
+            "description": "Why the project exists \u2014 the outcome it serves. Omitted or null keeps the stored text; an empty string clears it.",
             "title": "Purpose"
           },
           "vision": {
@@ -240,6 +247,7 @@
                 "type": "null"
               }
             ],
+            "description": "What success looks like, described as if it had already happened. Omitted or null keeps the stored text; an empty string clears it.",
             "title": "Vision"
           }
         },
@@ -610,7 +618,7 @@
                 "type": "null"
               }
             ],
-            "description": "What the task is, as free text. Never parsed for tags or attributes. Null or omitted leaves it unchanged.",
+            "description": "What the task is, as free text. Never parsed for tags or attributes. Null, omitted or empty leaves it unchanged: a description can be replaced, never cleared.",
             "title": "Description"
           },
           "due": {
@@ -1552,7 +1560,7 @@
     },
     "/gtd/inbox": {
       "get": {
-        "description": "List tasks that have not been processed yet: no project and no tags assigned.",
+        "description": "List tasks that have not been processed yet: no project and no tags. A tag means the task has been clarified, so giving it one takes it out of the inbox.",
         "operationId": "inbox_gtd_inbox_get",
         "parameters": [
           {
@@ -2186,6 +2194,7 @@
     },
     "/projects": {
       "post": {
+        "description": "Create a project explicitly (it also exists implicitly as soon as a task names it). Creating the same name twice changes nothing and returns the stored plan.",
         "operationId": "create_project_projects_post",
         "parameters": [
           {
@@ -2242,7 +2251,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Create Project",
+        "summary": "Create a project",
         "tags": [
           "projects"
         ]
@@ -2250,6 +2259,7 @@
     },
     "/projects/plans/{name}": {
       "get": {
+        "description": "Read a project's plan (GTD Natural Planning Model: purpose, principles, vision, brainstorm, organized). Unknown names return an empty plan.",
         "operationId": "get_plan_projects_plans__name__get",
         "parameters": [
           {
@@ -2305,12 +2315,13 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Get Plan",
+        "summary": "Get a project plan",
         "tags": [
           "projects"
         ]
       },
       "put": {
+        "description": "Create or update the plan; omitted fields are kept. It also creates the project when it does not exist yet.",
         "operationId": "upsert_plan_projects_plans__name__put",
         "parameters": [
           {
@@ -2376,7 +2387,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Upsert Plan",
+        "summary": "Update a project plan",
         "tags": [
           "projects"
         ]
@@ -2639,7 +2650,7 @@
         ]
       },
       "post": {
-        "description": "Create a new task. Optionally assign a project, tags, priority (H/M/L), due date, or make it recurring.",
+        "description": "Create a new task. Only the description is required; project, tags, priority (H/M/L), dates and a recurrence are optional, and an empty string counts as not given.",
         "operationId": "create_task_tasks_post",
         "parameters": [
           {
@@ -2821,7 +2832,7 @@
         ]
       },
       "put": {
-        "description": "Update one or more fields of a task (description, project, tags, priority, due date, etc.). Only provided fields are changed.",
+        "description": "Update one or more fields of a task. A field you omit, or send as null, is left as it is; an empty string clears `project`, `priority`, `due`, `scheduled`, `wait`, `until` and `recur`. The description is the exception: it can be replaced but not cleared, and an empty one leaves it as it was. `tags` replaces the whole tag set, so use `tags_add` / `tags_remove` to change single tags without reading the task first.",
         "operationId": "modify_task_tasks__uuid__put",
         "parameters": [
           {

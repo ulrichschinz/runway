@@ -720,3 +720,21 @@ class TestWhatTheFakeClaims:
         """Why the fake refuses `+1abc` rather than storing it as a tag."""
         task = self._add(["+1abc"], "t")
         assert task.get("tags", []) == []
+
+    def test_empty_free_text_leaves_the_description_alone(self):
+        """Why the fake drops an empty word: a description cannot be cleared, only replaced.
+
+        `modify -- ""` is rc 0 — no rejection to map to a 400 — and changes nothing, with or
+        without a modifier beside it. `PUT /tasks/{uuid}` with `description: ""` is therefore
+        a 200 carrying the old description, which is what the route description says.
+        """
+        from app.services import task_runner
+
+        task = self._add([], "hello world")
+        task_runner.modify_task("alice", task["uuid"], [], [""])
+        assert task_runner.export_tasks("alice", [task["uuid"]])[0]["description"] == "hello world"
+
+        task_runner.modify_task("alice", task["uuid"], ["priority:H"], [""])
+        after = task_runner.export_tasks("alice", [task["uuid"]])[0]
+        assert after["description"] == "hello world"
+        assert after["priority"] == "H"

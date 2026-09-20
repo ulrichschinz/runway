@@ -79,3 +79,40 @@ class TestPlans:
     def test_requires_authentication(self, client, registered):
         assert client.get("/projects/plans/x").status_code == 401
         assert client.post("/projects", json={"name": "x"}).status_code == 401
+
+
+class TestTheProjectToolsDocumentThemselves:
+    """An agent sees a route's summary, its description and its field descriptions — nothing else.
+
+    A model class docstring never reaches MCP, and `ops/surfaces/mcp-tools.json` records the
+    name and the summary only, so what a schema says is asserted here against the served
+    OpenAPI document. Before this, the three project routes carried FastAPI's summary derived
+    from the handler name, no description at all, and unlabelled fields: an agent could read
+    `POST /projects` and not learn that a project also exists as soon as a task names it.
+    """
+
+    # The phrase each description must carry is the fact an agent cannot infer from the
+    # signature: implicit creation, what a plan is, and that an omitted field is kept.
+    ROUTES = {
+        ("/projects", "post"): "implicitly",
+        ("/projects/plans/{name}", "get"): "Natural Planning Model",
+        ("/projects/plans/{name}", "put"): "omitted fields are kept",
+    }
+    SCHEMAS = ("ProjectCreate", "ProjectPlanUpdate", "BrainstormItem")
+
+    def test_every_project_route_carries_a_summary_and_a_description(self, client):
+        from app.main import app
+
+        paths = app.openapi()["paths"]
+        for (path, method), phrase in self.ROUTES.items():
+            operation = paths[path][method]
+            assert operation["summary"].strip()
+            assert phrase in operation["description"]
+
+    def test_every_request_field_of_a_project_body_is_described(self, client):
+        from app.main import app
+
+        schemas = app.openapi()["components"]["schemas"]
+        for name in self.SCHEMAS:
+            for field, spec in schemas[name]["properties"].items():
+                assert spec.get("description", "").strip(), f"{name}.{field} has no description"

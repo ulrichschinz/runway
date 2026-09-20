@@ -21,7 +21,14 @@ def _row_to_plan(name: str, row) -> ProjectPlan:
     )
 
 
-@router.post("", response_model=ProjectPlan, status_code=201)
+@router.post(
+    "",
+    response_model=ProjectPlan,
+    status_code=201,
+    summary="Create a project",
+    description="Create a project explicitly (it also exists implicitly as soon as a task "
+    "names it). Creating the same name twice changes nothing and returns the stored plan.",
+)
 async def create_project(
     payload: ProjectCreate,
     username: str = Depends(get_current_user),
@@ -47,7 +54,13 @@ async def create_project(
     return _row_to_plan(name, row)
 
 
-@router.get("/plans/{name}", response_model=ProjectPlan)
+@router.get(
+    "/plans/{name}",
+    response_model=ProjectPlan,
+    summary="Get a project plan",
+    description="Read a project's plan (GTD Natural Planning Model: purpose, principles, "
+    "vision, brainstorm, organized). Unknown names return an empty plan.",
+)
 async def get_plan(
     name: str,
     username: str = Depends(get_current_user),
@@ -63,7 +76,13 @@ async def get_plan(
     return _row_to_plan(name, row)
 
 
-@router.put("/plans/{name}", response_model=ProjectPlan)
+@router.put(
+    "/plans/{name}",
+    response_model=ProjectPlan,
+    summary="Update a project plan",
+    description="Create or update the plan; omitted fields are kept. It also creates the "
+    "project when it does not exist yet.",
+)
 async def upsert_plan(
     name: str,
     payload: ProjectPlanUpdate,

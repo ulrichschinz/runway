@@ -37,7 +37,8 @@ def _tasks(fn: Callable[..., list[Task]], *args: Any) -> list[Task]:
     "/inbox",
     response_model=list[Task],
     summary="GTD inbox",
-    description="List tasks that have not been processed yet: no project and no tags assigned.",
+    description="List tasks that have not been processed yet: no project and no tags. A tag "
+    "means the task has been clarified, so giving it one takes it out of the inbox.",
 )
 def inbox(
     username: str = Depends(get_current_user),

@@ -243,6 +243,18 @@ class TestEmptyStringClears:
         assert r.status_code == 200, r.text
         assert r.json()[field] is None
 
+    def test_an_empty_description_leaves_the_description_alone(self, client, auth):
+        """The one field an empty string does not clear, as the route description says.
+
+        `""` reaches Taskwarrior as free text after `--`, which 3.5.0 takes with rc 0 and
+        ignores (pinned in `tests/container`). The API therefore answers 200 with the old
+        description rather than an empty one.
+        """
+        task = _create(client, auth, description="hello world")
+        r = client.put(f"/tasks/{task['uuid']}", json={"description": ""}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json()["description"] == "hello world"
+
     def test_null_still_means_unchanged(self, client, auth):
         task = _create(client, auth, priority="H")
         r = client.put(f"/tasks/{task['uuid']}", json={"priority": None}, headers=auth)

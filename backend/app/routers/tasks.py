@@ -104,7 +104,8 @@ def list_tasks(
     response_model=Task,
     status_code=201,
     summary="Create a task",
-    description="Create a new task. Optionally assign a project, tags, priority (H/M/L), due date, or make it recurring.",
+    description="Create a new task. Only the description is required; project, tags, priority "
+    "(H/M/L), dates and a recurrence are optional, and an empty string counts as not given.",
 )
 def create_task(body: TaskCreate, username: str = Depends(get_current_user)):
     return _handle(task_service.create_task, username, body)
@@ -124,7 +125,11 @@ def get_task(uuid: str, username: str = Depends(get_current_user)):
     "/{uuid}",
     response_model=Task,
     summary="Modify a task",
-    description="Update one or more fields of a task (description, project, tags, priority, due date, etc.). Only provided fields are changed.",
+    description="Update one or more fields of a task. A field you omit, or send as null, is "
+    "left as it is; an empty string clears `project`, `priority`, `due`, `scheduled`, `wait`, "
+    "`until` and `recur`. The description is the exception: it can be replaced but not "
+    "cleared, and an empty one leaves it as it was. `tags` replaces the whole tag set, so use "
+    "`tags_add` / `tags_remove` to change single tags without reading the task first.",
 )
 def modify_task(uuid: str, body: TaskModify, username: str = Depends(get_current_user)):
     return _handle(task_service.modify_task, username, uuid, body)

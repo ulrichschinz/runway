@@ -11,7 +11,7 @@
     },
     {
       "name": "create_project_projects_post",
-      "summary": "Create Project"
+      "summary": "Create a project"
     },
     {
       "name": "create_task_tasks_post",
@@ -23,7 +23,7 @@
     },
     {
       "name": "get_plan_projects_plans__name__get",
-      "summary": "Get Plan"
+      "summary": "Get a project plan"
     },
     {
       "name": "get_task_tasks__uuid__get",
@@ -79,7 +79,7 @@
     },
     {
       "name": "upsert_plan_projects_plans__name__put",
-      "summary": "Upsert Plan"
+      "summary": "Update a project plan"
     },
     {
       "name": "waiting_gtd_waiting_get",

@@ -54,7 +54,7 @@ def _asgi_client(app: Any, headers: dict[str, str]) -> httpx.AsyncClient:
     )
 
 
-async def _session(headers: dict[str, str], tool: str, arguments: dict[str, Any]) -> tuple:
+async def _session(headers: dict[str, str], tool: str | None, arguments: dict[str, Any]) -> tuple:
     from app.main import app
 
     # The TestClient in the fixtures has already run and closed a lifespan; this opens one
@@ -66,15 +66,30 @@ async def _session(headers: dict[str, str], tool: str, arguments: dict[str, Any]
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 listing = await session.list_tools()
+                if tool is None:
+                    return listing.tools, None
                 result = await session.call_tool(tool, arguments)
                 return [t.name for t in listing.tools], result
 
 
-def _run(headers: dict[str, str], tool: str = "me_auth_me_get", arguments: Any = None) -> tuple:
+def _run(
+    headers: dict[str, str], tool: str | None = "me_auth_me_get", arguments: Any = None
+) -> tuple:
     async def main():
         return await asyncio.wait_for(_session(headers, tool, arguments or {}), TIMEOUT)
 
     return asyncio.run(main())
+
+
+def _tools(headers: dict[str, str]) -> dict[str, Any]:
+    """The tools as a client receives them — description and input schema — keyed by name.
+
+    ``_run`` reduces the listing to names, which is all the other tests need. The
+    documentation tests need the objects themselves, so this asks for the listing alone and
+    skips the tool call.
+    """
+    listing, _ = _run(headers, tool=None)
+    return {t.name: t for t in listing}
 
 
 @pytest.fixture
@@ -259,3 +274,54 @@ class TestQueryAndPathParametersSurviveTheHop:
             arguments={"name": name},
         )
         assert [t["description"] for t in _payload(result)] == ["renovieren"]
+
+
+class TestTheToolsCarryTheirOwnDocumentation:
+    """What an agent knows about a tool is what this listing says, and nothing else.
+
+    `ops/surfaces/mcp-tools.json` snapshots names and summaries, so neither a route
+    description nor a single field description is covered by any other gate — and a model
+    class docstring never leaves the process. The facts asserted here are the ones an agent
+    gets wrong when they are missing: that an empty string clears a field rather than leaving
+    it alone, that `tags` overwrites while `tags_add`/`tags_remove` do not, that the inbox is
+    defined by the absence of a project and of tags, and that `status=waiting` means a future
+    `wait` date rather than the GTD `waiting` tag.
+    """
+
+    def _schema(self, tools: dict[str, Any], name: str) -> dict[str, Any]:
+        return tools[name].inputSchema["properties"]
+
+    def test_modify_documents_clearing_and_the_tag_deltas(self, api_key):
+        properties = self._schema(_tools({"X-Api-Key": api_key}), "modify_task_tasks__uuid__put")
+        assert "empty string clears" in properties["priority"]["description"]
+        assert "complete tag set" in properties["tags"]["description"]
+        for field in ("tags_add", "tags_remove"):
+            text = properties[field]["description"]
+            assert "leaving every other tag as it is" in text
+            assert "Cannot be combined with `tags`" in text
+
+    def test_the_inbox_tool_states_what_makes_a_task_unprocessed(self, api_key):
+        description = _tools({"X-Api-Key": api_key})["inbox_gtd_inbox_get"].description
+        assert "no project and no tags" in description
+        assert "clarified" in description
+
+    def test_the_task_list_distinguishes_waiting_from_the_waiting_tag(self, api_key):
+        properties = self._schema(_tools({"X-Api-Key": api_key}), "list_tasks_tasks_get")
+        assert "future `wait` date" in properties["status"]["description"]
+        assert "NOT the `waiting` GTD tag" in properties["status"]["description"]
+
+    def test_the_project_tools_describe_plans_and_implicit_creation(self, api_key):
+        tools = _tools({"X-Api-Key": api_key})
+        assert "implicitly" in tools["create_project_projects_post"].description
+        assert "Natural Planning Model" in tools["get_plan_projects_plans__name__get"].description
+        assert (
+            "omitted fields are kept" in tools["upsert_plan_projects_plans__name__put"].description
+        )
+        assert (
+            "Why the project exists"
+            in (
+                self._schema(tools, "upsert_plan_projects_plans__name__put")["purpose"][
+                    "description"
+                ]
+            )
+        )
