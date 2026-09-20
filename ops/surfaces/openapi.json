@@ -305,6 +305,17 @@
             ],
             "title": "Due"
           },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
           "entry": {
             "anyOf": [
               {
@@ -2241,17 +2252,186 @@
     },
     "/tasks": {
       "get": {
-        "description": "Return all pending tasks for the current user, sorted by urgency. Set include_done=true to also include completed tasks.",
+        "description": "Search the current user's tasks. Without filters it returns the visible pending ones, most urgent first; completed tasks come back newest first. Filters combine with AND. Dates are compared per calendar day in the server's local time.",
         "operationId": "list_tasks_tasks_get",
         "parameters": [
           {
+            "description": "`pending` (the default) is every visible task; `waiting` is only the ones hidden by a future `wait` date, which is Taskwarrior's waiting and NOT the `waiting` GTD tag (use the waiting list for that); `completed` is done tasks; `all` is pending, hidden and completed together.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "waiting",
+                    "completed",
+                    "all"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`pending` (the default) is every visible task; `waiting` is only the ones hidden by a future `wait` date, which is Taskwarrior's waiting and NOT the `waiting` GTD tag (use the waiting list for that); `completed` is done tasks; `all` is pending, hidden and completed together.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Exact project name. A subproject is a project of its own, so `home` does not include `home.garden`.",
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact project name. A subproject is a project of its own, so `home` does not include `home.garden`.",
+              "title": "Project"
+            }
+          },
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one.",
+              "title": "Tag"
+            }
+          },
+          {
+            "description": "Only tasks due before this day. `YYYY-MM-DD`.",
+            "in": "query",
+            "name": "due_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 10,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks due before this day. `YYYY-MM-DD`.",
+              "title": "Due Before"
+            }
+          },
+          {
+            "description": "Only tasks due after this day. `YYYY-MM-DD`.",
+            "in": "query",
+            "name": "due_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 10,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks due after this day. `YYYY-MM-DD`.",
+              "title": "Due After"
+            }
+          },
+          {
+            "description": "Only tasks scheduled before this day. `YYYY-MM-DD`.",
+            "in": "query",
+            "name": "scheduled_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 10,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks scheduled before this day. `YYYY-MM-DD`.",
+              "title": "Scheduled Before"
+            }
+          },
+          {
+            "description": "Only tasks completed on or after this day. `YYYY-MM-DD`. It implies `status=completed` when no status is given, and is refused with `pending` or `waiting`.",
+            "in": "query",
+            "name": "completed_since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 10,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks completed on or after this day. `YYYY-MM-DD`. It implies `status=completed` when no status is given, and is refused with `pending` or `waiting`.",
+              "title": "Completed Since"
+            }
+          },
+          {
+            "description": "Return at most this many tasks, after sorting.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 500,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return at most this many tasks, after sorting.",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Deprecated alias: true means `status=all`, false is ignored. Sending true together with `status` is refused; use `status` instead.",
             "in": "query",
             "name": "include_done",
             "required": false,
             "schema": {
-              "default": false,
-              "title": "Include Done",
-              "type": "boolean"
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Deprecated alias: true means `status=all`, false is ignored. Sending true together with `status` is refused; use `status` instead.",
+              "title": "Include Done"
             }
           },
           {

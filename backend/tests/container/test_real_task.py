@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -530,6 +531,91 @@ class TestListSemantics:
             task_service.create_task("alice", TaskCreate(description="r", recur="weekly"))
         r = client.post("/tasks", json={"description": "r", "recur": "weekly"}, headers=headers)
         assert r.status_code == 400, r.text
+
+
+class TestSearchFilters:
+    """The task-list filters against the real binary (ADR 0038).
+
+    Three of them are Taskwarrior's own grammar and cannot be proven by the fake:
+    `project.is:` versus the hierarchical `project:`, the three status filters, and what
+    the `ALL` group leaves out. The date filters run in Python and only need a real `end`.
+    """
+
+    FUTURE = "2030-06-01"
+
+    @staticmethod
+    def _create(client, headers, **body):
+        body.setdefault("description", "a task")
+        r = client.post("/tasks", json=body, headers=headers)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    @staticmethod
+    def _names(client, headers, path, **params):
+        r = client.get(path, params=params, headers=headers)
+        assert r.status_code == 200, r.text
+        return [t["description"] for t in r.json()]
+
+    def test_the_project_filter_is_exact_where_taskwarriors_own_is_a_prefix(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="mine", project="alpha")
+        self._create(client, headers, description="sub", project="alpha.sub")
+        self._create(client, headers, description="other", project="alphabet")
+        assert self._names(client, headers, "/tasks", project="alpha") == ["mine"]
+        assert self._names(client, headers, "/gtd/projects/alpha") == ["mine"]
+        assert self._names(client, headers, "/tasks", project="alpha.sub") == ["sub"]
+
+    def test_a_project_name_with_a_space_and_an_umlaut_round_trips(self, real_client):
+        client, headers = real_client
+        created = self._create(client, headers, description="renovieren", project="Haus Umbau Büro")
+        assert created["project"] == "Haus Umbau Büro"
+        assert self._names(client, headers, "/tasks", project="Haus Umbau Büro") == ["renovieren"]
+        assert self._names(client, headers, "/gtd/projects/Haus Umbau Büro") == ["renovieren"]
+
+    def test_status_waiting_is_the_binarys_waiting_not_the_tag(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="hidden", wait=self.FUTURE)
+        self._create(client, headers, description="delegated", tags=["waiting"])
+        assert self._names(client, headers, "/tasks", status="waiting") == ["hidden"]
+        assert self._names(client, headers, "/tasks") == ["delegated"]
+
+    def test_completed_tasks_carry_a_real_end_and_filter_by_it(self, real_client):
+        client, headers = real_client
+        done = self._create(client, headers, description="finished")
+        self._create(client, headers, description="open")
+        assert client.post(f"/tasks/{done['uuid']}/done", headers=headers).status_code == 204
+        r = client.get("/tasks", params={"status": "completed"}, headers=headers)
+        assert [t["description"] for t in r.json()] == ["finished"]
+        end = r.json()[0]["end"]
+        assert end and end.endswith("Z"), end
+        today = datetime.now(UTC).date().isoformat()
+        assert self._names(client, headers, "/tasks", completed_since=today) == ["finished"]
+        tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
+        assert self._names(client, headers, "/tasks", completed_since=tomorrow) == []
+
+    def test_all_leaves_out_deleted_tasks_and_the_recurring_template(self, real_client):
+        """An unfiltered export — what `include_done=true` used to send — returns both."""
+        client, headers = real_client
+        gone = self._create(client, headers, description="deleted")
+        done = self._create(client, headers, description="finished")
+        self._create(client, headers, description="open")
+        self._create(client, headers, description="weekly", recur="weekly", due=self.FUTURE)
+        assert client.delete(f"/tasks/{gone['uuid']}", headers=headers).status_code == 204
+        assert client.post(f"/tasks/{done['uuid']}/done", headers=headers).status_code == 204
+        r = client.get("/tasks", params={"status": "all"}, headers=headers)
+        assert r.status_code == 200, r.text
+        names = sorted(t["description"] for t in r.json())
+        statuses = {t["status"] for t in r.json()}
+        assert "deleted" not in names
+        assert "recurring" not in statuses
+        assert names == ["finished", "open", "weekly"]
+
+    def test_a_refused_filter_value_never_reaches_the_binary(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="safe")
+        for params in ({"project": "a(b)"}, {"tag": "-next"}, {"due_before": "2026-9-3"}):
+            assert client.get("/tasks", params=params, headers=headers).status_code == 400, params
+        assert self._names(client, headers, "/tasks") == ["safe"]
 
 
 class TestWhatTheFakeClaims:

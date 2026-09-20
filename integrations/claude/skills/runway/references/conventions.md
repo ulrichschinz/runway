@@ -27,7 +27,7 @@ what they do.
 | tasks of one project | gtd project tasks (`gtd/projects/{name}`) |
 | project names | gtd projects |
 | inbox / next / waiting / someday | the matching gtd list |
-| duplicate check, overdue, "in no list" | list tasks (pending), filtered by project or tag where the server allows it |
+| overdue, done since, "in no list" | list tasks (`tasks`): `status`, `project`, `tag` (repeatable, AND), `due_before`/`due_after`/`completed_since` (YYYY-MM-DD), `limit` |
 | capture unclarified | inbox post (description, optional note) |
 | counters for reviews and hooks | gtd summary, if present |
 | hidden ticklers (future `wait`, soonest first) | gtd tickler (`gtd/tickler`) |

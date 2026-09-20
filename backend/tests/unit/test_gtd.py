@@ -162,3 +162,31 @@ class TestErrorMapping:
         self._raising(monkeypatch, RuntimeError("database is locked"))
         for path in ("/gtd/next", "/gtd/tickler", "/gtd/projects"):
             assert client.get(path, headers=auth).status_code == 500, path
+
+
+class TestProjectTasksMatchExactly:
+    """`project:alpha` is Taskwarrior's hierarchical prefix match, so the project view
+    used to mix in `alpha.sub` and `alphabet` (D2, ADR 0038)."""
+
+    def test_a_sibling_and_a_subproject_stay_out(self, client, auth):
+        _create(client, auth, description="mine", project="alpha")
+        _create(client, auth, description="sub", project="alpha.sub")
+        _create(client, auth, description="other", project="alphabet")
+        r = client.get("/gtd/projects/alpha", headers=auth)
+        assert [t["description"] for t in r.json()] == ["mine"]
+
+    def test_a_subproject_is_reachable_by_its_own_name(self, client, auth):
+        _create(client, auth, description="sub", project="alpha.sub")
+        r = client.get("/gtd/projects/alpha.sub", headers=auth)
+        assert [t["description"] for t in r.json()] == ["sub"]
+
+    def test_a_name_with_a_space_and_an_umlaut_survives_the_path(self, client, auth):
+        _create(client, auth, description="renovieren", project="Haus Umbau Büro")
+        r = client.get("/gtd/projects/Haus Umbau Büro", headers=auth)
+        assert [t["description"] for t in r.json()] == ["renovieren"]
+
+    def test_a_refused_name_is_a_400(self, client, auth):
+        """A parenthesis is Taskwarrior filter grammar, so it never becomes a name."""
+        r = client.get("/gtd/projects/a(b)", headers=auth)
+        assert r.status_code == 400
+        assert "Invalid project name" in r.json()["detail"]

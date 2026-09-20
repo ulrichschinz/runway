@@ -1,10 +1,45 @@
+import re
+
 from pydantic import BaseModel, Field
+
+# A project name we write, filter on, or put into a URL path (D4, ADR 0038). What it excludes,
+# and why: control characters and newlines (they would split an argument vector or a log line);
+# parentheses, quotes and `:` (Taskwarrior's own filter grammar reads them, so `project.is:a:b`
+# or `a)` would be parsed rather than matched); a backslash; and `/ ? # %`, because fastapi-mcp
+# 0.4.0 substitutes a path parameter into the URL without encoding it, so a project named `a/b`
+# would address a different route over MCP. Spaces, umlauts, dots and semicolons are allowed —
+# they are ordinary characters in a project name and survive both boundaries. A leading `+`,
+# `-` or space is refused (Taskwarrior would read a sign as a modifier), and so is a trailing
+# space, which no user can see.
+PROJECT_RE = re.compile(r"^(?![+\-\s])[^\x00-\x1f\x7f()\"'\\:/?#%]{1,100}(?<!\s)$")
+
+# Names that would collide with a sibling route rather than reach `{name}`: `/gtd/projects/
+# overview` and `/projects/plans/{name}`. Refused only where a name is created on purpose;
+# reading or filtering by such a name is merely empty, never dangerous.
+RESERVED_PROJECT_NAMES = frozenset({"overview", "plans"})
 
 # The complete set of roles. Two is deliberate: `admin` may administer other users and
 # site settings, `user` may not. Every place that writes a role — the API, the bootstrap
 # and the CLI escape hatch — validates against this tuple, so adding a third role is one
 # edit rather than a search.
 VALID_ROLES: tuple[str, ...] = ("admin", "user")
+
+
+def validate_project_name(name: str, reserved: bool = False) -> str:
+    """Return `name` if it is a project name this API will write or filter on.
+
+    It lives here, in `be/leaves`, rather than in the task service, so the project router
+    can reach it without the services layer gaining an importer it does not need.
+
+    `reserved=True` additionally refuses the two names that would address a sibling route.
+    Pass it where a name is *created*; never where one is read or filtered, so a name that
+    already exists stays reachable.
+    """
+    if not PROJECT_RE.fullmatch(name):
+        raise ValueError(f"Invalid project name: {name!r}")
+    if reserved and name in RESERVED_PROJECT_NAMES:
+        raise ValueError(f"Reserved project name: {name!r}")
+    return name
 
 
 class TaskAnnotation(BaseModel):
@@ -31,6 +66,7 @@ class Task(BaseModel):
     start: str | None = None
     entry: str | None = None
     modified: str | None = None
+    end: str | None = None
 
 
 # Field descriptions reach MCP clients through the OpenAPI schema, so they are the only

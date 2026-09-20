@@ -36,10 +36,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.services.task_runner import TaskwarriorRejected
-from app.services.task_service import EXISTING_TAG_RE, OPEN, TAG_RE
-
-# `ALL` of P1-5 (D12): every task that is not deleted and not a recurring template.
-ALL = ["(", "status:pending", "or", "status:waiting", "or", "status:completed", ")"]
+from app.services.task_service import ALL, EXISTING_TAG_RE, OPEN, TAG_RE
 
 _DATE_FIELDS = ("due", "scheduled", "wait", "until")
 _STAMP = "%Y%m%dT%H%M%SZ"

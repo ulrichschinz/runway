@@ -60,6 +60,8 @@ and ask once; suggest adding the `runway_project:` line so you never have to ask
 One call: the project's tasks. Present in this order: **Next**, **Waiting for**, then the
 rest, each with a short readable date where one exists. Keep it to a compact list. Never
 fetch all tasks including completed ones just to answer a lookup; it is large and slow.
+Ask the list for what you need instead: `status=completed` with `completed_since` answers
+"what did I finish since …", and `due_before` answers "what is overdue".
 If the lookup reveals a stalled project or long-overdue dates, say so in one line and
 offer `plan` or a review. Do not fix anything unasked.
 

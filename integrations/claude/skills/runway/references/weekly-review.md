@@ -12,9 +12,9 @@ steps below where it calls for them.
 
 ## Prepare (you, silently)
 
-Summary (if available), inbox, next, waiting, someday, projects, tickler,
-tasks completed in the last seven days (only if the server can filter by completion date —
-do not pull the whole history).
+Summary (if available), inbox, next, waiting, someday, projects, tickler, and the tasks
+completed in the last seven days: list tasks with `status=completed` and
+`completed_since=<today−7>`.
 
 ## Get clear
 
