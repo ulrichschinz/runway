@@ -285,7 +285,10 @@ class FakeTaskCLI:
 def _parse_date(value: str) -> str:
     """The three date forms the fake accepts, stored as Taskwarrior stores them.
 
-    `YYYY-MM-DD` is UTC midnight: the container tier and the shipped image run in UTC.
+    `YYYY-MM-DD` is UTC midnight, which is what the binary does in a UTC process: the
+    container tier pins `TZ=UTC` by fixture, and the fake assumes that zone. The shipped
+    image runs `TZ=Europe/Berlin`, where the real binary stores the same bare date at
+    22:00Z or 23:00Z the day before — pinned in `TestTheBerlinZone`, not modelled here.
     """
     for form in ("%Y-%m-%d", "%Y-%m-%dT%H:%M", _STAMP):
         try:

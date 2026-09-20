@@ -1,6 +1,8 @@
+import os
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, tzinfo
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.models import Task, TaskCreate, TaskModify, validate_project_name
 from app.services import task_runner
@@ -72,9 +74,30 @@ _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_LIMIT = 500
 
 
+def _zone() -> tzinfo:
+    """The server's zone as *rules*, not as today's offset (D10).
+
+    `datetime.now().astimezone().tzinfo` is a fixed-offset snapshot of the moment it was
+    taken — `CEST` (+02:00) in July, `CET` (+01:00) in December. Converting a stamp from
+    the *other* half of the year with it lands a calendar day out, which is exactly the
+    off-by-one the Berlin clock exists to remove: a bare `due:2026-07-15` is stored as
+    `20260714T220000Z`, and read back with a +01:00 snapshot that is the 14th. `ZoneInfo`
+    carries the transitions, so the conversion asks the rule that held at the stamp's own
+    instant. `TZ` is what libc and the `task` binary read, so naming it here keeps the
+    application, the binary and the compose declaration on one zone.
+    """
+    name = os.environ.get("TZ", "").lstrip(":")
+    if name:
+        try:
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError):
+            pass  # an unset-by-rule or unknown TZ: fall back to what libc resolved
+    return datetime.now().astimezone().tzinfo or UTC
+
+
 def _now() -> datetime:
     """The one clock (D10): the server's local time, aware. Tests replace it with the fake's."""
-    return datetime.now().astimezone()
+    return datetime.now(_zone())
 
 
 def _parse_tw(stamp: str) -> datetime:
@@ -86,7 +109,9 @@ def _local_day(stamp: str) -> date:
     """The calendar day a stored timestamp falls on, in the server's zone (D10).
 
     Taskwarrior stores UTC and interprets a bare `YYYY-MM-DD` locally, so "due today" is a
-    local-day question. The zone comes from `_now()`, the one clock, which tests replace.
+    local-day question. The zone comes from `_now()`, the one clock, which tests replace —
+    and which carries the zone's rules rather than one offset, so a stamp from the other
+    side of a DST transition still lands on the day the binary wrote it (see `_zone`).
     """
     return _parse_tw(stamp).astimezone(_now().tzinfo).date()
 

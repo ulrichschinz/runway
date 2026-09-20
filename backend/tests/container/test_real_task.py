@@ -10,10 +10,16 @@ These tests run only inside ``backend/Dockerfile.test``, where a real ``task`` e
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -629,6 +635,152 @@ class TestSearchFilters:
         assert self._names(client, headers, "/tasks") == ["safe"]
 
 
+class TestTheBerlinZone:
+    """What `TZ=Europe/Berlin` in the deploy compose buys, and what it needs (D10).
+
+    Every day question this API answers — overdue, due today, a tickler task returning, the
+    `due_before` / `due_after` filters, and the review's "today" — is "which calendar day does
+    this stored UTC timestamp fall on, in the server's zone". Taskwarrior interprets a bare
+    `YYYY-MM-DD` in that same zone, so the two move together or not at all.
+
+    The image's default is UTC. Berlin is one or two hours ahead, so between local midnight
+    and 02:00 the server's day is still yesterday's: a task the user entered as due *today*
+    reads back as due yesterday and is reported overdue. The control is one environment
+    variable in `ops/deploy/docker-compose.yml`; these tests are why it is more than an
+    assertion — the zone data has to exist in the runtime image, and the day logic has to
+    actually move with it.
+    """
+
+    # 23:30 UTC on 2026-09-20 is 01:30 on 2026-09-21 in Berlin (CEST, UTC+2) — inside the
+    # window where the two zones disagree about the date.
+    INSTANT = datetime(2026, 9, 20, 23, 30, tzinfo=UTC)
+    BERLIN_DAY = "2026-09-21"
+    UTC_DAY = "2026-09-20"
+    # What the binary stores for `due:2026-09-21` when it reads that bare date in Berlin.
+    STORED = "20260920T220000Z"
+
+    @staticmethod
+    @contextmanager
+    def _zone(name: str) -> Iterator[None]:
+        """Run the process, and the `task` it spawns, in `name` — as the container would.
+
+        The tier's autouse fixture pins UTC; this replaces it for the body and puts it back,
+        including `time.tzset()`, which is what makes `datetime.now().astimezone()` follow.
+        """
+        before = os.environ.get("TZ")
+        os.environ["TZ"] = name
+        time.tzset()
+        try:
+            yield
+        finally:
+            if before is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = before
+            time.tzset()
+
+    def test_the_runtime_image_carries_the_berlin_zone(self):
+        """`TZ` names a file. Without tzdata the process stays on UTC, silently."""
+        assert Path("/usr/share/zoneinfo/Europe/Berlin").is_file(), (
+            "the runtime image has no Europe/Berlin zone, so TZ in the deploy compose "
+            "would leave the container on UTC without saying so"
+        )
+        assert self.INSTANT.astimezone(ZoneInfo("Europe/Berlin")).isoformat() == (
+            "2026-09-21T01:30:00+02:00"
+        )
+        with self._zone("Europe/Berlin"):
+            assert self.INSTANT.astimezone().utcoffset() == timedelta(hours=2)
+            assert task_service._now().tzinfo is not None
+
+    def test_a_bare_due_date_and_the_day_logic_agree_on_the_berlin_day(
+        self, real_client, monkeypatch
+    ):
+        """At 01:30 Berlin: what the user called today is today, and nothing is overdue."""
+        client, headers = real_client
+        with self._zone("Europe/Berlin"):
+            monkeypatch.setattr(task_service, "_now", lambda: self.INSTANT.astimezone())
+            r = client.post(
+                "/tasks", json={"description": "heute", "due": self.BERLIN_DAY}, headers=headers
+            )
+            assert r.status_code == 201, r.text
+            assert r.json()["due"] == self.STORED
+            assert task_service._local_day(self.STORED).isoformat() == self.BERLIN_DAY
+
+            def names(**params):
+                got = client.get("/tasks", params=params, headers=headers)
+                assert got.status_code == 200, got.text
+                return [t["description"] for t in got.json()]
+
+            # "due today" around the Berlin day, and "overdue" before it.
+            assert names(due_after="2026-09-20", due_before="2026-09-22") == ["heute"]
+            assert names(due_before=self.BERLIN_DAY) == []
+
+    def test_under_utc_the_same_stamp_reads_as_the_day_before(self, real_client, monkeypatch):
+        """The defect the variable removes — the gate watching it fail (Operability pattern).
+
+        Same instant, same stored timestamp, UTC server: the task is one day older than the
+        user's calendar says, so a "due today" window misses it and an overdue query claims it.
+        """
+        client, headers = real_client  # the autouse fixture keeps this one in UTC
+        monkeypatch.setattr(task_service, "_now", lambda: self.INSTANT.astimezone())
+        assert task_service._local_day(self.STORED).isoformat() == self.UTC_DAY
+
+        r = client.post(
+            "/tasks", json={"description": "heute", "due": self.STORED}, headers=headers
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["due"] == self.STORED
+
+        def names(**params):
+            got = client.get("/tasks", params=params, headers=headers)
+            assert got.status_code == 200, got.text
+            return [t["description"] for t in got.json()]
+
+        assert names(due_after="2026-09-20", due_before="2026-09-22") == []
+        assert names(due_before=self.BERLIN_DAY) == ["heute"]
+
+    def test_the_zone_moves_the_day_logic_and_nothing_else_that_is_written_down(self):
+        """The blast radius, made executable rather than asserted in a brief.
+
+        `task_service._now()` is the one clock that follows the zone (D10). Everything else
+        this deployment stamps — the JSON log lines, the audit log, the JWT expiry — asks for
+        UTC by name, and `docs/operations.md` promises exactly that. A container moved to
+        Berlin must not quietly re-stamp any of them in local time.
+        """
+        import logging
+
+        from app import audit
+        from app.logging_setup import JsonFormatter
+
+        record = logging.LogRecord("t", logging.INFO, __file__, 1, "hello", None, None)
+        with self._zone("Europe/Berlin"):
+            assert audit.now().endswith("Z")
+            assert json.loads(JsonFormatter().format(record))["timestamp"].endswith("Z")
+            # Berlin's offset, whatever today's is: hard-coding +02:00 would turn this
+            # tier red every winter for a reason that has nothing to do with the code.
+            berlin = datetime.now(ZoneInfo("Europe/Berlin")).utcoffset()
+            assert task_service._now().utcoffset() == berlin
+            assert task_service._now().utcoffset() != timedelta(0)  # and not UTC
+
+    def test_a_stamp_from_the_other_half_of_the_year_keeps_its_day(self):
+        """Berlin has two offsets, so the clock has to carry the rules, not today's offset.
+
+        The binary writes local midnight, which is 22:00Z under CEST and 23:00Z under CET —
+        the exact hour where the offset decides the calendar day. Converting with a snapshot
+        of the *current* offset (what `datetime.now().astimezone().tzinfo` is) gets one of
+        these two wrong whichever day the suite runs on, and that is the same off-by-one day
+        `TZ=Europe/Berlin` was set to remove — reintroduced for half the year instead of two
+        hours a night. Both assertions hold on every day of the year.
+        """
+        with self._zone("Europe/Berlin"):
+            # A bare `due:2026-07-15` in summer — local midnight, 22:00Z under CEST. A
+            # +01:00 snapshot reads it as the 14th.
+            assert task_service._local_day("20260714T220000Z").isoformat() == "2026-07-15"
+            # `due:2026-01-14T23:30` in winter — 22:30Z under CET. A +02:00 snapshot reads
+            # it as the 15th. No single fixed offset gets both right.
+            assert task_service._local_day("20260114T223000Z").isoformat() == "2026-01-14"
+
+
 class TestWhatTheFakeClaims:
     """Each claim ``tests/fake_task.py`` makes about the binary, pinned against the binary.
 
@@ -705,7 +857,11 @@ class TestWhatTheFakeClaims:
         ],
     )
     def test_the_date_forms_the_fake_accepts(self, value, stored):
-        """Under TZ=UTC, which is what the shipped image runs and what the fake assumes."""
+        """Under TZ=UTC, which this tier pins by fixture and which the fake assumes.
+
+        The shipped image runs `TZ=Europe/Berlin`, where the binary stores the same bare
+        date two or three hours earlier — see `TestTheBerlinZone`.
+        """
         for field in ("due", "scheduled", "wait", "until"):
             task = self._add([f"{field}:{value}"], field)
             assert task[field] == stored, field

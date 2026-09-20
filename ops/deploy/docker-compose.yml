@@ -39,6 +39,23 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - DATA_ROOT=/app/data
       - DB_PATH=/app/users.db
+      # The zone the day logic runs in. Not application configuration — no Settings field
+      # reads it, so it is not an env var in README's sense (RULE-SURF-002); libc reads it,
+      # and both the backend and the `task` it spawns follow.
+      #
+      # "Today", overdue, due today and a tickler task returning are all "which calendar day
+      # does this stored UTC timestamp fall on", and Taskwarrior reads a bare YYYY-MM-DD in
+      # the same zone. On UTC, between local midnight and 02:00 the server's day is still
+      # yesterday's: a task entered as due today reads back as due yesterday and is reported
+      # overdue. The users are in Berlin; the server now is too.
+      #
+      # Everything else stamped here asks for UTC by name — the JSON log lines, the audit
+      # log and the JWT expiry — and the container tier pins that this stays true.
+      #
+      # Deleting this line moves the deployed day logic back to UTC. Every zone test sets
+      # TZ for itself, so one of them reads this file instead: TestTheServersZone in
+      # backend/tests/unit/test_task_service.py goes red if this line disappears.
+      - TZ=Europe/Berlin
       # Unset resolves to INFO, which is what the application defaults to anyway — so this
       # line changes nothing until someone raises it to debug a live problem. It is here so
       # the knob is visible where the deployment is described rather than only in README.

@@ -15,6 +15,7 @@ grammar stops interpreting it.
 
 import uuid as uuidlib
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -858,3 +859,72 @@ class TestEndIsExposed:
         assert task.end is None
         task_service.complete_task("alice", task.uuid)
         assert task_service.get_task("alice", task.uuid).end == "20260919T100000Z"
+
+
+def _deploy_environment(compose: Path, service: str) -> list[str]:
+    """The `environment:` entries one service declares in the deploy compose.
+
+    Read by hand rather than with PyYAML: the backend declares no YAML dependency (it is
+    only transitively present through uvicorn's extras), and this needs two levels of
+    indentation, not a parser.
+    """
+    entries: list[str] = []
+    in_service = in_env = False
+    for line in compose.read_text(encoding="utf-8").splitlines():
+        body = line.strip()
+        if not body or body.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= 2:
+            in_service = indent == 2 and body == f"{service}:"
+            in_env = False
+        elif in_service and indent == 4:
+            in_env = body == "environment:"
+        elif in_env and indent >= 6 and body.startswith("- "):
+            entries.append(body[2:])
+    return entries
+
+
+class TestTheServersZone:
+    """The zone the day logic runs in, and the one line that sets it (D10, brief 0037).
+
+    `_local_day` answers every day question this API has — overdue, due today, a tickler
+    task returning, the `due_*` filters — and Taskwarrior writes a bare `YYYY-MM-DD` as
+    local midnight, which is the hour where the offset decides the calendar day. So the
+    clock has to carry the zone's *rules*: a snapshot of today's offset is a day out for
+    every stamp on the other side of a DST transition, which is the same off-by-one the
+    Berlin clock was set to remove.
+    """
+
+    COMPOSE = Path(__file__).resolve().parents[3] / "ops" / "deploy" / "docker-compose.yml"
+
+    def test_a_stamp_from_either_half_of_the_year_keeps_its_berlin_day(self, monkeypatch):
+        monkeypatch.setenv("TZ", "Europe/Berlin")
+        # A bare `due:2026-07-15` in summer: local midnight is 22:00Z under CEST. Converted
+        # with a +01:00 snapshot it reads as the 14th.
+        assert task_service._local_day("20260714T220000Z").isoformat() == "2026-07-15"
+        # `due:2026-01-14T23:30` in winter: 22:30Z under CET. Converted with a +02:00
+        # snapshot it reads as the 15th. No single fixed offset gets both of these right,
+        # whichever side of a transition the suite happens to run on.
+        assert task_service._local_day("20260114T223000Z").isoformat() == "2026-01-14"
+        zone = task_service._zone()
+        assert zone.utcoffset(datetime(2026, 7, 15)) == timedelta(hours=2)
+        assert zone.utcoffset(datetime(2026, 1, 15)) == timedelta(hours=1)
+
+    def test_a_tz_that_names_no_zone_falls_back_to_what_libc_resolved(self, monkeypatch):
+        """A POSIX rule string or a typo must not take the clock down."""
+        monkeypatch.setenv("TZ", "Not/AZone")
+        assert task_service._now().utcoffset() is not None
+
+    def test_the_deploy_compose_puts_the_backend_in_berlin(self):
+        """The control itself, which nothing else here would miss.
+
+        Every other zone test — this file's and the container tier's `TestTheBerlinZone` —
+        sets `TZ` for itself, so deleting the line from `ops/deploy/docker-compose.yml`
+        would leave the whole suite green while the deployed day logic went back to UTC.
+        """
+        assert "TZ=Europe/Berlin" in _deploy_environment(self.COMPOSE, "backend"), (
+            "the backend service of ops/deploy/docker-compose.yml no longer declares "
+            "TZ=Europe/Berlin, so the deployed day logic is back on UTC while "
+            "docs/operations.md and brief 0037 say it is in Berlin"
+        )
