@@ -40,6 +40,7 @@ const hook = readFileSync(
   new URL('../../integrations/claude/hooks/runway-summary.sh', import.meta.url),
   'utf8',
 )
+const rootReadme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8')
 
 /**
  * The first fenced block below the `## <heading>` of setup.md.
@@ -173,6 +174,15 @@ describe('the copies of the skill setup', () => {
       integrationReadme.split('\n').map((l) => l.trim().replace(/\s{2,}#.*$/, '')),
     )
     for (const line of [...PLUGIN_INSTALL.split('\n'), ...PLUGIN_UPDATE.split('\n')]) {
+      expect([...readmeLines], line).toContain(line)
+    }
+  })
+
+  it('offers the plugin install the root README prints by hand', () => {
+    // The root README's marketplace route is a third copy of these two commands, and it is
+    // the copy a reader follows before ever seeing the card. Same whole-line rule.
+    const readmeLines = new Set(rootReadme.split('\n').map((l) => l.trim()))
+    for (const line of PLUGIN_INSTALL.split('\n')) {
       expect([...readmeLines], line).toContain(line)
     }
   })

@@ -230,20 +230,56 @@ public surface — see [`AGENTS.md`](AGENTS.md).
 
 [`integrations/claude/`](integrations/claude/README.md) is a Claude Code plugin with one skill,
 `runway`, that runs Getting Things Done on this server: capture from any repository, clarify the
-inbox, daily and weekly review, project planning. It needs the MCP connection above, once per
-machine and in user scope, with the key in an environment variable:
+inbox, daily and weekly review, project planning. Every route below needs the MCP connection
+above, once per machine and in user scope — the skill on its own is instructions for operations
+that nothing answers.
+
+**From the settings page**, which is the shortest way and the only one that already knows your
+host. Log in and open Settings: the **Connect Claude** card lays out the four steps — the two
+environment variables, the `claude mcp add` command, the plugin install, the standing rule to
+copy — generated for this origin, each with a copy button. The command stores the *placeholder*
+`${RUNWAY_API_KEY}`; your key stays in your shell, so rotating it is one edit rather than a
+re-paste.
+
+**From the marketplace**, by hand. This is the channel the plugin documentation recommends, and
+it installs the same plugin the card's third step does — either way you get the SessionStart hook
+that reminds you when a review is due. The zip below does not carry it:
 
 ```sh
+export RUNWAY_API_KEY='<your-api-key>'   # from the settings page; e.g. in ~/.zshenv
+export RUNWAY_URL='https://your-host'    # origin only — the review reminder reads it
+
 claude mcp add --scope user --transport http runway https://your-host/api/mcp \
   --header 'X-Api-Key: ${RUNWAY_API_KEY}'
-```
-
-Then install the plugin from this repository's marketplace:
-
-```sh
 claude plugin marketplace add ulrichschinz/runway
 claude plugin install runway@runway
 ```
+
+**From the server, as a zip**, for a client that has no plugin marketplace but can send a fixed
+`X-Api-Key` header to a remote MCP server:
+
+```sh
+curl -fsSOJ https://your-host/api/skill/runway.zip
+```
+
+That download is the copy *your* server carries rather than this repository's `main`, which
+matters because the skill no longer hedges: every operation it names has to exist on the server
+it talks to. It carries the skill text only — a hook is a plugin mechanism, and a client without
+plugins has nowhere to register one.
+
+**What a server is running.** There is no changelog and no release checklist here. `GET /api/skill`
+on the running server **is** the release record: it names the skill version that build ships, the
+content hash of that skill — the same one [`ops/skill-release.json`](ops/skill-release.json)
+records — and the commit the image was built from. The deploy asks it that question after every
+push and fails the run when the answer is not the commit it just shipped, so the record is
+maintained by the deployment instead of by remembering to edit a file.
+
+**The server's clock decides what "today" means.** Taskwarrior stores UTC, and runway resolves
+every stored timestamp to a calendar day in the server's own zone — which is what `due_today`,
+`overdue`, the daily review and the day a tickler task comes back are all counted in. The
+deployed compose declares `Europe/Berlin` for the backend; a container left on the image default
+of UTC answers one day behind Berlin between local midnight and 02:00. See
+[the container clock](docs/operations.md#the-container-clock).
 
 Updating, the install script for people without plugins, and why nothing is ever symlinked into a
 checkout: [`integrations/claude/README.md`](integrations/claude/README.md). The one-time personal

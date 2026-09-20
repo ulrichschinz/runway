@@ -71,8 +71,18 @@ So there are two install channels, and neither reads the working tree:
 - `install.sh` is POSIX sh and is parsed with `dash -n` by its test. The repository has no shell lint
   beyond that, for this script or any other.
 
-## Follow-up, not built here
+## Follow-up, built since
 
 A download route that serves the skill as a zip matching the running server's version, and a
 "Connect Claude" block on the settings page (the MCP command, the skill download, the standing rule to
-copy). Recorded in `docs/plan/STATUS.md`.
+copy). Both landed on 2026-09-20. The download route is recorded in
+[ADR 0040](0040-the-server-ships-the-skill-it-speaks.md); the settings-page block decided nothing an
+ADR is for and is recorded in
+[brief 0042](../briefs/0042-connect-claude-from-the-settings-page.md). ADR 0040 is an addendum to this
+record rather than a replacement of it: the skill still lives with the API it drives and still
+installs from a ref.
+What ADR 0040 adds is the other end of that promise — the server now says which skill release and
+which commit it carries, so a client can install the copy its own server speaks instead of the
+repository's `main`. [ADR 0041](0041-the-plugin-ships-a-review-reminder.md) then ships a SessionStart
+hook alongside the skill text, which is why the released content hash this record introduced covers
+`hooks/` as well as `skills/`.
