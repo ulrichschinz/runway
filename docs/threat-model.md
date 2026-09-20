@@ -74,8 +74,8 @@ both.
 **Enforced**
 - `RULE-SEC-001` — every route in [`backend/app/routers/`](../backend/app/routers) declares its guard
   in [`rules/route-guards.toml`](../rules/route-guards.toml), the declaration must match the guard the
-  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-seven
-  routes: thirty `user`, four `admin`, three `open`.
+  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-nine
+  routes: thirty `user`, four `admin`, five `open`.
 - `RULE-GOV-001` — the live branch protection matches [`ops/github/ruleset.json`](../ops/github/ruleset.json),
   so the rule that an unverified commit cannot reach `main` is itself checked-in state.
 - `RULE-TEST-001` and `RULE-TEST-002` — the bootstrap branches, the last-admin refusal and the
@@ -83,8 +83,8 @@ both.
 
 **Asserted**
 - **The route-guard rule does not see the whole surface.** `tools/checks/route_guards.py` globs
-  `backend/app/routers/*.py` only. The served schema has **38** operations
-  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 37: the
+  `backend/app/routers/*.py` only. The served schema has **40** operations
+  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 39: the
   odd one is `GET /health` at [`backend/app/main.py:91-93`](../backend/app/main.py), declared on the
   app object. Harmless in itself, and the proof that the next route added there would need no guard
   declaration. `RISK-SEC-005`.
@@ -194,6 +194,11 @@ SEC-4 was the previous pairing of `allow_origins=["*"]` with `allow_credentials=
   a new route cannot arrive unremarked.
 - `RULE-DEP-004` — the `task` binary is pinned to a dated Arch archive snapshot, so the grammar the
   first control depends on cannot change under a rebuild.
+
+Two routes take no caller input at all. `GET /skill` and `GET /skill/runway.zip`
+([`backend/app/routers/skill.py`](../backend/app/routers/skill.py)) have no path parameter, no query
+parameter and no body; the archive is built from a fixed file list under one directory, so there is
+no name for a caller to supply and therefore nothing to traverse. What they *disclose* is in §8.
 
 **Asserted**
 - No length limit on any request field, and no body-size limit from uvicorn or Starlette. A capacity
@@ -455,7 +460,7 @@ Everything that enters the running image is pinned by content, not by name.
 
 ## 8. Abuse cases
 
-Six, each with what actually stops it and what does not.
+Seven, each with what actually stops it and what does not.
 
 ### Credential stuffing against `POST /auth/login`
 
@@ -528,6 +533,20 @@ than requested paths ([`backend/app/audit.py:258-273`](../backend/app/audit.py))
 caller cannot append to a file nothing prunes; login failures are the exception and the per-username
 limiter bounds them ([ADR 0026](adr/0026-the-audit-log.md)). A caller cycling usernames can still
 append faster than a legitimate one. `RISK-OPS-006`.
+
+### Reading the public skill routes
+
+**Discloses**, to anyone, the commit sha this image was built from, the skill version it carries and
+that skill's text. Deliberately (ADR 0040): the repository is public, the image tags in the registry
+are the same sha, and the whole point of `GET /skill` is that a client — or the post-deploy job —
+can tell which build is answering. **Not stopped**, because there is nothing to stop; there is also
+nothing user-specific to leak, since neither route reads the database, the Taskwarrior data or the
+caller's identity.
+
+**What it would mean if that changed.** A version stamp turns into a vulnerability disclosure the
+moment the thing it stamps has a known CVE. The mitigation is the one this repository already
+runs — the deploy is a full rebuild on every merge to `main`, so the sha names a build that is a few
+minutes old — and the re-open trigger is the first field here that is not already public.
 
 ### Denial of service
 

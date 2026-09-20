@@ -90,7 +90,11 @@ There are three parts to deploy. They are versioned differently, so keep them ap
   older than the skill answers 404 and the call fails. A skill that is older than the
   server simply does not use the new operations. So the safe order is:
   deploy the server, then update the skill. When in doubt, install the skill from the tag
-  the server was built from.
+  the server was built from — or, more directly, take
+  `https://<host>/api/skill/runway.zip`, which is the copy that server carries.
+  **1.0 needs a server that has the operations of ADR 0036–0039**: the tickler, the
+  validated task filters, the scoped lists, the summary, the review timestamps and the
+  project status. Against anything older it is not a degraded skill, it is a broken one.
 
 - **What an update never touches**: the MCP connection, your standing rule, permissions
   and profile. Read the release notes for new operations worth adding to the permission
@@ -103,14 +107,20 @@ There are three parts to deploy. They are versioned differently, so keep them ap
 2. Bump `version` in `.claude-plugin/plugin.json` — patch for wording, minor for new modes
    or newly used operations, major when the skill stops working with older servers.
 3. Test as described under "Testing a change".
-4. Merge to the default branch; tag releases with the server version. Plugin users get the
+4. Merge to the default branch. There is no changelog and no release checklist: the record
+   of what is released is `GET /api/skill` on the running server, which names the version
+   and the commit it was built from. Tag if you want a name for it. Plugin users get the
    update on their next marketplace update, script users on their next `install.sh`.
 
 ### Other clients
 
-claude.ai and other agents that support Agent Skills: zip `skills/runway/` from a release
-tag and upload it; the runway MCP server has to be connected there as well. Updating means
-uploading the new zip. (Untested so far.)
+Other clients that can send a fixed `X-Api-Key` header to a remote MCP server: download
+`https://<host>/api/skill/runway.zip` — the copy that matches the version your server
+speaks — and install it there. The skill is useless without the runway MCP server connected
+in the same client. Updating means downloading the zip again after the server is deployed.
+
+Not claude.ai: its remote connectors authenticate by OAuth or not at all, and runway has no
+OAuth. That is a statement about the connector, not about the zip.
 
 ## How the skill is built
 

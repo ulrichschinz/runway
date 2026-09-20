@@ -19,6 +19,11 @@ Keep the single quotes: they store the placeholder instead of the key itself.
 Verify with the health and "me" tools. If a repository already declares the same server in
 its own `.mcp.json`, that is fine; keep the name `runway` so permission rules match.
 
+Other clients that can send a fixed `X-Api-Key` header to a remote MCP server: download
+`https://<host>/api/skill/runway.zip` — the copy that matches the version your server
+speaks — and install it there. The skill is useless without the runway MCP server connected
+in the same client.
+
 ## 2. Permissions (`~/.claude/settings.json`)
 
 Looking something up should never raise a permission prompt; changes ask; deleting is

@@ -73,7 +73,8 @@ jobs:
       # /opt/stack/docker-compose.yml, and a file can only enter an image from inside its own
       # build context. Narrowing the context back to ./backend would silently drop the baked
       # compose and return this service to shipping images without its configuration.
-      # .dockerignore at the root keeps the context to the backend tree plus that one file.
+      # .dockerignore at the root keeps the context to the backend tree, that one file, and
+      # the Claude skill the image serves (ADR 0040).
       - name: Build and push backend
         uses: docker/build-push-action@v7
         with:
@@ -81,6 +82,11 @@ jobs:
           file: ./backend/Dockerfile
           push: true
           platforms: linux/amd64
+          # Baked into /app/BUILD_COMMIT and reported by GET /skill, so a reader of the
+          # running server can tell which commit is answering — the one fact that lets the
+          # skill version it serves be checked against this repository (ADR 0040).
+          build-args: |
+            RUNWAY_COMMIT=${{ github.sha }}
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository }}-backend:latest
             ${{ env.REGISTRY }}/${{ github.repository }}-backend:${{ github.sha }}

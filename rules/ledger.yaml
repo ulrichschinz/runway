@@ -1400,7 +1400,7 @@ residual_risks:
       neither observed nor required to appear in rules/route-guards.toml. One route is outside
       it today: GET /health, declared on the app object in backend/app/main.py, unauthenticated,
       returning a fixed {"status": "ok"}. That route is harmless and it is also the proof of the
-      gap: the declaration file has thirty-seven entries and the application serves thirty-eight
+      gap: the declaration file has thirty-nine entries and the application serves forty
       routes, and nothing anywhere says so. The consequence is not the health check, it is the
       next route someone adds beside it — a guard forgotten there fails exactly the way
       RULE-SEC-001 was written to prevent, silently and for everybody, while the gate stays
