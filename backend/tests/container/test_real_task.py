@@ -10,9 +10,16 @@ These tests run only inside ``backend/Dockerfile.test``, where a real ``task`` e
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -531,6 +538,383 @@ class TestListSemantics:
         r = client.post("/tasks", json={"description": "r", "recur": "weekly"}, headers=headers)
         assert r.status_code == 400, r.text
 
+    def test_a_repeated_tag_filter_ands_on_the_real_binary(self, real_client):
+        """Two `+tag` tokens in one filter are an AND on Taskwarrior 3.5 — the whole point
+        of scoping a list by an area tag, and nothing but the binary can prove it."""
+        client, headers = real_client
+        self._create(client, headers, description="both", tags=["next", "@home", "ar"])
+        self._create(client, headers, description="one context", tags=["next", "@home"])
+        self._create(client, headers, description="one area", tags=["next", "ar"])
+        r = client.get("/gtd/next", params=[("tag", "@home"), ("tag", "ar")], headers=headers)
+        assert r.status_code == 200, r.text
+        assert [t["description"] for t in r.json()] == ["both"]
+
+
+class TestSearchFilters:
+    """The task-list filters against the real binary (ADR 0038).
+
+    Three of them are Taskwarrior's own grammar and cannot be proven by the fake:
+    `project.is:` versus the hierarchical `project:`, the three status filters, and what
+    the `ALL` group leaves out. The date filters run in Python and only need a real `end`.
+    """
+
+    FUTURE = "2030-06-01"
+
+    @staticmethod
+    def _create(client, headers, **body):
+        body.setdefault("description", "a task")
+        r = client.post("/tasks", json=body, headers=headers)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    @staticmethod
+    def _names(client, headers, path, **params):
+        r = client.get(path, params=params, headers=headers)
+        assert r.status_code == 200, r.text
+        return [t["description"] for t in r.json()]
+
+    def test_the_project_filter_is_exact_where_taskwarriors_own_is_a_prefix(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="mine", project="alpha")
+        self._create(client, headers, description="sub", project="alpha.sub")
+        self._create(client, headers, description="other", project="alphabet")
+        assert self._names(client, headers, "/tasks", project="alpha") == ["mine"]
+        assert self._names(client, headers, "/gtd/projects/alpha") == ["mine"]
+        assert self._names(client, headers, "/tasks", project="alpha.sub") == ["sub"]
+
+    def test_a_project_name_with_a_space_and_an_umlaut_round_trips(self, real_client):
+        client, headers = real_client
+        created = self._create(client, headers, description="renovieren", project="Haus Umbau Büro")
+        assert created["project"] == "Haus Umbau Büro"
+        assert self._names(client, headers, "/tasks", project="Haus Umbau Büro") == ["renovieren"]
+        assert self._names(client, headers, "/gtd/projects/Haus Umbau Büro") == ["renovieren"]
+
+    def test_status_waiting_is_the_binarys_waiting_not_the_tag(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="hidden", wait=self.FUTURE)
+        self._create(client, headers, description="delegated", tags=["waiting"])
+        assert self._names(client, headers, "/tasks", status="waiting") == ["hidden"]
+        assert self._names(client, headers, "/tasks") == ["delegated"]
+
+    def test_completed_tasks_carry_a_real_end_and_filter_by_it(self, real_client):
+        client, headers = real_client
+        done = self._create(client, headers, description="finished")
+        self._create(client, headers, description="open")
+        assert client.post(f"/tasks/{done['uuid']}/done", headers=headers).status_code == 204
+        r = client.get("/tasks", params={"status": "completed"}, headers=headers)
+        assert [t["description"] for t in r.json()] == ["finished"]
+        end = r.json()[0]["end"]
+        assert end and end.endswith("Z"), end
+        today = datetime.now(UTC).date().isoformat()
+        assert self._names(client, headers, "/tasks", completed_since=today) == ["finished"]
+        tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
+        assert self._names(client, headers, "/tasks", completed_since=tomorrow) == []
+
+    def test_all_leaves_out_deleted_tasks_and_the_recurring_template(self, real_client):
+        """An unfiltered export — what `include_done=true` used to send — returns both."""
+        client, headers = real_client
+        gone = self._create(client, headers, description="deleted")
+        done = self._create(client, headers, description="finished")
+        self._create(client, headers, description="open")
+        self._create(client, headers, description="weekly", recur="weekly", due=self.FUTURE)
+        assert client.delete(f"/tasks/{gone['uuid']}", headers=headers).status_code == 204
+        assert client.post(f"/tasks/{done['uuid']}/done", headers=headers).status_code == 204
+        r = client.get("/tasks", params={"status": "all"}, headers=headers)
+        assert r.status_code == 200, r.text
+        names = sorted(t["description"] for t in r.json())
+        statuses = {t["status"] for t in r.json()}
+        assert "deleted" not in names
+        assert "recurring" not in statuses
+        assert names == ["finished", "open", "weekly"]
+
+    def test_a_refused_filter_value_never_reaches_the_binary(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="safe")
+        for params in ({"project": "a(b)"}, {"tag": "-next"}, {"due_before": "2026-9-3"}):
+            assert client.get("/tasks", params=params, headers=headers).status_code == 400, params
+        assert self._names(client, headers, "/tasks") == ["safe"]
+
+
+class TestTheBerlinZone:
+    """What `TZ=Europe/Berlin` in the deploy compose buys, and what it needs (D10).
+
+    Every day question this API answers — overdue, due today, a tickler task returning, the
+    `due_before` / `due_after` filters, and the review's "today" — is "which calendar day does
+    this stored UTC timestamp fall on, in the server's zone". Taskwarrior interprets a bare
+    `YYYY-MM-DD` in that same zone, so the two move together or not at all.
+
+    The image's default is UTC. Berlin is one or two hours ahead, so between local midnight
+    and 02:00 the server's day is still yesterday's: a task the user entered as due *today*
+    reads back as due yesterday and is reported overdue. The control is one environment
+    variable in `ops/deploy/docker-compose.yml`; these tests are why it is more than an
+    assertion — the zone data has to exist in the runtime image, and the day logic has to
+    actually move with it.
+    """
+
+    # 23:30 UTC on 2026-09-20 is 01:30 on 2026-09-21 in Berlin (CEST, UTC+2) — inside the
+    # window where the two zones disagree about the date.
+    INSTANT = datetime(2026, 9, 20, 23, 30, tzinfo=UTC)
+    BERLIN_DAY = "2026-09-21"
+    UTC_DAY = "2026-09-20"
+    # What the binary stores for `due:2026-09-21` when it reads that bare date in Berlin.
+    STORED = "20260920T220000Z"
+
+    @staticmethod
+    @contextmanager
+    def _zone(name: str) -> Iterator[None]:
+        """Run the process, and the `task` it spawns, in `name` — as the container would.
+
+        The tier's autouse fixture pins UTC; this replaces it for the body and puts it back,
+        including `time.tzset()`, which is what makes `datetime.now().astimezone()` follow.
+        """
+        before = os.environ.get("TZ")
+        os.environ["TZ"] = name
+        time.tzset()
+        try:
+            yield
+        finally:
+            if before is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = before
+            time.tzset()
+
+    def test_the_runtime_image_carries_the_berlin_zone(self):
+        """`TZ` names a file. Without tzdata the process stays on UTC, silently."""
+        assert Path("/usr/share/zoneinfo/Europe/Berlin").is_file(), (
+            "the runtime image has no Europe/Berlin zone, so TZ in the deploy compose "
+            "would leave the container on UTC without saying so"
+        )
+        assert self.INSTANT.astimezone(ZoneInfo("Europe/Berlin")).isoformat() == (
+            "2026-09-21T01:30:00+02:00"
+        )
+        with self._zone("Europe/Berlin"):
+            assert self.INSTANT.astimezone().utcoffset() == timedelta(hours=2)
+            assert task_service._now().tzinfo is not None
+
+    def test_a_bare_due_date_and_the_day_logic_agree_on_the_berlin_day(
+        self, real_client, monkeypatch
+    ):
+        """At 01:30 Berlin: what the user called today is today, and nothing is overdue."""
+        client, headers = real_client
+        with self._zone("Europe/Berlin"):
+            monkeypatch.setattr(task_service, "_now", lambda: self.INSTANT.astimezone())
+            r = client.post(
+                "/tasks", json={"description": "heute", "due": self.BERLIN_DAY}, headers=headers
+            )
+            assert r.status_code == 201, r.text
+            assert r.json()["due"] == self.STORED
+            assert task_service._local_day(self.STORED).isoformat() == self.BERLIN_DAY
+
+            def names(**params):
+                got = client.get("/tasks", params=params, headers=headers)
+                assert got.status_code == 200, got.text
+                return [t["description"] for t in got.json()]
+
+            # "due today" around the Berlin day, and "overdue" before it.
+            assert names(due_after="2026-09-20", due_before="2026-09-22") == ["heute"]
+            assert names(due_before=self.BERLIN_DAY) == []
+
+    def test_under_utc_the_same_stamp_reads_as_the_day_before(self, real_client, monkeypatch):
+        """The defect the variable removes — the gate watching it fail (Operability pattern).
+
+        Same instant, same stored timestamp, UTC server: the task is one day older than the
+        user's calendar says, so a "due today" window misses it and an overdue query claims it.
+        """
+        client, headers = real_client  # the autouse fixture keeps this one in UTC
+        monkeypatch.setattr(task_service, "_now", lambda: self.INSTANT.astimezone())
+        assert task_service._local_day(self.STORED).isoformat() == self.UTC_DAY
+
+        r = client.post(
+            "/tasks", json={"description": "heute", "due": self.STORED}, headers=headers
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["due"] == self.STORED
+
+        def names(**params):
+            got = client.get("/tasks", params=params, headers=headers)
+            assert got.status_code == 200, got.text
+            return [t["description"] for t in got.json()]
+
+        assert names(due_after="2026-09-20", due_before="2026-09-22") == []
+        assert names(due_before=self.BERLIN_DAY) == ["heute"]
+
+    def test_the_zone_moves_the_day_logic_and_nothing_else_that_is_written_down(self):
+        """The blast radius, made executable rather than asserted in a brief.
+
+        `task_service._now()` is the one clock that follows the zone (D10). Everything else
+        this deployment stamps — the JSON log lines, the audit log, the JWT expiry — asks for
+        UTC by name, and `docs/operations.md` promises exactly that. A container moved to
+        Berlin must not quietly re-stamp any of them in local time.
+        """
+        import logging
+
+        from app import audit
+        from app.logging_setup import JsonFormatter
+
+        record = logging.LogRecord("t", logging.INFO, __file__, 1, "hello", None, None)
+        with self._zone("Europe/Berlin"):
+            assert audit.now().endswith("Z")
+            assert json.loads(JsonFormatter().format(record))["timestamp"].endswith("Z")
+            # Berlin's offset, whatever today's is: hard-coding +02:00 would turn this
+            # tier red every winter for a reason that has nothing to do with the code.
+            berlin = datetime.now(ZoneInfo("Europe/Berlin")).utcoffset()
+            assert task_service._now().utcoffset() == berlin
+            assert task_service._now().utcoffset() != timedelta(0)  # and not UTC
+
+    def test_a_stamp_from_the_other_half_of_the_year_keeps_its_day(self):
+        """Berlin has two offsets, so the clock has to carry the rules, not today's offset.
+
+        The binary writes local midnight, which is 22:00Z under CEST and 23:00Z under CET —
+        the exact hour where the offset decides the calendar day. Converting with a snapshot
+        of the *current* offset (what `datetime.now().astimezone().tzinfo` is) gets one of
+        these two wrong whichever day the suite runs on, and that is the same off-by-one day
+        `TZ=Europe/Berlin` was set to remove — reintroduced for half the year instead of two
+        hours a night. Both assertions hold on every day of the year.
+        """
+        with self._zone("Europe/Berlin"):
+            # A bare `due:2026-07-15` in summer — local midnight, 22:00Z under CEST. A
+            # +01:00 snapshot reads it as the 14th.
+            assert task_service._local_day("20260714T220000Z").isoformat() == "2026-07-15"
+            # `due:2026-01-14T23:30` in winter — 22:30Z under CET. A +02:00 snapshot reads
+            # it as the 15th. No single fixed offset gets both right.
+            assert task_service._local_day("20260114T223000Z").isoformat() == "2026-01-14"
+
+
+class TestTheSummaryCounters:
+    """The summary against the real binary (D14, D17).
+
+    Everything it counts is Python over one export, so the fake covers the arithmetic. What
+    it cannot cover is what the binary puts in that export: whether a task with a `wait` an
+    hour in the past comes back as visible and still carries the `wait` the "returned today"
+    counter reads, and whether a bare `YYYY-MM-DD` due date lands on the day the counters
+    then call today. Both are the binary's date handling, and both are the whole counter.
+    """
+
+    @staticmethod
+    def _create(client, headers, **body):
+        r = client.post("/tasks", json=body, headers=headers)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    def test_hidden_and_returned_tickler_tasks_are_counted(self, real_client):
+        client, headers = real_client
+        now = datetime.now(UTC)
+        # Earlier today, never yesterday: just after local midnight `now - 1h` would be the
+        # previous day and "returned today" would rightly not count it.
+        returned = max(now - timedelta(hours=1), now.replace(hour=0, minute=0))
+        self._create(
+            client,
+            headers,
+            description="back in the inbox",
+            wait=returned.strftime("%Y-%m-%dT%H:%M"),
+        )
+        self._create(
+            client,
+            headers,
+            description="parked",
+            wait=(now + timedelta(days=30)).strftime("%Y-%m-%d"),
+        )
+        self._create(client, headers, description="plain")
+        r = client.get("/gtd/summary", headers=headers)
+        assert r.status_code == 200, r.text
+        summary = r.json()
+        assert summary["today"] == now.date().isoformat()
+        assert summary["hidden"] == 1
+        assert summary["tickler_returned_today"] == 1
+        # The returned one is visible again and untagged, so it is back in the inbox with
+        # the plain task; the parked one is not.
+        assert summary["inbox"] == 2
+        assert summary["inbox_oldest_entry"] and summary["inbox_oldest_entry"].endswith("Z")
+
+    def test_due_and_scheduled_days_are_the_binarys_own(self, real_client):
+        client, headers = real_client
+        today = datetime.now(UTC).date()
+        self._create(client, headers, description="due today", due=today.isoformat(), tags=["next"])
+        self._create(
+            client,
+            headers,
+            description="overdue",
+            due=(today - timedelta(days=3)).isoformat(),
+            tags=["next"],
+        )
+        self._create(
+            client,
+            headers,
+            description="chase",
+            scheduled=(today - timedelta(days=1)).isoformat(),
+            tags=["waiting"],
+        )
+        self._create(client, headers, description="stalls it", project="alpha")
+        summary = client.get("/gtd/summary", headers=headers).json()
+        assert summary["overdue"] == 1
+        assert summary["due_today"] == 1
+        assert summary["next"] == 2
+        assert summary["waiting"] == 1
+        assert summary["waiting_followup_due"] == 1
+        assert summary["scheduled_passed"] == 0, "a waiting-for belongs to its own counter"
+        assert summary["stalled_projects"] == ["alpha"]
+
+
+class TestTheProjectOverview:
+    """The overview's counts against the real binary (D14, D15, ADR 0039).
+
+    The arithmetic is Python over one export and the fake covers it. What the fake cannot
+    cover is the export itself: that a task parked by a future `wait` still reaches the
+    rollup at all (it is `status:waiting`, not `status:pending`, on 3.5), and that a
+    subproject is a project of its own here rather than part of its parent — the binary's
+    `project:` is a hierarchical prefix match, which is the defect ADR 0038 removed.
+    """
+
+    @staticmethod
+    def _create(client, headers, **body):
+        r = client.post("/tasks", json=body, headers=headers)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    @staticmethod
+    def _rows(client, headers):
+        r = client.get("/gtd/projects/overview", headers=headers)
+        assert r.status_code == 200, r.text
+        return {row["name"]: row for row in r.json()}
+
+    def test_parked_and_waiting_tasks_are_counted_and_stop_a_project_being_stalled(
+        self, real_client
+    ):
+        client, headers = real_client
+        future = (datetime.now(UTC) + timedelta(days=30)).strftime("%Y-%m-%d")
+        self._create(client, headers, description="go", project="alpha", tags=["next"])
+        self._create(client, headers, description="later", project="alpha", wait=future)
+        self._create(client, headers, description="chase", project="patient", tags=["waiting"])
+        self._create(client, headers, description="parked", project="dormant", wait=future)
+        self._create(client, headers, description="plain", project="stuck")
+        rows = self._rows(client, headers)
+        assert (rows["alpha"]["pending"], rows["alpha"]["hidden"]) == (1, 1)
+        assert rows["alpha"]["next"] == 1
+        assert rows["patient"]["waiting"] == 1
+        assert (rows["dormant"]["pending"], rows["dormant"]["hidden"]) == (0, 1)
+        assert [name for name, row in rows.items() if row["stalled"]] == ["stuck"]
+
+    def test_a_subproject_is_a_project_of_its_own(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="parent step", project="alpha", tags=["next"])
+        self._create(client, headers, description="child step", project="alpha.sub")
+        rows = self._rows(client, headers)
+        assert sorted(rows) == ["alpha", "alpha.sub"]
+        assert rows["alpha"]["stalled"] is False
+        assert rows["alpha.sub"]["stalled"] is True, "the parent's next action is not its own"
+
+    def test_a_stored_status_reaches_the_overview_and_the_summary(self, real_client):
+        client, headers = real_client
+        self._create(client, headers, description="plain", project="Haus Umbau")
+        assert client.get("/gtd/summary", headers=headers).json()["stalled_projects"] == [
+            "Haus Umbau"
+        ]
+        r = client.put("/projects/Haus Umbau/status", json={"status": "on_hold"}, headers=headers)
+        assert r.status_code == 200, r.text
+        assert self._rows(client, headers)["Haus Umbau"]["status"] == "on_hold"
+        assert client.get("/gtd/summary", headers=headers).json()["stalled_projects"] == []
+
 
 class TestWhatTheFakeClaims:
     """Each claim ``tests/fake_task.py`` makes about the binary, pinned against the binary.
@@ -608,7 +992,11 @@ class TestWhatTheFakeClaims:
         ],
     )
     def test_the_date_forms_the_fake_accepts(self, value, stored):
-        """Under TZ=UTC, which is what the shipped image runs and what the fake assumes."""
+        """Under TZ=UTC, which this tier pins by fixture and which the fake assumes.
+
+        The shipped image runs `TZ=Europe/Berlin`, where the binary stores the same bare
+        date two or three hours earlier — see `TestTheBerlinZone`.
+        """
         for field in ("due", "scheduled", "wait", "until"):
             task = self._add([f"{field}:{value}"], field)
             assert task[field] == stored, field
@@ -623,3 +1011,21 @@ class TestWhatTheFakeClaims:
         """Why the fake refuses `+1abc` rather than storing it as a tag."""
         task = self._add(["+1abc"], "t")
         assert task.get("tags", []) == []
+
+    def test_empty_free_text_leaves_the_description_alone(self):
+        """Why the fake drops an empty word: a description cannot be cleared, only replaced.
+
+        `modify -- ""` is rc 0 — no rejection to map to a 400 — and changes nothing, with or
+        without a modifier beside it. `PUT /tasks/{uuid}` with `description: ""` is therefore
+        a 200 carrying the old description, which is what the route description says.
+        """
+        from app.services import task_runner
+
+        task = self._add([], "hello world")
+        task_runner.modify_task("alice", task["uuid"], [], [""])
+        assert task_runner.export_tasks("alice", [task["uuid"]])[0]["description"] == "hello world"
+
+        task_runner.modify_task("alice", task["uuid"], ["priority:H"], [""])
+        after = task_runner.export_tasks("alice", [task["uuid"]])[0]
+        assert after["description"] == "hello world"
+        assert after["priority"] == "H"

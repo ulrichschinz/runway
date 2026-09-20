@@ -86,11 +86,27 @@ route = "GET /gtd/projects"
 guard = "user"
 
 [[routes]]
+route = "GET /gtd/projects/overview"
+guard = "user"
+
+[[routes]]
 route = "GET /gtd/projects/{name}"
 guard = "user"
 
 [[routes]]
+route = "GET /gtd/review"
+guard = "user"
+
+[[routes]]
+route = "POST /gtd/review"
+guard = "user"
+
+[[routes]]
 route = "GET /gtd/someday"
+guard = "user"
+
+[[routes]]
+route = "GET /gtd/summary"
 guard = "user"
 
 [[routes]]
@@ -115,6 +131,10 @@ guard = "user"
 
 [[routes]]
 route = "PUT /projects/plans/{name}"
+guard = "user"
+
+[[routes]]
+route = "PUT /projects/{name}/status"
 guard = "user"
 
 [[routes]]

@@ -219,7 +219,7 @@ section claimed until Step 13, none of which ever existed:
 
 MCP clients discover tools at connect time, so nothing had to hardcode these — which is
 exactly why the documentation could be wrong for so long without anyone noticing. The full
-list of all 22 is checked in at
+list of all 27 is checked in at
 [`ops/surfaces/mcp-tools.json`](ops/surfaces/mcp-tools.json), captured by booting the app and
 reading the tool list, and `RULE-SURF-001` fails the build when it changes.
 

@@ -30,10 +30,12 @@
       "BrainstormItem": {
         "properties": {
           "id": {
+            "description": "Identifier of the item, unique within the list. Any string.",
             "title": "Id",
             "type": "string"
           },
           "text": {
+            "description": "One idea, or one organized step, as free text.",
             "title": "Text",
             "type": "string"
           }
@@ -43,6 +45,112 @@
           "text"
         ],
         "title": "BrainstormItem",
+        "type": "object"
+      },
+      "GtdSummary": {
+        "properties": {
+          "due_today": {
+            "description": "Open tasks whose `due` day is today. Narrowed by `tag` where the summary was called with one.",
+            "title": "Due Today",
+            "type": "integer"
+          },
+          "hidden": {
+            "description": "Tasks parked in the tickler by a future `wait` date. Narrowed by `tag` where the summary was called with one.",
+            "title": "Hidden",
+            "type": "integer"
+          },
+          "inbox": {
+            "description": "Unprocessed tasks: no project, no tags, not hidden by a `wait` date. Never narrowed by `tag` \u2014 the inbox is untagged by definition.",
+            "title": "Inbox",
+            "type": "integer"
+          },
+          "inbox_oldest_entry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the oldest inbox task was captured, `YYYYMMDDTHHMMSSZ` (UTC), or null if the inbox is empty. An old entry is the finding, not the count.",
+            "title": "Inbox Oldest Entry"
+          },
+          "last_review": {
+            "$ref": "#/components/schemas/LastReview",
+            "description": "When reviews were last recorded."
+          },
+          "next": {
+            "description": "Visible tasks tagged `next`. Narrowed by `tag` where the summary was called with one.",
+            "title": "Next",
+            "type": "integer"
+          },
+          "overdue": {
+            "description": "Open tasks whose `due` day is before today. Narrowed by `tag` where the summary was called with one.",
+            "title": "Overdue",
+            "type": "integer"
+          },
+          "scheduled_passed": {
+            "description": "Visible tasks that are not `waiting` and whose `scheduled` day is today or earlier \u2014 they could have been started. Narrowed by `tag` where the summary was called with one.",
+            "title": "Scheduled Passed",
+            "type": "integer"
+          },
+          "someday": {
+            "description": "Visible tasks tagged `someday`. Narrowed by `tag` where the summary was called with one.",
+            "title": "Someday",
+            "type": "integer"
+          },
+          "stalled_projects": {
+            "description": "Names of active projects with no `next` action, nothing `waiting` and nothing parked in the tickler. Names only, no tasks.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Stalled Projects",
+            "type": "array"
+          },
+          "tickler_returned_today": {
+            "description": "Tasks whose `wait` date passed today, so they are back. Narrowed by `tag` where the summary was called with one.",
+            "title": "Tickler Returned Today",
+            "type": "integer"
+          },
+          "today": {
+            "description": "The server's current date, `YYYY-MM-DD`. Every day counter below is relative to it.",
+            "title": "Today",
+            "type": "string"
+          },
+          "unclarified": {
+            "description": "Visible tasks with tags but no project and none of `next`, `waiting` or `someday`: in no GTD list at all. Narrowed by `tag` where the summary was called with one.",
+            "title": "Unclarified",
+            "type": "integer"
+          },
+          "waiting": {
+            "description": "Open tasks tagged `waiting`, hidden ones included. Narrowed by `tag` where the summary was called with one.",
+            "title": "Waiting",
+            "type": "integer"
+          },
+          "waiting_followup_due": {
+            "description": "Tasks tagged `waiting` whose `scheduled` follow-up day is today or earlier. Narrowed by `tag` where the summary was called with one.",
+            "title": "Waiting Followup Due",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "today",
+          "inbox",
+          "overdue",
+          "due_today",
+          "next",
+          "waiting",
+          "waiting_followup_due",
+          "someday",
+          "hidden",
+          "tickler_returned_today",
+          "scheduled_passed",
+          "unclarified",
+          "stalled_projects",
+          "last_review"
+        ],
+        "title": "GtdSummary",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -93,6 +201,36 @@
         "title": "InboxItem",
         "type": "object"
       },
+      "LastReview": {
+        "properties": {
+          "daily": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the last daily review was recorded, `YYYYMMDDTHHMMSSZ` (UTC), or null if none was.",
+            "title": "Daily"
+          },
+          "weekly": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the last weekly review was recorded, `YYYYMMDDTHHMMSSZ` (UTC), or null if none was.",
+            "title": "Weekly"
+          }
+        },
+        "title": "LastReview",
+        "type": "object"
+      },
       "PasswordChange": {
         "properties": {
           "current_password": {
@@ -114,6 +252,7 @@
       "ProjectCreate": {
         "properties": {
           "name": {
+            "description": "Project name, spelled exactly as tasks spell it; dots nest subprojects (`home.garden`). Surrounding whitespace is removed.",
             "title": "Name",
             "type": "string"
           }
@@ -122,6 +261,68 @@
           "name"
         ],
         "title": "ProjectCreate",
+        "type": "object"
+      },
+      "ProjectOverview": {
+        "properties": {
+          "explicit": {
+            "description": "True when the project was created on purpose or has a plan; false when it exists only because tasks name it. Both are real projects.",
+            "title": "Explicit",
+            "type": "boolean"
+          },
+          "has_plan": {
+            "description": "True when any plan field (purpose, principles, vision, brainstorm, organized) is filled.",
+            "title": "Has Plan",
+            "type": "boolean"
+          },
+          "hidden": {
+            "description": "Tasks parked in the tickler by a future `wait` date.",
+            "title": "Hidden",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The project name, spelled as tasks spell it.",
+            "title": "Name",
+            "type": "string"
+          },
+          "next": {
+            "description": "Visible tasks tagged `next`: the project's next actions.",
+            "title": "Next",
+            "type": "integer"
+          },
+          "pending": {
+            "description": "Open tasks that are visible \u2014 not parked by a future `wait` date.",
+            "title": "Pending",
+            "type": "integer"
+          },
+          "stalled": {
+            "description": "True when the project is `active` and has no `next` action, nothing `waiting` and nothing parked in the tickler. Nothing is moving it.",
+            "title": "Stalled",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "`active` \u2014 it is running and needs a next action; `on_hold` \u2014 deliberately parked, so it is never reported as stalled; `done` \u2014 the outcome was reached or dropped. A project nobody has said anything about is `active`.",
+            "title": "Status",
+            "type": "string"
+          },
+          "waiting": {
+            "description": "Open tasks tagged `waiting`, hidden ones included.",
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "explicit",
+          "has_plan",
+          "pending",
+          "next",
+          "waiting",
+          "hidden",
+          "stalled"
+        ],
+        "title": "ProjectOverview",
         "type": "object"
       },
       "ProjectPlan": {
@@ -193,6 +394,7 @@
                 "type": "null"
               }
             ],
+            "description": "Unsorted ideas, in no particular order. The complete list: what you send replaces the stored one. Omitted or null keeps it.",
             "title": "Brainstorm"
           },
           "organized": {
@@ -207,6 +409,7 @@
                 "type": "null"
               }
             ],
+            "description": "The ideas worth keeping, in the order they will be acted on. The complete list: what you send replaces the stored one. Omitted or null keeps it.",
             "title": "Organized"
           },
           "principles": {
@@ -218,6 +421,7 @@
                 "type": "null"
               }
             ],
+            "description": "The standards and constraints the work has to hold to. Omitted or null keeps the stored text; an empty string clears it.",
             "title": "Principles"
           },
           "purpose": {
@@ -229,6 +433,7 @@
                 "type": "null"
               }
             ],
+            "description": "Why the project exists \u2014 the outcome it serves. Omitted or null keeps the stored text; an empty string clears it.",
             "title": "Purpose"
           },
           "vision": {
@@ -240,10 +445,101 @@
                 "type": "null"
               }
             ],
+            "description": "What success looks like, described as if it had already happened. Omitted or null keeps the stored text; an empty string clears it.",
             "title": "Vision"
           }
         },
         "title": "ProjectPlanUpdate",
+        "type": "object"
+      },
+      "ProjectStatus": {
+        "properties": {
+          "name": {
+            "description": "The project the status belongs to, spelled as tasks spell it.",
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "description": "`active` \u2014 it is running and needs a next action; `on_hold` \u2014 deliberately parked, so it is never reported as stalled; `done` \u2014 the outcome was reached or dropped. A project nobody has said anything about is `active`.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "title": "ProjectStatus",
+        "type": "object"
+      },
+      "ProjectStatusUpdate": {
+        "properties": {
+          "status": {
+            "description": "`active` \u2014 it is running and needs a next action; `on_hold` \u2014 deliberately parked, so it is never reported as stalled; `done` \u2014 the outcome was reached or dropped. A project nobody has said anything about is `active`.",
+            "enum": [
+              "active",
+              "on_hold",
+              "done"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ProjectStatusUpdate",
+        "type": "object"
+      },
+      "Review": {
+        "properties": {
+          "kind": {
+            "description": "`daily` or `weekly`.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "description": "When this review was recorded, `YYYYMMDDTHHMMSSZ` (UTC).",
+            "title": "Reviewed At",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Which part of the system the review covered: the scope tags, sorted and joined with `+` (`@work+ar`), or empty for the whole system. Order and duplicates do not matter; the server returns the canonical form, which is what the summary's `tag` resolves to.",
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "scope",
+          "reviewed_at"
+        ],
+        "title": "Review",
+        "type": "object"
+      },
+      "ReviewCreate": {
+        "properties": {
+          "kind": {
+            "description": "`daily` for the short daily pass, `weekly` for the full weekly review.",
+            "enum": [
+              "daily",
+              "weekly"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "scope": {
+            "default": "",
+            "description": "Which part of the system the review covered: the scope tags, sorted and joined with `+` (`@work+ar`), or empty for the whole system. Order and duplicates do not matter; the server returns the canonical form, which is what the summary's `tag` resolves to.",
+            "maxLength": 200,
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "ReviewCreate",
         "type": "object"
       },
       "RoleUpdate": {
@@ -304,6 +600,17 @@
               }
             ],
             "title": "Due"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
           },
           "entry": {
             "anyOf": [
@@ -599,7 +906,7 @@
                 "type": "null"
               }
             ],
-            "description": "What the task is, as free text. Never parsed for tags or attributes. Null or omitted leaves it unchanged.",
+            "description": "What the task is, as free text. Never parsed for tags or attributes. Null, omitted or empty leaves it unchanged: a description can be replaced, never cleared.",
             "title": "Description"
           },
           "due": {
@@ -1541,9 +1848,31 @@
     },
     "/gtd/inbox": {
       "get": {
-        "description": "List tasks that have not been processed yet: no project and no tags assigned.",
+        "description": "List tasks that have not been processed yet: no project and no tags. A tag means the task has been clarified, so giving it one takes it out of the inbox.",
         "operationId": "inbox_gtd_inbox_get",
         "parameters": [
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
           {
             "in": "header",
             "name": "x-api-key",
@@ -1603,6 +1932,28 @@
         "description": "List tasks tagged +next \u2014 concrete actions you can do right now.",
         "operationId": "next_actions_gtd_next_get",
         "parameters": [
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
           {
             "in": "header",
             "name": "x-api-key",
@@ -1716,6 +2067,65 @@
         ]
       }
     },
+    "/gtd/projects/overview": {
+      "get": {
+        "description": "Every project with its open task counts, its status and whether it is stalled \u2014 active, with no `next` action, nothing `waiting` and nothing parked in the tickler. Projects that exist only because tasks name them are included and marked `explicit: false`. Names and numbers only, no task descriptions.",
+        "operationId": "projects_overview_gtd_projects_overview_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectOverview"
+                  },
+                  "title": "Response Projects Overview Gtd Projects Overview Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Projects overview",
+        "tags": [
+          "gtd"
+        ]
+      }
+    },
     "/gtd/projects/{name}": {
       "get": {
         "description": "List all pending tasks belonging to a specific project.",
@@ -1728,6 +2138,28 @@
             "schema": {
               "title": "Name",
               "type": "string"
+            }
+          },
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
             }
           },
           {
@@ -1784,11 +2216,155 @@
         ]
       }
     },
+    "/gtd/review": {
+      "get": {
+        "description": "When each kind of review was last recorded, one entry per kind and scope. An empty list means none was ever recorded \u2014 not that the system is unreviewed, only that nothing said so here.",
+        "operationId": "last_reviews_gtd_review_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Review"
+                  },
+                  "title": "Response Last Reviews Gtd Review Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Last reviews",
+        "tags": [
+          "gtd"
+        ]
+      },
+      "post": {
+        "description": "Note that a daily or weekly review just finished, so the next session knows how current the lists are. Recording the same kind and scope again moves the timestamp; nothing else is stored, and no task is touched.",
+        "operationId": "record_review_gtd_review_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Review"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record a review",
+        "tags": [
+          "gtd"
+        ]
+      }
+    },
     "/gtd/someday": {
       "get": {
         "description": "List tasks tagged +someday \u2014 ideas and intentions not yet committed to.",
         "operationId": "someday_gtd_someday_get",
         "parameters": [
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
           {
             "in": "header",
             "name": "x-api-key",
@@ -1843,11 +2419,110 @@
         ]
       }
     },
+    "/gtd/summary": {
+      "get": {
+        "description": "Counters for a review or a reminder, from one pass over the open tasks: how much is in the inbox and how old it is, what is overdue or due today, how many next, waiting, someday and hidden tasks there are, which follow-ups are due, what is in no list, and which active projects are stalled. It carries no task descriptions, so it is safe to print anywhere. Fetch a list only when its counter is above zero.",
+        "operationId": "summary_gtd_summary_get",
+        "parameters": [
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. Every counter is narrowed except `inbox` and `inbox_oldest_entry`, which are always counted whole: an inbox item carries no tags by definition, so a scoped inbox count would always be zero.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. Every counter is narrowed except `inbox` and `inbox_oldest_entry`, which are always counted whole: an inbox item carries no tags by definition, so a scoped inbox count would always be zero.",
+              "title": "Tag"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GtdSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "GTD summary",
+        "tags": [
+          "gtd"
+        ]
+      }
+    },
     "/gtd/tickler": {
       "get": {
         "description": "Tasks hidden by a future wait date, soonest first. They return to their list (untagged ones to the inbox) when the date passes.",
         "operationId": "tickler_gtd_tickler_get",
         "parameters": [
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
           {
             "in": "header",
             "name": "x-api-key",
@@ -1907,6 +2582,28 @@
         "description": "List tasks tagged +waiting \u2014 things delegated or blocked on someone/something else.",
         "operationId": "waiting_gtd_waiting_get",
         "parameters": [
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
           {
             "in": "header",
             "name": "x-api-key",
@@ -2043,6 +2740,7 @@
     },
     "/projects": {
       "post": {
+        "description": "Create a project explicitly (it also exists implicitly as soon as a task names it). Creating the same name twice changes nothing and returns the stored plan.",
         "operationId": "create_project_projects_post",
         "parameters": [
           {
@@ -2099,7 +2797,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Create Project",
+        "summary": "Create a project",
         "tags": [
           "projects"
         ]
@@ -2107,6 +2805,7 @@
     },
     "/projects/plans/{name}": {
       "get": {
+        "description": "Read a project's plan (GTD Natural Planning Model: purpose, principles, vision, brainstorm, organized). Unknown names return an empty plan.",
         "operationId": "get_plan_projects_plans__name__get",
         "parameters": [
           {
@@ -2162,12 +2861,13 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Get Plan",
+        "summary": "Get a project plan",
         "tags": [
           "projects"
         ]
       },
       "put": {
+        "description": "Create or update the plan; omitted fields are kept. It also creates the project when it does not exist yet.",
         "operationId": "upsert_plan_projects_plans__name__put",
         "parameters": [
           {
@@ -2233,7 +2933,81 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Upsert Plan",
+        "summary": "Update a project plan",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/projects/{name}/status": {
+      "put": {
+        "description": "Say whether a project is `active`, `on_hold` or `done`. Only that is stored: no task is touched, and no project is created \u2014 a project exists because a task names it or because it was created explicitly. An `on_hold` or `done` project is never reported as stalled, which is what makes 'nothing is moving here' a finding worth acting on rather than a list of everything the user has parked.",
+        "operationId": "set_project_status_projects__name__status_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectStatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set a project's status",
         "tags": [
           "projects"
         ]
@@ -2241,17 +3015,205 @@
     },
     "/tasks": {
       "get": {
-        "description": "Return all pending tasks for the current user, sorted by urgency. Set include_done=true to also include completed tasks.",
+        "description": "Search the current user's tasks. Without filters it returns the visible pending ones, most urgent first; completed tasks come back newest first. Filters combine with AND. Dates are compared per calendar day in the server's local time.",
         "operationId": "list_tasks_tasks_get",
         "parameters": [
           {
+            "description": "`pending` (the default) is every visible task; `waiting` is only the ones hidden by a future `wait` date, which is Taskwarrior's waiting and NOT the `waiting` GTD tag (use the waiting list for that); `completed` is done tasks; `all` is pending, hidden and completed together.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "waiting",
+                    "completed",
+                    "all"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`pending` (the default) is every visible task; `waiting` is only the ones hidden by a future `wait` date, which is Taskwarrior's waiting and NOT the `waiting` GTD tag (use the waiting list for that); `completed` is done tasks; `all` is pending, hidden and completed together.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Exact project name. A subproject is a project of its own, so `home` does not include `home.garden`.",
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact project name. A subproject is a project of its own, so `home` does not include `home.garden`.",
+              "title": "Project"
+            }
+          },
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one.",
+              "title": "Tag"
+            }
+          },
+          {
+            "description": "Only tasks due before this day. `YYYY-MM-DD`.",
+            "in": "query",
+            "name": "due_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 10,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks due before this day. `YYYY-MM-DD`.",
+              "title": "Due Before"
+            }
+          },
+          {
+            "description": "Only tasks due after this day. `YYYY-MM-DD`.",
+            "in": "query",
+            "name": "due_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 10,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks due after this day. `YYYY-MM-DD`.",
+              "title": "Due After"
+            }
+          },
+          {
+            "description": "Only tasks scheduled before this day. `YYYY-MM-DD`.",
+            "in": "query",
+            "name": "scheduled_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 10,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks scheduled before this day. `YYYY-MM-DD`.",
+              "title": "Scheduled Before"
+            }
+          },
+          {
+            "description": "Only tasks completed on or after this day. `YYYY-MM-DD`. It implies `status=completed` when no status is given, and is refused with `pending` or `waiting`.",
+            "in": "query",
+            "name": "completed_since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 10,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks completed on or after this day. `YYYY-MM-DD`. It implies `status=completed` when no status is given, and is refused with `pending` or `waiting`.",
+              "title": "Completed Since"
+            }
+          },
+          {
+            "description": "Case-insensitive substring of the description. It is filtered on the server and never passed to Taskwarrior, so it takes plain text, not a search expression. Useful as a duplicate check: run it once with `status=pending` and once with `status=waiting`.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring of the description. It is filtered on the server and never passed to Taskwarrior, so it takes plain text, not a search expression. Useful as a duplicate check: run it once with `status=pending` and once with `status=waiting`.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Return at most this many tasks, after sorting.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 500,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return at most this many tasks, after sorting.",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Deprecated alias: true means `status=all`, false is ignored. Sending true together with `status` is refused; use `status` instead.",
             "in": "query",
             "name": "include_done",
             "required": false,
             "schema": {
-              "default": false,
-              "title": "Include Done",
-              "type": "boolean"
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Deprecated alias: true means `status=all`, false is ignored. Sending true together with `status` is refused; use `status` instead.",
+              "title": "Include Done"
             }
           },
           {
@@ -2308,7 +3270,7 @@
         ]
       },
       "post": {
-        "description": "Create a new task. Optionally assign a project, tags, priority (H/M/L), due date, or make it recurring.",
+        "description": "Create a new task. Only the description is required; project, tags, priority (H/M/L), dates and a recurrence are optional, and an empty string counts as not given.",
         "operationId": "create_task_tasks_post",
         "parameters": [
           {
@@ -2490,7 +3452,7 @@
         ]
       },
       "put": {
-        "description": "Update one or more fields of a task (description, project, tags, priority, due date, etc.). Only provided fields are changed.",
+        "description": "Update one or more fields of a task. A field you omit, or send as null, is left as it is; an empty string clears `project`, `priority`, `due`, `scheduled`, `wait`, `until` and `recur`. The description is the exception: it can be replaced but not cleared, and an empty one leaves it as it was. `tags` replaces the whole tag set, so use `tags_add` / `tags_remove` to change single tags without reading the task first.",
         "operationId": "modify_task_tasks__uuid__put",
         "parameters": [
           {

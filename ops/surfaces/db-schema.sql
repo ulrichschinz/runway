@@ -12,6 +12,16 @@ CREATE TABLE project_plans (
     UNIQUE(username, project_name)
 );
 
+-- table project_status
+CREATE TABLE project_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'on_hold', 'done')),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(username, name)
+);
+
 -- table projects
 CREATE TABLE projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,6 +35,16 @@ CREATE TABLE projects (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(username, name)
+);
+
+-- table reviews
+CREATE TABLE reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('daily', 'weekly')),
+    scope TEXT NOT NULL DEFAULT '',
+    reviewed_at TEXT NOT NULL,
+    UNIQUE(username, kind, scope)
 );
 
 -- table site_settings

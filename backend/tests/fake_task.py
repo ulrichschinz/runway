@@ -22,6 +22,8 @@ the binary in ``tests/container`` (``TestWhatTheFakeClaims`` and ``TestListSeman
 - ``project:`` (no project), ``project:X`` (prefix match), ``project.is:X`` (exact), ``-word``
   (tag exclusion; ``-project`` is the tag ``project``), ``status:completed`` and the exact
   ``OPEN`` / ``ALL`` token groups;
+- free text after ``--``: an empty word is dropped, because the binary takes ``modify -- ""``
+  with rc 0 and leaves the description alone — a description is replaced, never cleared;
 - refusals: a priority outside H/M/L and ``recur`` without ``due`` are ``TaskwarriorRejected``
   and change nothing; a ``+tag`` failing ``TAG_RE`` is a ``FakeTaskError``, because the binary
   would silently turn it into description text.
@@ -36,10 +38,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.services.task_runner import TaskwarriorRejected
-from app.services.task_service import EXISTING_TAG_RE, OPEN, TAG_RE
-
-# `ALL` of P1-5 (D12): every task that is not deleted and not a recurring template.
-ALL = ["(", "status:pending", "or", "status:waiting", "or", "status:completed", ")"]
+from app.services.task_service import ALL, EXISTING_TAG_RE, OPEN, TAG_RE
 
 _DATE_FIELDS = ("due", "scheduled", "wait", "until")
 _STAMP = "%Y%m%dT%H%M%SZ"
@@ -158,7 +157,10 @@ class FakeTaskCLI:
     def _change(self, task: dict[str, Any], args: list[str], text: list[str]) -> None:
         # Free text is description, verbatim. It is never inspected for tags, attributes
         # or rc. overrides — that is exactly what `--` buys from the real binary.
-        words: list[str] = list(text)
+        # An empty word is dropped: `task <uuid> modify -- ""` is rc 0 on 3.5.0 and leaves
+        # the description as it was (pinned in tests/container), so a description can be
+        # replaced but never cleared.
+        words: list[str] = [word for word in text if word]
         for arg in args:
             if arg.startswith("+"):
                 tag = arg[1:]
@@ -283,7 +285,10 @@ class FakeTaskCLI:
 def _parse_date(value: str) -> str:
     """The three date forms the fake accepts, stored as Taskwarrior stores them.
 
-    `YYYY-MM-DD` is UTC midnight: the container tier and the shipped image run in UTC.
+    `YYYY-MM-DD` is UTC midnight, which is what the binary does in a UTC process: the
+    container tier pins `TZ=UTC` by fixture, and the fake assumes that zone. The shipped
+    image runs `TZ=Europe/Berlin`, where the real binary stores the same bare date at
+    22:00Z or 23:00Z the day before — pinned in `TestTheBerlinZone`, not modelled here.
     """
     for form in ("%Y-%m-%d", "%Y-%m-%dT%H:%M", _STAMP):
         try:

@@ -6,10 +6,22 @@ changes in one go.
 
 ## 1. Gather (no questions yet)
 
-If the server offers a summary operation, call it first and fetch only the lists whose
-counters are not zero. Otherwise two calls are enough: the pending tasks (sections 1, 3,
-4 and 6 are filters over that list) and the project list (section 5). If the user named a
-context ("daily @home"), filter section 6 by it.
+Call the summary first. It is the entry path: it names no task, and it says which lists are
+worth fetching at all. **Fetch a list only when its counter is above zero.** In a scoped
+repository pass the scope tags as `tag` to the summary and to every list call below that
+takes one; the calls that do not are named in the table, and they are not made when scoped.
+
+| Section | Counter | Call, only if the counter is above zero |
+|---|---|---|
+| 1 Overdue / due today | `overdue`, `due_today`, `scheduled_passed` | list tasks with `due_before=<tomorrow>`; if `scheduled_passed` is above zero also `scheduled_before=<tomorrow>`, and drop the `waiting` ones — they are section 3. `overdue` and `due_today` count parked tasks as well, which the list call does not return: a remainder is in the tickler, not missing |
+| 2 Inbox | `inbox`, `inbox_oldest_entry` | `gtd/inbox`, only if `inbox` is five or fewer and the repository is not scoped; otherwise report count and age and stop there |
+| 3 Waiting for | `waiting_followup_due` | `gtd/waiting`, keep those whose `scheduled` is today or earlier |
+| 4 In no list | `unclarified` | list tasks with `status=pending`, filtered locally (no project, none of `next`/`waiting`/`someday`). This is the one permitted full pending fetch, and only when the counter says there is something to find |
+| 5 Stalled projects | `stalled_projects` | none — the summary gives the names; `gtd/projects/overview` only if the user asks what is in them, and never in a scoped repository: it takes no `tag` and would list every area's projects |
+| 6 Next actions | `next` | `gtd/next`, scoped by the area tags only |
+
+If the user named a context ("daily @home"), filter section 6 by it yourself — a task
+without a context fits everywhere, and a server-side context filter would drop it.
 
 ## 2. Show one numbered screen
 
@@ -26,9 +38,10 @@ visible — a count cannot be addressed by shorthand.
 4. **In no list** — stand-alone tasks without `next`/`waiting`/`someday`. Tasks that carry
    only a context tag look clarified to the server but usually are not (no verb, no
    outcome): list them here and offer `clarify`.
-5. **Stalled projects** — active projects without a `next` action and nothing waiting
-   (names only). If the server has no project status, check the plan
-   for an "ON HOLD" note, for at most five candidates.
+5. **Stalled projects** — active projects without a `next` action, nothing waiting and
+   nothing in the tickler (names only). Projects the user set to `on_hold` or `done` are
+   already out of this list; offer that status for anything they have consciously parked
+   (`projects/{name}/status`).
 6. **Next actions** — the candidates for today, at most ten, numbered on.
 
 Two zeros are worth a line of their own because they are findings, not emptiness:
@@ -63,9 +76,10 @@ Overdue items get exactly one of three outcomes: done, a new honest date, or no 
 
 ## 4. Close
 
-- Record the review on the server if it supports review timestamps. Otherwise, if the
-  repository has its own marker for reviews, follow its instructions; if neither exists,
-  do nothing — do not invent a state file.
+- Record the review: POST `gtd/review` with kind `daily` and, if `runway_scope` is
+  declared, scope = its tags sorted and joined with `+` (e.g. `@work+ar`; the server
+  canonicalizes). Pass the same tags as `tag` to the summary, so `last_review` matches.
+  If the repository has its own marker for reviews as well, follow its instructions too.
 - End with the focus list and nothing else. No task dump into journals or logs; at most
   counters ("Inbox 0, 2 überfällige geklärt, Fokus 3").
 

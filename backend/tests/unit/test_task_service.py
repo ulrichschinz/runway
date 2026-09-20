@@ -14,6 +14,8 @@ grammar stops interpreting it.
 """
 
 import uuid as uuidlib
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -177,11 +179,12 @@ class TestTheOverrideIsNeutralised:
         task_runner.reject_structural_tokens(["project:runway", "+urgent", "priority:H"])
 
 
-class TestStillUnvalidated:
-    """Deliberately unchanged: these reach argv as attribute values, are parsed by
-    Taskwarrior, and are not overrides. Recorded rather than hardened."""
+class TestValidatedButPermissive:
+    """Checked, but only for what could change how Taskwarrior or a URL reads the value.
+    A project name is still allowed to look like prose — spaces, a semicolon, umlauts —
+    because that is what users call their projects."""
 
-    def test_a_project_name_is_unvalidated(self, fake_task):
+    def test_a_project_name_may_look_like_prose(self, fake_task):
         task_service.create_task("alice", TaskCreate(description="t", project="a b; c"))
         assert "project:a b; c" in _args_of(fake_task)
 
@@ -509,10 +512,11 @@ class TestListFilters:
         with pytest.raises(ValueError, match="At most 10"):
             task_service.gtd_list("alice", "next", tags=[f"t{i}" for i in range(11)])
 
-    def test_project_tasks_is_still_the_prefix_filter(self, fake_task):
-        """Exact match (`project.is:`) and name validation arrive in P1-5 (D2)."""
+    def test_project_tasks_matches_the_name_exactly(self, fake_task):
+        """`project:` is Taskwarrior's prefix match; the project list means this project
+        alone, subprojects included only when they are asked for by name (D2)."""
         task_service.project_tasks("alice", "alpha", tags=["next"])
-        assert _args_of(fake_task) == ["status:pending", "project:alpha", "+next", "export"]
+        assert _args_of(fake_task) == ["status:pending", "project.is:alpha", "+next", "export"]
 
     def test_project_names_sees_open_tasks(self, fake_task):
         _seed(fake_task, description="parked", project="dormant", wait="20261001T000000Z")
@@ -616,3 +620,311 @@ class TestTheFakeRefusesWhatTheBinaryRefuses:
 
         with pytest.raises(FakeTaskError):
             task_runner.export_tasks("alice", ["due.before:today"])
+
+
+class TestProjectNamesAreValidated:
+    """A project name reaches three parsed positions — a Taskwarrior filter, a Taskwarrior
+    modifier, and an MCP URL path — and was checked in none of them (ADR 0038)."""
+
+    @pytest.mark.parametrize(
+        "name", ["Haus Umbau", "Büro", "home.garden", "a b; c", "x" * 100, "_x", "3d-druck"]
+    )
+    def test_an_ordinary_name_is_accepted(self, fake_task, name):
+        task_service.create_task("alice", TaskCreate(description="t", project=name))
+        assert f"project:{name}" in _args_of(fake_task)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "rc.data.location=/tmp/x",
+            "a\nb",
+            "a\tb",
+            "a:b",
+            "a/b",
+            "a?b",
+            "a#b",
+            "a%b",
+            "a(b)",
+            'a"b',
+            "a'b",
+            "a\\b",
+            "-next",
+            "+x",
+            " lead",
+            "trail ",
+            "x" * 101,
+        ],
+    )
+    def test_a_dangerous_or_shapeless_name_is_refused_before_argv(self, fake_task, name):
+        with pytest.raises(ValueError):
+            task_service.create_task("alice", TaskCreate(description="t", project=name))
+        assert fake_task.calls == [], "a refused name must never reach the binary"
+
+    def test_an_rc_shaped_name_is_accepted_and_inert(self, fake_task):
+        """Recorded rather than hardened: a project name never travels alone. It is always
+        the tail of `project:` or `project.is:`, so it cannot be the `rc.`-prefixed token
+        Taskwarrior reads as a configuration override. The `/` in a real data path is
+        refused anyway, because it would break an MCP path parameter."""
+        task_service.create_task("alice", TaskCreate(description="t", project="rc.data.location=x"))
+        args = _args_of(fake_task)
+        assert "project:rc.data.location=x" in args
+        assert "rc.data.location=x" not in args
+
+    def test_an_empty_project_on_create_still_means_no_project(self, fake_task):
+        """D7: on create `""` is "not given", so there is no name to validate."""
+        task = task_service.create_task("alice", TaskCreate(description="t", project=""))
+        assert task.project is None
+        assert not [a for a in _args_of(fake_task) if a.startswith("project")]
+
+    def test_the_reserved_names_are_only_refused_where_a_name_is_created(self):
+        from app.models import validate_project_name
+
+        for name in ("overview", "plans"):
+            assert validate_project_name(name) == name
+            with pytest.raises(ValueError, match="Reserved"):
+                validate_project_name(name, reserved=True)
+
+    def test_a_project_filter_is_exact_not_a_prefix(self, fake_task):
+        for project in ("alpha", "alpha.sub", "alphabet"):
+            _seed(fake_task, description=project, project=project)
+        assert [t.description for t in task_service.project_tasks("alice", "alpha")] == ["alpha"]
+        assert "project.is:alpha" in _argv_containing(fake_task, "project.is:alpha")
+
+    def test_a_bad_name_in_the_project_filter_is_refused(self, fake_task):
+        with pytest.raises(ValueError):
+            task_service.project_tasks("alice", "a/b")
+        assert fake_task.calls == []
+
+    def test_an_unchanged_project_is_not_revalidated(self, fake_task):
+        """Another live user's task may carry a name today's rules refuse. The web UI
+        resends the project on every save, so re-validating it would lock the task (D4)."""
+        seeded = _seed(fake_task, project="a/b")
+        task = task_service.modify_task(
+            "alice", seeded["uuid"], TaskModify(description="still theirs", project="a/b")
+        )
+        assert task.project == "a/b"
+
+    def test_changing_to_a_bad_project_is_refused(self, fake_task):
+        seeded = _seed(fake_task, project="a/b")
+        with pytest.raises(ValueError):
+            task_service.modify_task("alice", seeded["uuid"], TaskModify(project="c/d"))
+
+
+class TestSearchFilters:
+    """`GET /tasks` filters (D11, D12). Status, project and tags are Taskwarrior's; the
+    dates and the limit are ours, applied in Python over the export."""
+
+    def _make(self, fake, description, **fields):
+        return task_service.create_task("alice", TaskCreate(description=description, **fields))
+
+    def test_the_status_constants_reach_argv(self, fake_task):
+        for status, token in (
+            ("pending", "status:pending"),
+            ("waiting", "status:waiting"),
+            ("completed", "status:completed"),
+        ):
+            fake_task.calls.clear()
+            task_service.search_tasks("alice", status=status)
+            assert token in _args_of(fake_task)
+        fake_task.calls.clear()
+        task_service.search_tasks("alice", status="all")
+        assert _args_of(fake_task)[:-1] == task_service.ALL
+
+    def test_all_excludes_deleted_tasks_and_recurring_templates(self, fake_task):
+        _seed(fake_task, description="open")
+        _seed(fake_task, description="gone", status="deleted")
+        _seed(fake_task, description="template", status="recurring")
+        found = task_service.search_tasks("alice", status="all")
+        assert [t.description for t in found] == ["open"]
+
+    def test_include_done_is_an_alias_for_all(self, fake_task):
+        _seed(fake_task, description="open")
+        _seed(fake_task, description="done", status="completed")
+        _seed(fake_task, description="gone", status="deleted")
+        found = task_service.search_tasks("alice", include_done=True)
+        assert sorted(t.description for t in found) == ["done", "open"]
+
+    def test_include_done_false_is_a_no_op(self, fake_task):
+        """The web UI sends it, and an agent filling defaults will too (D12)."""
+        _seed(fake_task, description="done", status="completed", end="20260918T100000Z")
+        found = task_service.search_tasks("alice", include_done=False, status="completed")
+        assert [t.description for t in found] == ["done"]
+
+    def test_include_done_true_with_status_is_refused(self, fake_task):
+        with pytest.raises(ValueError, match="include_done"):
+            task_service.search_tasks("alice", include_done=True, status="pending")
+        assert fake_task.calls == []
+
+    def test_completed_since_implies_completed_and_is_refused_with_open_statuses(self, fake_task):
+        _seed(fake_task, description="done", status="completed", end="20260918T100000Z")
+        found = task_service.search_tasks("alice", completed_since="2026-09-18")
+        assert [t.description for t in found] == ["done"]
+        for status in ("pending", "waiting"):
+            with pytest.raises(ValueError, match="completed_since"):
+                task_service.search_tasks("alice", completed_since="2026-09-18", status=status)
+
+    def test_completed_since_compares_the_local_end_day(self, fake_task):
+        _seed(fake_task, description="older", status="completed", end="20260917T235900Z")
+        _seed(fake_task, description="newer", status="completed", end="20260918T000100Z")
+        found = task_service.search_tasks("alice", completed_since="2026-09-18")
+        assert [t.description for t in found] == ["newer"]
+
+    def test_completed_tasks_come_back_newest_first(self, fake_task):
+        _seed(fake_task, description="first", status="completed", end="20260917T080000Z")
+        _seed(fake_task, description="second", status="completed", end="20260918T080000Z")
+        found = task_service.search_tasks("alice", status="completed")
+        assert [t.description for t in found] == ["second", "first"]
+
+    def test_the_due_filters_compare_days_not_instants(self, fake_task):
+        self._make(fake_task, "yesterday", due="2026-09-18")
+        self._make(fake_task, "today", due="2026-09-19")
+        self._make(fake_task, "tomorrow", due="2026-09-20")
+        self._make(fake_task, "no date")
+        before = task_service.search_tasks("alice", due_before="2026-09-19")
+        after = task_service.search_tasks("alice", due_after="2026-09-19")
+        assert [t.description for t in before] == ["yesterday"]
+        assert [t.description for t in after] == ["tomorrow"]
+
+    def test_the_day_filters_use_the_servers_zone_not_utc(self, fake_task):
+        """D10: a day is a day in the server's zone, not in Taskwarrior's stored UTC.
+
+        Every other test here runs at UTC, where `_local_day`'s conversion is a no-op and
+        the claim ADR 0038 (Decision 4) and the parameter descriptions make — "compared per
+        calendar day in the server's local time" — is unverified. Here the one clock sits at
+        UTC+13, so both stamps land on the *next* calendar day locally, and each assertion
+        is the opposite of what a UTC-day comparison would give.
+        """
+        fake_task.now = datetime(2026, 9, 20, 12, 0, tzinfo=timezone(timedelta(hours=13)))
+        _seed(fake_task, description="due late", due="20260919T230000Z")
+        _seed(fake_task, description="finished late", status="completed", end="20260917T230000Z")
+
+        # 20260919T230000Z is 2026-09-20 at UTC+13, so it is not before that day.
+        assert task_service.search_tasks("alice", due_before="2026-09-20") == []
+        after = task_service.search_tasks("alice", due_after="2026-09-19")
+        assert [t.description for t in after] == ["due late"]
+        # 20260917T230000Z is 2026-09-18 at UTC+13, so this task counts as done since then.
+        since = task_service.search_tasks("alice", completed_since="2026-09-18")
+        assert [t.description for t in since] == ["finished late"]
+
+    def test_scheduled_before_finds_a_start_date_that_has_passed(self, fake_task):
+        self._make(fake_task, "ready", scheduled="2026-09-18")
+        self._make(fake_task, "later", scheduled="2026-09-25")
+        found = task_service.search_tasks("alice", scheduled_before="2026-09-19")
+        assert [t.description for t in found] == ["ready"]
+
+    @pytest.mark.parametrize(
+        "field", ["due_before", "due_after", "scheduled_before", "completed_since"]
+    )
+    @pytest.mark.parametrize("value", ["2026-9-3", "today", "2026-13-01", "2026-09-19T10:00", ""])
+    def test_a_date_filter_takes_only_a_calendar_day(self, fake_task, field, value):
+        with pytest.raises(ValueError, match="Invalid date"):
+            task_service.search_tasks("alice", **{field: value})
+        assert fake_task.calls == [], "a refused date must never reach the binary"
+
+    def test_a_filter_tag_is_validated_like_one_we_would_write(self, fake_task):
+        task_service.search_tasks("alice", tags=["@home", "ar"])
+        assert "+@home" in _args_of(fake_task)
+        for tags in (["-next"], ["+x"], ["1abc"], ["a b"], ["x" * 101], ["a"] * 11):
+            fake_task.calls.clear()
+            with pytest.raises(ValueError):
+                task_service.search_tasks("alice", tags=tags)
+            assert fake_task.calls == []
+
+    def test_limit_slices_after_the_sort(self, fake_task):
+        self._make(fake_task, "low", tags=["someday"])
+        self._make(fake_task, "high", tags=["next"])
+        self._make(fake_task, "middle")
+        assert [t.description for t in task_service.search_tasks("alice", limit=2)] == [
+            "high",
+            "middle",
+        ]
+        with pytest.raises(ValueError, match="limit"):
+            task_service.search_tasks("alice", limit=0)
+        with pytest.raises(ValueError, match="limit"):
+            task_service.search_tasks("alice", limit=task_service.MAX_LIMIT + 1)
+
+    def test_the_filters_combine_with_and(self, fake_task):
+        self._make(fake_task, "wanted", project="alpha", tags=["next"], due="2026-09-18")
+        self._make(fake_task, "wrong project", project="beta", tags=["next"], due="2026-09-18")
+        self._make(fake_task, "no tag", project="alpha", due="2026-09-18")
+        found = task_service.search_tasks(
+            "alice", project="alpha", tags=["next"], due_before="2026-09-19"
+        )
+        assert [t.description for t in found] == ["wanted"]
+
+
+class TestEndIsExposed:
+    def test_a_completed_task_carries_the_time_it_was_finished(self, fake_task):
+        task = task_service.create_task("alice", TaskCreate(description="t"))
+        assert task.end is None
+        task_service.complete_task("alice", task.uuid)
+        assert task_service.get_task("alice", task.uuid).end == "20260919T100000Z"
+
+
+def _deploy_environment(compose: Path, service: str) -> list[str]:
+    """The `environment:` entries one service declares in the deploy compose.
+
+    Read by hand rather than with PyYAML: the backend declares no YAML dependency (it is
+    only transitively present through uvicorn's extras), and this needs two levels of
+    indentation, not a parser.
+    """
+    entries: list[str] = []
+    in_service = in_env = False
+    for line in compose.read_text(encoding="utf-8").splitlines():
+        body = line.strip()
+        if not body or body.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= 2:
+            in_service = indent == 2 and body == f"{service}:"
+            in_env = False
+        elif in_service and indent == 4:
+            in_env = body == "environment:"
+        elif in_env and indent >= 6 and body.startswith("- "):
+            entries.append(body[2:])
+    return entries
+
+
+class TestTheServersZone:
+    """The zone the day logic runs in, and the one line that sets it (D10, brief 0037).
+
+    `_local_day` answers every day question this API has — overdue, due today, a tickler
+    task returning, the `due_*` filters — and Taskwarrior writes a bare `YYYY-MM-DD` as
+    local midnight, which is the hour where the offset decides the calendar day. So the
+    clock has to carry the zone's *rules*: a snapshot of today's offset is a day out for
+    every stamp on the other side of a DST transition, which is the same off-by-one the
+    Berlin clock was set to remove.
+    """
+
+    COMPOSE = Path(__file__).resolve().parents[3] / "ops" / "deploy" / "docker-compose.yml"
+
+    def test_a_stamp_from_either_half_of_the_year_keeps_its_berlin_day(self, monkeypatch):
+        monkeypatch.setenv("TZ", "Europe/Berlin")
+        # A bare `due:2026-07-15` in summer: local midnight is 22:00Z under CEST. Converted
+        # with a +01:00 snapshot it reads as the 14th.
+        assert task_service._local_day("20260714T220000Z").isoformat() == "2026-07-15"
+        # `due:2026-01-14T23:30` in winter: 22:30Z under CET. Converted with a +02:00
+        # snapshot it reads as the 15th. No single fixed offset gets both of these right,
+        # whichever side of a transition the suite happens to run on.
+        assert task_service._local_day("20260114T223000Z").isoformat() == "2026-01-14"
+        zone = task_service._zone()
+        assert zone.utcoffset(datetime(2026, 7, 15)) == timedelta(hours=2)
+        assert zone.utcoffset(datetime(2026, 1, 15)) == timedelta(hours=1)
+
+    def test_a_tz_that_names_no_zone_falls_back_to_what_libc_resolved(self, monkeypatch):
+        """A POSIX rule string or a typo must not take the clock down."""
+        monkeypatch.setenv("TZ", "Not/AZone")
+        assert task_service._now().utcoffset() is not None
+
+    def test_the_deploy_compose_puts_the_backend_in_berlin(self):
+        """The control itself, which nothing else here would miss.
+
+        Every other zone test — this file's and the container tier's `TestTheBerlinZone` —
+        sets `TZ` for itself, so deleting the line from `ops/deploy/docker-compose.yml`
+        would leave the whole suite green while the deployed day logic went back to UTC.
+        """
+        assert "TZ=Europe/Berlin" in _deploy_environment(self.COMPOSE, "backend"), (
+            "the backend service of ops/deploy/docker-compose.yml no longer declares "
+            "TZ=Europe/Berlin, so the deployed day logic is back on UTC while "
+            "docs/operations.md and brief 0037 say it is in Berlin"
+        )

@@ -209,9 +209,59 @@ client.
 > The only drift between the host and the checked-in copy is the two `logging:` blocks and the `LOG_LEVEL`
 > line — log rotation, which is still unapplied. See *The log stream*.
 >
+> This is one read on one date and it is not amended afterwards: `TZ` was added to the checked-in copy on
+> 2026-09-20, after this read, and is therefore drift this paragraph never saw. See *The container clock*.
+>
 > **Do not read this as a standing guarantee.** It is one read on one date, and the sentence it replaces
 > was also true when it was written. Nothing continuously compares the host against the checked-in copy
 > (`RISK-OPS-002`); CI has no host access, so this paragraph starts ageing the moment it is committed.
+
+## The container clock
+
+The backend service declares **`TZ=Europe/Berlin`** in
+[`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml). It is not application configuration:
+no `Settings` field reads it, so it is not an environment variable in `README`'s sense and `RULE-SURF-002`
+does not apply to it. libc reads it, and both the backend process and the `task` binary it spawns follow.
+
+It decides one thing — **which calendar day a stored timestamp falls on**. Taskwarrior stores UTC and
+interprets a bare `YYYY-MM-DD` in the local zone, and every day question the API answers asks the same
+question back: overdue, due today, a tickler task returning, the `due_before` / `due_after` filters, and
+the review's "today". `task_service._now()` is the single clock behind all of them.
+
+On the image's default UTC, that answer is one day behind Berlin between local midnight and 02:00 — CET is
+UTC+1, CEST UTC+2. A task the user entered as due *today* is stored at 22:00 or 23:00 UTC on the previous
+day, so a server thinking in UTC reads it back as due yesterday and reports it overdue, and a task whose
+`wait` date has just passed returns on the wrong day. The users are in Berlin; the server now is too.
+
+**A zone is two offsets, not one.** Berlin is UTC+1 in winter and UTC+2 in summer, so the clock has to
+carry the zone's *rules*: `task_service._zone()` resolves `TZ` to a `ZoneInfo`, and `_local_day()` asks it
+for the offset that held at the stamp's own instant. Reading a stamp with a snapshot of *today's* offset —
+which is what `datetime.now().astimezone().tzinfo` is — puts every timestamp from the other half of the
+year a calendar day out, which is the same off-by-one this section exists to remove, made permanent for
+half the tasks instead of two hours a night.
+
+**Nothing else moves with it.** The JSON log lines, the audit log and the JWT expiry all ask for UTC by
+name (`datetime.now(tz=UTC)`), which is what the rest of this document promises. The container tier pins
+all of it: `TestTheBerlinZone` in
+[`backend/tests/container/test_real_task.py`](../backend/tests/container/test_real_task.py) checks that
+the runtime image carries `/usr/share/zoneinfo/Europe/Berlin` at all — without tzdata a `TZ` value leaves
+the process on UTC silently — that a bare due date and the day logic agree on the Berlin day at 23:30 UTC,
+that the same stamp reads as the day before under UTC (the defect this removes), that a summer and a
+winter stamp each keep their own day, and that the log and audit stamps stay UTC in a Berlin container.
+
+**The declaration itself is held by a test, not by a gate rule.** Every zone test sets `TZ` for itself, so
+deleting the line from the deploy compose would otherwise leave the suite green while production went back
+to UTC. `TestTheServersZone` in
+[`backend/tests/unit/test_task_service.py`](../backend/tests/unit/test_task_service.py) reads
+`ops/deploy/docker-compose.yml` and fails if the `backend` service stops declaring `TZ=Europe/Berlin`.
+
+Changing the zone is a behaviour change for every user, not a preference: it moves which tasks a review
+calls overdue. It belongs in a reviewed commit to the deploy compose, like any other topology change.
+
+`TZ` was added to the checked-in compose on **2026-09-20**, after the host read recorded under *Health*
+above. Like the `logging:` blocks it is drift until a deploy applies this file to the host, and nothing in
+CI can see that it did (`RISK-OPS-002`): confirming it is a production read, owed once after the next
+deploy, not a gate result.
 
 ## Timeouts
 

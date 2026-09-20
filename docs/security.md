@@ -195,7 +195,20 @@ Three controls, in order of how much they are relied on:
 2. **`reject_structural_tokens`** refuses `rc.`-shaped tokens in the caller-supplied argument
    list — the filter and modifier positions, which must stay parseable and so cannot sit
    behind a separator.
-3. **`RULE-ARCH-004`** keeps `subprocess` importable only from
+3. **Every value that becomes a filter or a modifier is shaped first.** `--` cannot cover
+   these positions, so each has a regex of its own in the service layer, and a refused value
+   raises before anything is exported — the binary never sees it. A tag is `TAG_RE`; a
+   project name is `PROJECT_RE` in
+   [`backend/app/models.py`](../backend/app/models.py), which allows spaces, umlauts and dots
+   but refuses control characters, parentheses, quotes, a backslash, `:` and `/ ? # %`, and a
+   leading `+`, `-` or space; a date filter is `YYYY-MM-DD` and is applied in Python rather
+   than handed to Taskwarrior's much wider date grammar. A project name is never a token by
+   itself — it is always the tail of `project:` or `project.is:` — so an `rc.`-shaped name is
+   inert; the `/` of a real data path is refused anyway, because it would also break an MCP
+   path parameter ([ADR 0038](adr/0038-validated-filters-and-exact-project-match.md)).
+   Values a client merely resends unchanged — a kept tag, the project a task already has —
+   are **not** re-validated, or live users' legacy data would become uneditable.
+4. **`RULE-ARCH-004`** keeps `subprocess` importable only from
    [`backend/app/services/task_runner.py`](../backend/app/services/task_runner.py). A choke
    point only works while it stays the only door, and a second caller would bypass both
    controls above with nothing going red.

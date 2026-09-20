@@ -74,8 +74,8 @@ both.
 **Enforced**
 - `RULE-SEC-001` — every route in [`backend/app/routers/`](../backend/app/routers) declares its guard
   in [`rules/route-guards.toml`](../rules/route-guards.toml), the declaration must match the guard the
-  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-two
-  routes: twenty-five `user`, four `admin`, three `open`.
+  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-seven
+  routes: thirty `user`, four `admin`, three `open`.
 - `RULE-GOV-001` — the live branch protection matches [`ops/github/ruleset.json`](../ops/github/ruleset.json),
   so the rule that an unverified commit cannot reach `main` is itself checked-in state.
 - `RULE-TEST-001` and `RULE-TEST-002` — the bootstrap branches, the last-admin refusal and the
@@ -83,8 +83,8 @@ both.
 
 **Asserted**
 - **The route-guard rule does not see the whole surface.** `tools/checks/route_guards.py` globs
-  `backend/app/routers/*.py` only. The served schema has **33** operations
-  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 32: the
+  `backend/app/routers/*.py` only. The served schema has **38** operations
+  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 37: the
   odd one is `GET /health` at [`backend/app/main.py:91-93`](../backend/app/main.py), declared on the
   app object. Harmless in itself, and the proof that the next route added there would need no guard
   declaration. `RISK-SEC-005`.
@@ -111,27 +111,50 @@ real binary on 2026-08-25 rather than assumed; the transcript is in the module d
 
 Two controls, in order, both in that file:
 
-1. **`--`.** `SEPARATOR = "--"` (line 48) and `cmd += [SEPARATOR, *text]` (lines 90-91). Everything
+1. **`--`.** `SEPARATOR = "--"` (line 78) and `cmd += [SEPARATOR, *text]` (lines 131-133). Everything
    after it is free text, so an override in a description is inert *by Taskwarrior's own grammar*
    rather than by our filtering. This is the primary control and it does not depend on us enumerating
    dangerous shapes correctly.
-2. **`reject_structural_tokens`** (lines 55-67), refusing any token matching `^rc\.` in the positions
+2. **`reject_structural_tokens`** (lines 97-109), refusing any token matching `^rc\.` in the positions
    `--` cannot cover — filters and modifiers, which have to stay parseable. Defence in depth.
 
-`shell=False` follows from the list form at line 93, so no shell metacharacter can start a process;
+`shell=False` follows from the list form at line 135, so no shell metacharacter can start a process;
 that was never the vulnerability, and saying so is worth a line because the linter's `S603` finding
 is about the wrong risk. [ADR 0019](adr/0019-the-taskwarrior-argv-boundary.md) records the whole
 boundary. Structured fields are validated separately before they get near it:
-[`backend/app/services/task_service.py:7-24`](../backend/app/services/task_service.py) pins UUID,
+[`backend/app/services/task_service.py:8-25`](../backend/app/services/task_service.py) pins UUID,
 priority and tag shapes (`TAG_RE` for a tag written or added, the looser `EXISTING_TAG_RE` for a
 stored tag being removed, whose first character still excludes a digit or `.`, because the
-binary reads `-1abc` as description text), and lines 107-110 pin the recurrence grammar. A tag removal is a `-tag`
+binary reads `-1abc` as description text), and lines 277-280 pin the recurrence grammar. A tag removal is a `-tag`
 modifier and goes before `--` like every other modifier; after it, it would be description text.
+
+### Values that must stay parseable: filters and modifiers
+
+A filter or a modifier cannot sit behind `--`, so the second control is all that stands there,
+and it only knows the `rc.` shape. Since [ADR 0038](adr/0038-validated-filters-and-exact-project-match.md)
+every such value is also shaped before it is built into a token: the project name
+(`PROJECT_RE` in [`backend/app/models.py`](../backend/app/models.py) — no control characters,
+parentheses, quotes, backslash, `:`, `/ ? # %`, no leading sign or space, at most 100
+characters), each filter tag (`TAG_RE`, at most ten of them, at most 100 characters each), and
+the four date filters (`YYYY-MM-DD` only, then compared in Python — Taskwarrior's own date
+grammar never sees them). The text search `q` is the opposite case and is listed here so it is
+not mistaken for one: it is bounded at 200 characters and compared in Python against the
+exported descriptions, so no part of it is ever built into a token — a description filter would
+put the user's own words back into the one position `--` cannot protect, which is the mistake
+`create_task` made below. Validation runs before the export, so a refused value never reaches
+an argument vector at all; `backend/tests/unit/test_tasks.py` asserts exactly that for a fuzz
+list, and the container tier repeats it against the binary.
+
+Two exclusions are worth naming. `/ ? # %` are refused not because Taskwarrior minds them but
+because fastapi-mcp 0.4.0 substitutes a path parameter into the URL unencoded, so a project
+named `a/b` would address a different route over MCP. And a value a client merely resends —
+a tag the task already carries, the project it already has — is deliberately **not** validated:
+live users hold data that predates these rules, and re-checking it would lock their tasks.
 
 One historical detail is worth keeping visible: `create_task` used to re-query by
 `["description:" + task.description]`, putting the same user string into a *filter* position, which
 is the one place `--` cannot protect. It is now `+LATEST`, Taskwarrior's own virtual tag
-([`task_runner.py:116-122`](../backend/app/services/task_runner.py)).
+([`task_runner.py:167-173`](../backend/app/services/task_runner.py)).
 
 ### Request bodies
 
@@ -334,9 +357,10 @@ reachable from outside the compose network except through the frontend.
 
 Four stores, three of them on one partition on the deploy host.
 
-**`users.db`** — accounts, password hashes, API keys, roles, profile fields, project plans and site
-settings. Four tables, created and migrated at
-[`backend/app/database.py:13-59`](../backend/app/database.py) and lines 65-70. Bind-mounted from
+**`users.db`** — accounts, password hashes, API keys, roles, profile fields, project plans, site
+settings, when each kind of review last happened and which projects are on hold or done. Six
+tables, created and migrated at
+[`backend/app/database.py:13-106`](../backend/app/database.py) and lines 112-117. Bind-mounted from
 `/opt/services/runway/users.db` ([`ops/deploy/docker-compose.yml:22-24`](../ops/deploy/docker-compose.yml)).
 Its schema is a protected surface, snapshotted at
 [`ops/surfaces/db-schema.sql`](../ops/surfaces/db-schema.sql).

@@ -1,5 +1,5 @@
 {
-  "count": 22,
+  "count": 27,
   "tools": [
     {
       "name": "annotate_task_tasks__uuid__annotate_post",
@@ -11,7 +11,7 @@
     },
     {
       "name": "create_project_projects_post",
-      "summary": "Create Project"
+      "summary": "Create a project"
     },
     {
       "name": "create_task_tasks_post",
@@ -23,7 +23,7 @@
     },
     {
       "name": "get_plan_projects_plans__name__get",
-      "summary": "Get Plan"
+      "summary": "Get a project plan"
     },
     {
       "name": "get_task_tasks__uuid__get",
@@ -36,6 +36,10 @@
     {
       "name": "inbox_gtd_inbox_get",
       "summary": "GTD inbox"
+    },
+    {
+      "name": "last_reviews_gtd_review_get",
+      "summary": "Last reviews"
     },
     {
       "name": "list_tasks_tasks_get",
@@ -62,6 +66,18 @@
       "summary": "List projects"
     },
     {
+      "name": "projects_overview_gtd_projects_overview_get",
+      "summary": "Projects overview"
+    },
+    {
+      "name": "record_review_gtd_review_post",
+      "summary": "Record a review"
+    },
+    {
+      "name": "set_project_status_projects__name__status_put",
+      "summary": "Set a project's status"
+    },
+    {
       "name": "someday_gtd_someday_get",
       "summary": "Someday / maybe"
     },
@@ -74,12 +90,16 @@
       "summary": "Pause a task"
     },
     {
+      "name": "summary_gtd_summary_get",
+      "summary": "GTD summary"
+    },
+    {
       "name": "tickler_gtd_tickler_get",
       "summary": "Tickler"
     },
     {
       "name": "upsert_plan_projects_plans__name__put",
-      "summary": "Upsert Plan"
+      "summary": "Update a project plan"
     },
     {
       "name": "waiting_gtd_waiting_get",

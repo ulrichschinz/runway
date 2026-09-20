@@ -85,9 +85,10 @@ There are three parts to deploy. They are versioned differently, so keep them ap
   `--check` prints installed and available as `<version> <commit>`. Rolling back is
   `install.sh --ref <older tag or commit>`.
 
-- **Skill and server belong together.** The skill tolerates an older server (it treats
-  newer operations as "if present" and says what the server cannot do). A skill that is
-  older than the server simply does not use the new operations. So the safe order is:
+- **Skill and server belong together.** The skill no longer works around a missing
+  operation: every operation it names has to exist on the server it talks to, so a server
+  older than the skill answers 404 and the call fails. A skill that is older than the
+  server simply does not use the new operations. So the safe order is:
   deploy the server, then update the skill. When in doubt, install the skill from the tag
   the server was built from.
 
@@ -136,15 +137,17 @@ Design decisions worth knowing before changing anything:
 - **It refers to operations by what they do**, with today's route next to it
   (`references/conventions.md`, "Which operation for what"). MCP tool names are FastAPI
   operation ids and a public surface; every route named there has to exist.
-- **It degrades gracefully.** Newer operations (summary, filters)
-  are used "if present"; on older servers the skill falls back or says plainly what the
-  server cannot do. It never works around a gap by deleting and recreating tasks.
+- **It degrades gracefully.** It never works around a gap by deleting and recreating
+  tasks. Nothing in the skill is written as "if present" any more: every operation it names
+  exists on the server it ships with, and a server older than those operations is a server
+  this version of the skill does not target.
 - **Server semantics it depends on**: inbox = no project and no tag; `next`, `waiting`,
   `someday` as plain tags; contexts as `@tags`; `wait` hides a task from every task list but
   waiting until the date (the tickler, `gtd/tickler`, lists it), `scheduled` carries
   follow-up dates; empty string clears a field; projects cannot be renamed and
-  unknown project names are accepted silently. If one of these changes, the skill changes
-  in the same commit.
+  unknown project names are accepted silently; a project's status (`active`, `on_hold`,
+  `done`) lives on the server, and stalled means active with no `next`, nothing waiting and
+  nothing in the tickler. If one of these changes, the skill changes in the same commit.
 - **Contexts are the main filter.** There is deliberately no work/private split; GTD keeps
   one system and filters by context at the moment of choice. `runway_scope` exists as an
   opt-in for repositories whose conversations are logged.

@@ -12,9 +12,9 @@ steps below where it calls for them.
 
 ## Prepare (you, silently)
 
-Summary (if available), inbox, next, waiting, someday, projects, tickler,
-tasks completed in the last seven days (only if the server can filter by completion date —
-do not pull the whole history).
+Summary, inbox, next, waiting, someday, projects, tickler, and the tasks
+completed in the last seven days: list tasks with `status=completed` and
+`completed_since=<today−7>`.
 
 ## Get clear
 
@@ -32,9 +32,13 @@ do not pull the whole history).
    anything to prepare? (You ask; the user looks.) Results become tasks.
 5. **Waiting for — the complete list.** For each: still waiting? follow up now (you draft,
    the user sends)? give up? Move `scheduled` forward.
-6. **Projects, one by one.** Is the outcome still wanted? Is there a `next` action? Is it
-   really active, or on hold? For every stalled project: define the next action now, or
-   plan it (`references/planning.md`), or put it on hold, or close it.
+6. **Projects, one by one.** `gtd/projects/overview` gives every project with its counts,
+   its status and whether it is stalled. It takes no `tag`: in a scoped repository do not
+   call it — work from the scoped summary's `stalled_projects` and the scoped lists
+   instead. Is the outcome still wanted? Is there a `next` action? Is it really active, or
+   on hold? For every stalled project: define the next action now, or plan it
+   (`references/planning.md`), or put it on hold (status `on_hold`), or close it (status
+   `done`) — `projects/{name}/status`.
 7. **Date hygiene.** Overdue items: done, new honest date, or no date. Question every
    `due` that is not a hard deadline.
 8. **In no list.** Stand-alone tasks without a status tag: `next`, `someday`, or gone.
@@ -48,7 +52,9 @@ do not pull the whole history).
 
 ## Close
 
-Record the review (server timestamp if supported, otherwise the repository's own marker).
+Record the review: POST `gtd/review` with kind `weekly` and, if `runway_scope` is declared,
+scope = its tags sorted and joined with `+` (e.g. `@work+ar`; the server canonicalizes). If
+the repository has its own marker as well, follow its instructions too.
 Finish with a short tally: inbox, projects reviewed, stalled fixed, waiting followed up,
 someday activated or dropped — and the two or three things the user named as most
 important for the coming week.
@@ -61,15 +67,16 @@ leave it at that.
 
 ## Reset — after a gap
 
-When the last review is more than ten days ago, do not start with the full weekly review
-and do not comment on the gap. A system that greets the user with guilt gets closed.
+When the last `weekly` review in `last_review` is more than ten days ago, do not start with
+the full weekly review and do not comment on the gap. A `null` there means none was ever
+recorded, not that there was a gap: judge by the overdue share instead. A system that greets the user with guilt gets closed.
 Offer a fifteen-minute reset; numbers only, neutral tone:
 
 1. **Inbox**: clarify what is quick, move the rest to one honest pass later.
 2. **Overdue**: done, new honest date, or no date — in one shorthand round like the daily
    review.
 3. **One `next` action per active project.** Projects nobody wants to think about go on
-   hold.
+   hold: status `on_hold`, so the next review stops reporting them as stalled.
 
-Then record a review and suggest a fixed weekly slot in the calendar. A calendar
+Then record a `weekly` review and suggest a fixed weekly slot in the calendar. A calendar
 appointment is the most reliable reminder there is, and it needs no infrastructure.

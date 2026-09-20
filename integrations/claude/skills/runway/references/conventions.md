@@ -26,13 +26,17 @@ what they do.
 |---|---|
 | tasks of one project | gtd project tasks (`gtd/projects/{name}`) |
 | project names | gtd projects |
-| inbox / next / waiting / someday | the matching gtd list |
-| duplicate check, overdue, "in no list" | list tasks (pending), filtered by project or tag where the server allows it |
+| inbox / next / waiting / someday / tickler | the matching gtd list, optional `tag` (repeatable, AND) |
+| overdue, done since, "in no list" | list tasks (`tasks`): `status`, `project`, `tag` (repeatable, AND), `due_before`/`due_after`/`completed_since` (YYYY-MM-DD), `limit` |
 | capture unclarified | inbox post (description, optional note) |
-| counters for reviews and hooks | gtd summary, if present |
+| counters for reviews and hooks | gtd summary (`gtd/summary`), optional `tag` |
+| record / read the last review | review (`gtd/review`) |
 | hidden ticklers (future `wait`, soonest first) | gtd tickler (`gtd/tickler`) |
 | project plan | get plan / upsert plan |
 | change tags without reading first | modify task (`tasks/{uuid}`), `tags_add` / `tags_remove` |
+| projects with status and counts | gtd projects overview (`gtd/projects/overview`) |
+| put a project on hold / done / active | project status (`projects/{name}/status`) |
+| duplicate check | list tasks (`tasks`) with `q` = a distinctive word, once with `status=pending` and once with `status=waiting` (hidden ticklers are not pending) |
 
 ## Status tags
 
@@ -57,7 +61,7 @@ right. Work and private life are not kept apart by a label of their own; `@offic
   `@errands`, `@phone`. Look at the tags already in use before inventing a new one.
 - One context per task is the norm; two only when the task really can be done in either.
   No context means "anywhere".
-- A context is not a topic. Topics are projects, or findable by text search.
+- A context is not a topic. Topics are projects, or findable with `q` on list tasks.
 - For recurring conversations with one person use `@agenda-<name>`.
 - The `@` is part of the tag name (`"@phone"`).
 
@@ -66,9 +70,21 @@ right. Work and private life are not kept apart by a label of their own; `@offic
 A repository may declare `runway_scope: <tags>`. Then unasked lists (next, waiting,
 reviews) show only tasks carrying those tags and give the rest as one line of counts. This
 exists for repositories whose conversations are logged or shared with others. An explicit
-request by name always wins. Without the declaration, nothing is hidden. Be aware that
-scoping filters what you say, not what the tools return; use the server's tag filter when
-it has one.
+request by name always wins. Without the declaration, nothing is hidden.
+
+When `runway_scope` is set, pass its tags as `tag` on **every** task list call, so other
+areas' titles never reach the transcript. The project-name list and the projects overview
+take no `tag` and return every area's projects: do not call them in a scoped repository —
+the scoped summary already names the stalled projects of this area, and any other project
+name you need comes from a scoped task list. Do not list the inbox in a scoped repository;
+report its count instead (the summary gives it, and a scoped summary names no other area's
+project). Capture in a scoped
+repository stays untagged — it goes to the inbox, and adding the scope tag would mark it
+clarified.
+
+The scope key for reviews is the scope tags sorted and joined with `+` (e.g. `@work+ar`);
+the server canonicalizes it, so any order will do. Pass the same tags as `tag` to the
+summary, or its `last_review` will report the whole system's review instead of this area's.
 
 ## Projects
 
@@ -77,10 +93,13 @@ it has one.
   case-insensitively and write them exactly as listed.
 - Always check the name against the project list before creating a task; unknown names
   are accepted silently and projects cannot be renamed.
-- **On hold**: move its open tasks to `someday` and note "ON HOLD" in the plan (or set
-  the project status if the server supports it). An on-hold project is not stalled.
-- **Stalled**: an active project with no `next` action and nothing in `waiting`. Finding
-  these is the most valuable thing a review does.
+- **On hold**: set status `on_hold` (`projects/{name}/status`). Moving its open tasks to
+  `someday` is optional and says the same thing about each task. An on-hold project is not
+  stalled; a finished one gets status `done`.
+- **Stalled**: an active project with no `next` action, nothing in `waiting` and nothing
+  parked in the tickler (hidden by a future `wait`). The server computes it as `stalled`
+  (overview) and `stalled_projects` (summary), so it already leaves out what is on hold or
+  done. Finding these is the most valuable thing a review does.
 
 ## Dates
 

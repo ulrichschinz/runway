@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app import audit
@@ -21,14 +23,80 @@ def _handle(fn, *args, **kwargs):
     "",
     response_model=list[Task],
     summary="List tasks",
-    description="Return all pending tasks for the current user, sorted by urgency. Set include_done=true to also include completed tasks.",
+    description="Search the current user's tasks. Without filters it returns the visible "
+    "pending ones, most urgent first; completed tasks come back newest first. Filters "
+    "combine with AND. Dates are compared per calendar day in the server's local time.",
 )
 def list_tasks(
     username: str = Depends(get_current_user),
-    include_done: bool = Query(default=False),
+    status: Literal["pending", "waiting", "completed", "all"] | None = Query(
+        None,
+        description="`pending` (the default) is every visible task; `waiting` is only the "
+        "ones hidden by a future `wait` date, which is Taskwarrior's waiting and NOT the "
+        "`waiting` GTD tag (use the waiting list for that); `completed` is done tasks; "
+        "`all` is pending, hidden and completed together.",
+    ),
+    project: str | None = Query(
+        None,
+        max_length=100,
+        description="Exact project name. A subproject is a project of its own, so "
+        "`home` does not include `home.garden`.",
+    ),
+    tag: list[str] | None = Query(
+        None,
+        max_length=10,
+        description="Only tasks carrying ALL of these tags, written without `+`. Repeat "
+        "the parameter for more than one.",
+    ),
+    due_before: str | None = Query(
+        None, max_length=10, description="Only tasks due before this day. `YYYY-MM-DD`."
+    ),
+    due_after: str | None = Query(
+        None, max_length=10, description="Only tasks due after this day. `YYYY-MM-DD`."
+    ),
+    scheduled_before: str | None = Query(
+        None,
+        max_length=10,
+        description="Only tasks scheduled before this day. `YYYY-MM-DD`.",
+    ),
+    completed_since: str | None = Query(
+        None,
+        max_length=10,
+        description="Only tasks completed on or after this day. `YYYY-MM-DD`. It implies "
+        "`status=completed` when no status is given, and is refused with `pending` or "
+        "`waiting`.",
+    ),
+    q: str | None = Query(
+        None,
+        max_length=200,
+        description="Case-insensitive substring of the description. It is filtered on the "
+        "server and never passed to Taskwarrior, so it takes plain text, not a search "
+        "expression. Useful as a duplicate check: run it once with `status=pending` and "
+        "once with `status=waiting`.",
+    ),
+    limit: int | None = Query(
+        None, ge=1, le=500, description="Return at most this many tasks, after sorting."
+    ),
+    include_done: bool | None = Query(
+        None,
+        description="Deprecated alias: true means `status=all`, false is ignored. Sending "
+        "true together with `status` is refused; use `status` instead.",
+    ),
 ):
-    filters = [] if include_done else ["status:pending"]
-    return _handle(task_service.list_tasks, username, filters)
+    return _handle(
+        task_service.search_tasks,
+        username,
+        status=status,
+        include_done=include_done,
+        project=project,
+        tags=tag,
+        due_before=due_before,
+        due_after=due_after,
+        scheduled_before=scheduled_before,
+        completed_since=completed_since,
+        q=q,
+        limit=limit,
+    )
 
 
 @router.post(
@@ -36,7 +104,8 @@ def list_tasks(
     response_model=Task,
     status_code=201,
     summary="Create a task",
-    description="Create a new task. Optionally assign a project, tags, priority (H/M/L), due date, or make it recurring.",
+    description="Create a new task. Only the description is required; project, tags, priority "
+    "(H/M/L), dates and a recurrence are optional, and an empty string counts as not given.",
 )
 def create_task(body: TaskCreate, username: str = Depends(get_current_user)):
     return _handle(task_service.create_task, username, body)
@@ -56,7 +125,11 @@ def get_task(uuid: str, username: str = Depends(get_current_user)):
     "/{uuid}",
     response_model=Task,
     summary="Modify a task",
-    description="Update one or more fields of a task (description, project, tags, priority, due date, etc.). Only provided fields are changed.",
+    description="Update one or more fields of a task. A field you omit, or send as null, is "
+    "left as it is; an empty string clears `project`, `priority`, `due`, `scheduled`, `wait`, "
+    "`until` and `recur`. The description is the exception: it can be replaced but not "
+    "cleared, and an empty one leaves it as it was. `tags` replaces the whole tag set, so use "
+    "`tags_add` / `tags_remove` to change single tags without reading the task first.",
 )
 def modify_task(uuid: str, body: TaskModify, username: str = Depends(get_current_user)):
     return _handle(task_service.modify_task, username, uuid, body)

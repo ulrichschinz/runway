@@ -89,8 +89,8 @@ expand → migrate → switch → contract — not a changelog line.
 
 | Surface | Promise |
 |---|---|
-| REST API (33 routes) | Breaking changes go through the migration pattern. The served OpenAPI schema is snapshotted in `ops/surfaces/openapi.json`. |
-| **MCP tools (22)** | Allowlist: tags `tasks`, `gtd`, `projects`, `inbox`, plus `health` and `me` (ADR 0037); auth/admin are REST-only. Tool names are FastAPI **operation ids** — function, path, method (`create_task_tasks_post`). Observed at boot; snapshot in `ops/surfaces/mcp-tools.json`, enforced by `RULE-SURF-001`. Renaming an exposed route's function renames its tool: a breaking change. Transport is Streamable HTTP at `/mcp` (`/api/mcp` externally); for eleven weeks no client could connect, so `backend/tests/unit/test_mcp_session.py` opens a real session (ADR 0033). |
+| REST API (38 routes) | Breaking changes go through the migration pattern. The served OpenAPI schema is snapshotted in `ops/surfaces/openapi.json`. |
+| **MCP tools (27)** | Allowlist: tags `tasks`, `gtd`, `projects`, `inbox`, plus `health` and `me` (ADR 0037); auth/admin are REST-only. Tool names are FastAPI **operation ids** — function, path, method (`create_task_tasks_post`). Observed at boot; snapshot in `ops/surfaces/mcp-tools.json`, enforced by `RULE-SURF-001`. Renaming an exposed route's function renames its tool: a breaking change. Transport is Streamable HTTP at `/mcp` (`/api/mcp` externally); for eleven weeks no client could connect, so `backend/tests/unit/test_mcp_session.py` opens a real session (ADR 0033). |
 | Auth: `Authorization: Bearer <jwt>`, `X-Api-Key`, and Bearer-as-API-key everywhere | The third form is `SHIM-SEC-006`, a dated compatibility shim in `rules/shims.yaml`, not a design. `RULE-SEC-002` fails the gate when it expires. |
 | SQLite schema | Forward-only, additive. Migrations run in `init_db()` on every start, and the migrated schema is snapshotted in `ops/surfaces/db-schema.sql`. |
 | Taskwarrior data and `backend/taskrc_template.txt` | **Urgency coefficients are a behavioural contract** — changing one re-orders every user's list. Existing users' `.taskrc` files are *not* updated. |

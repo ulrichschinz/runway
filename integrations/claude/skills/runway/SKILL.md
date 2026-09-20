@@ -37,8 +37,9 @@ Look in the instructions already in your context (CLAUDE.md, AGENTS.md) for:
 
 - `runway_project: <name>` — the runway project this repository belongs to.
 - `runway_scope: <tag> [<tag> …]` — optional. Only if the repository declares it, limit
-  what you list unasked to tasks carrying these tags (see "Scoping" in
-  `references/conventions.md`). Most users never need it.
+  what you list unasked to tasks carrying these tags: pass them as `tag` on every task list
+  call, so nothing else even arrives (see "Scoping" in `references/conventions.md`, which
+  also says what to do about the project-name list). Most users never need it.
 
 The user's personal conventions (contexts, language) live in
 `~/.config/runway/profile.md`. Read it once per session before the first write or review;
@@ -49,7 +50,7 @@ if it is missing, use the defaults in `references/conventions.md` and mention on
 set of lists, and what separates them at the moment of choice is the **context** — where
 the user is and what they have at hand. So do not sort tasks into areas of life and do not
 hide anything by default. When the user wants a narrower view they say so ("nur @home",
-"alles zum Umzug"), and you filter by context, project or text.
+"alles zum Umzug"), and you filter by context, project or text (`q` on list tasks).
 
 If no project is declared and the user asks about "this project", list the project names
 and ask once; suggest adding the `runway_project:` line so you never have to ask again.
@@ -60,6 +61,8 @@ and ask once; suggest adding the `runway_project:` line so you never have to ask
 One call: the project's tasks. Present in this order: **Next**, **Waiting for**, then the
 rest, each with a short readable date where one exists. Keep it to a compact list. Never
 fetch all tasks including completed ones just to answer a lookup; it is large and slow.
+Ask the list for what you need instead: `status=completed` with `completed_since` answers
+"what did I finish since …", and `due_before` answers "what is overdue".
 If the lookup reveals a stalled project or long-overdue dates, say so in one line and
 offer `plan` or a review. Do not fix anything unasked.
 
@@ -76,6 +79,8 @@ offer `plan` or a review. Do not fix anything unasked.
   It gets clarified later; nothing is lost.
 - Confirm in one line: what was created, where. No follow-up questions unless the project
   is genuinely ambiguous.
+- In a scoped repository, capture without tags; never add the scope tag to an inbox item —
+  a tag means clarified.
 - `due` is for hard deadlines only. A date promised to someone else ("bis Mittwoch an
   Frau Berg") is a hard deadline; a date the user merely sets for themselves is not, and
   such wish dates turn into a wall of overdue items. "Not before" is `scheduled`; "hide
@@ -87,7 +92,8 @@ appears in the conversation, offer it: one line at the end of your answer, e.g.
 *"Soll ich dafür ein Todo anlegen: 'Angebot an Meyer schicken' (Projekt website-relaunch)?"*
 At most one offer per answer. Do not offer for things you are completing in this session,
 for hypotheticals, or again after a "no". Check for duplicates only after the user says
-yes — a lookup before every offer costs time for nothing.
+yes — a lookup before every offer costs time for nothing (list tasks with `q` = a
+distinctive word, once pending and once waiting).
 
 A commitment often comes with a follow-on wait ("ich schicke ihr X, dann meldet sie
 sich"). Offer the user's own action and mention the wait in the same line. When creating
@@ -105,8 +111,9 @@ annotation; then create the waiting-for it names.
 ### Engage ("what should I do now?")
 Context is the main filter in this system. If the user has not said where they are, ask
 for context and available time first ("Wo bist du, wie viel Zeit hast du?"), then filter
-the `next` list by that context tag and show at most five. Tasks without a context fit
-everywhere; include them. GTD picks by context, time and
+the `next` list by that context tag and show at most five. Fetch `next` scoped only by the
+area tag and filter by context yourself: tasks without a context fit everywhere, and a
+server-side context filter would drop exactly those. GTD picks by context, time and
 energy before priority; a list sorted by urgency alone ignores that the user may be on a
 train with twenty minutes.
 
@@ -129,10 +136,12 @@ If the repository has its own routine for the same kind of review (its instructi
 one), that routine leads and calls this skill for the runway part. Do not run a second,
 competing review of the same kind.
 
-**When to propose a reset instead.** If the server records reviews, use that. If it does
-not, take the newest `modified` date among pending tasks as a stand-in. When that is more
-than about ten days old, or more than half of the pending tasks are overdue, a daily
-review cannot fix the lists: show the screen, then propose `reset` and stop there.
+**When to propose a reset instead.** Use `last_review` from the summary: when the last
+`weekly` review is more than ten days ago, or more than half of the pending tasks are
+overdue, a daily review cannot fix the lists. Show the screen, then propose `reset` and
+stop there. A `null` weekly means none was ever recorded here — not that the system is
+unreviewed — so judge by the overdue share alone and record the review at the end, which
+is what makes the next answer evidence.
 
 ## Guardrails
 
@@ -143,5 +152,5 @@ review cannot fix the lists: show the screen, then propose `reset` and stop ther
 - If a change fails because the server lacks a capability, say so plainly. Do not work
   around it by deleting and recreating tasks; that loses history, annotations and
   dependencies.
-- Prefer the server's summary and filter operations when they exist; fall back to the
-  plain lists when they do not.
+- Use the summary and the filter parameters; never fetch everything to count. The only
+  full pending fetch is daily-review §4, and only when `unclarified` is above zero.

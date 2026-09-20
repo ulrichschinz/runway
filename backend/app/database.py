@@ -58,6 +58,53 @@ CREATE TABLE IF NOT EXISTS site_settings (
 )
 """
 
+# When a review last happened, per user, per kind and per scope. A new table rather than a
+# column on anything: it is the one shape that needs no ALTER, and the migration loop below
+# runs before the CREATE statements, so a column added to a table that does not exist yet on
+# a fresh database would fail on first boot and succeed on the second (D15).
+#
+# `scope` is the canonical scope key (D16) — the review's scope tags, sorted and joined with
+# `+` — or '' for an unscoped review. It is part of the uniqueness, not a detail of the row:
+# a repository that reviews only its own area has not reviewed the whole system, and storing
+# both under one key would tell the user their system is current when half of it is not.
+#
+# `reviewed_at` holds Taskwarrior's own stamp format (YYYYMMDDTHHMMSSZ, UTC), because the
+# summary carries it next to `entry` and `wait` values that come from the binary and an agent
+# comparing two timestamps should not have to notice which one came from where.
+CREATE_REVIEWS = """
+CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('daily', 'weekly')),
+    scope TEXT NOT NULL DEFAULT '',
+    reviewed_at TEXT NOT NULL,
+    UNIQUE(username, kind, scope)
+)
+"""
+
+# What the user decided about a project, where the decision is not visible in the tasks
+# themselves (D15). "On hold" and "done" are the two states a GTD review has to be able to
+# express and Taskwarrior cannot: a project with no next action is either stalled — the most
+# valuable finding a review makes — or deliberately parked, and nothing in the task data can
+# tell the two apart. No row means `active`, which is what every project is until somebody
+# says otherwise.
+#
+# Separate from `projects`, which means "created explicitly": a project that exists only
+# because tasks name it can be put on hold without being created, and one created explicitly
+# starts active without a row here. It is also a table rather than a column on `projects` for
+# the reason the reviews table gives — the migration loop runs before the CREATE statements,
+# so an ALTER against a table a fresh database does not have yet fails on the first boot.
+CREATE_PROJECT_STATUS = """
+CREATE TABLE IF NOT EXISTS project_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'on_hold', 'done')),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(username, name)
+)
+"""
+
 # The additive schema migrations, applied on every start. There is no migrations/ directory
 # and no version table: with four statements against two shapes of database, re-running an
 # idempotent list is cheaper than a framework, and the point at which that stops being true
@@ -155,6 +202,75 @@ async def get_allow_registration(db) -> bool:
     return settings.allow_registration
 
 
+async def get_reviews(db, username: str) -> list:
+    """Every review timestamp this user has, one row per kind and scope.
+
+    The upsert below keeps exactly one row per `(username, kind, scope)`, so "the rows" and
+    "the latest review of each kind and scope" are the same set and no ordering or grouping
+    is needed to answer the question the summary asks.
+    """
+    async with db.execute(
+        "SELECT kind, scope, reviewed_at FROM reviews WHERE username=? ORDER BY kind, scope",
+        (username,),
+    ) as cur:
+        return list(await cur.fetchall())
+
+
+async def record_review(db, username: str, kind: str, scope: str, at: str) -> None:
+    """Write down that a review of this kind and scope just happened.
+
+    An upsert rather than an insert: a review is a *state* ("the lists were last looked at
+    then"), not a log. Appending would grow one row per review per user forever to answer a
+    question that only ever needs the newest one, and would make the read a GROUP BY over a
+    table nothing else prunes. The history is the user's Taskwarrior data, not this table.
+    """
+    await db.execute(
+        """
+        INSERT INTO reviews (username, kind, scope, reviewed_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(username, kind, scope) DO UPDATE SET reviewed_at=excluded.reviewed_at
+        """,
+        (username, kind, scope, at),
+    )
+    await db.commit()
+
+
+async def get_project_statuses(db, username: str) -> dict[str, str]:
+    """Every project this user has said something about, mapped to what they said.
+
+    Only the projects with a row: a project with none is `active`, and writing that out for
+    every project a user has would make "nobody has decided anything about this yet" and
+    "somebody decided it is running" the same fact. The caller defaults.
+    """
+    async with db.execute(
+        "SELECT name, status FROM project_status WHERE username=? ORDER BY id",
+        (username,),
+    ) as cur:
+        return {row["name"]: row["status"] for row in await cur.fetchall()}
+
+
+async def set_project_status(db, username: str, name: str, status: str) -> None:
+    """Record what a project's status is now. State, not history, so this upserts.
+
+    It deliberately does not create the project: a project exists because a task names it or
+    because somebody created it explicitly, and saying "this one is on hold" is a statement
+    about a project, not a way of making one. A status set on a name no project carries is
+    listed by `GET /gtd/projects/overview` with zero counts, so it can be seen and corrected,
+    and it is never reported as stalled — a typo must not become a permanent finding.
+    """
+    await db.execute(
+        """
+        INSERT INTO project_status (username, name, status, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(username, name) DO UPDATE SET
+            status=excluded.status,
+            updated_at=CURRENT_TIMESTAMP
+        """,
+        (username, name, status),
+    )
+    await db.commit()
+
+
 async def bootstrap_admin(db) -> str:
     """Ensure the instance has an administrator, without ever overriding a decision.
 
@@ -240,6 +356,8 @@ async def init_db() -> str:
         await db.execute(CREATE_PROJECT_PLANS)
         await db.execute(CREATE_PROJECTS)
         await db.execute(CREATE_SITE_SETTINGS)
+        await db.execute(CREATE_REVIEWS)
+        await db.execute(CREATE_PROJECT_STATUS)
         # seed allow_registration from env if not set
         await db.execute(
             "INSERT OR IGNORE INTO site_settings (key, value) VALUES ('allow_registration', ?)",

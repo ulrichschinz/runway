@@ -243,6 +243,18 @@ class TestEmptyStringClears:
         assert r.status_code == 200, r.text
         assert r.json()[field] is None
 
+    def test_an_empty_description_leaves_the_description_alone(self, client, auth):
+        """The one field an empty string does not clear, as the route description says.
+
+        `""` reaches Taskwarrior as free text after `--`, which 3.5.0 takes with rc 0 and
+        ignores (pinned in `tests/container`). The API therefore answers 200 with the old
+        description rather than an empty one.
+        """
+        task = _create(client, auth, description="hello world")
+        r = client.put(f"/tasks/{task['uuid']}", json={"description": ""}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json()["description"] == "hello world"
+
     def test_null_still_means_unchanged(self, client, auth):
         task = _create(client, auth, priority="H")
         r = client.put(f"/tasks/{task['uuid']}", json={"priority": None}, headers=auth)
@@ -282,3 +294,156 @@ class TestTaskwarriorRejections:
         r = client.post("/tasks", json={"description": "x", "due": "notadate"}, headers=auth)
         assert r.status_code == 400
         assert "not a valid date" in r.json()["detail"]
+
+
+class TestListFiltersOverHttp:
+    """The filters of ADR 0038, as an MCP client or the SPA sends them."""
+
+    def test_the_status_parameter_selects_completed_tasks(self, client, auth):
+        done = _create(client, auth, description="finished")
+        _create(client, auth, description="open")
+        client.post(f"/tasks/{done['uuid']}/done", headers=auth)
+        r = client.get("/tasks", params={"status": "completed"}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["finished"]
+        assert r.json()[0]["end"] == "20260919T100000Z"
+
+    def test_status_waiting_is_a_future_wait_not_the_waiting_tag(self, client, auth):
+        _create(client, auth, description="hidden", wait="2026-10-01")
+        _create(client, auth, description="delegated", tags=["waiting"])
+        r = client.get("/tasks", params={"status": "waiting"}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["hidden"]
+
+    def test_include_done_no_longer_returns_deleted_tasks(self, client, auth):
+        """It used to send no filter at all, so deleted tasks and recurring templates
+        came back with everything else (D12)."""
+        gone = _create(client, auth, description="deleted")
+        done = _create(client, auth, description="finished")
+        client.delete(f"/tasks/{gone['uuid']}", headers=auth)
+        client.post(f"/tasks/{done['uuid']}/done", headers=auth)
+        r = client.get("/tasks", params={"include_done": True}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["finished"]
+
+    def test_include_done_false_is_ignored_rather_than_a_conflict(self, client, auth):
+        """The SPA sends it on every context-tag refresh, and agents fill defaults."""
+        r = client.get(
+            "/tasks", params={"include_done": False, "status": "completed"}, headers=auth
+        )
+        assert r.status_code == 200
+
+    def test_include_done_true_with_a_status_is_a_400(self, client, auth):
+        r = client.get("/tasks", params={"include_done": True, "status": "all"}, headers=auth)
+        assert r.status_code == 400
+        assert "include_done" in r.json()["detail"]
+
+    def test_the_project_filter_is_exact(self, client, auth):
+        _create(client, auth, description="mine", project="alpha")
+        _create(client, auth, description="sub", project="alpha.sub")
+        _create(client, auth, description="other", project="alphabet")
+        r = client.get("/tasks", params={"project": "alpha"}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["mine"]
+
+    def test_tags_are_repeatable_and_combine_with_and(self, client, auth):
+        _create(client, auth, description="both", tags=["next", "@home"])
+        _create(client, auth, description="one", tags=["next"])
+        r = client.get("/tasks", params=[("tag", "next"), ("tag", "@home")], headers=auth)
+        assert [t["description"] for t in r.json()] == ["both"]
+
+    def test_the_date_filters_and_the_limit(self, client, auth):
+        _create(client, auth, description="yesterday", due="2026-09-18")
+        _create(client, auth, description="tomorrow", due="2026-09-20")
+        r = client.get("/tasks", params={"due_before": "2026-09-19"}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["yesterday"]
+        assert len(client.get("/tasks", params={"limit": 1}, headers=auth).json()) == 1
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"project": "a/b"},
+            {"project": "rc.data.location=/tmp/x"},
+            {"project": "a\nb"},
+            {"tag": "-next"},
+            {"due_before": "2026-9-3"},
+            {"completed_since": "2026-09-01", "status": "pending"},
+        ],
+    )
+    def test_a_refused_filter_value_is_a_400(self, client, auth, params):
+        assert client.get("/tasks", params=params, headers=auth).status_code == 400
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"status": "archived"},
+            {"limit": 0},
+            {"limit": 501},
+            {"project": "x" * 101},
+            {"due_before": "x" * 11},
+        ],
+    )
+    def test_a_parameter_outside_its_declared_type_is_a_422(self, client, auth, params):
+        assert client.get("/tasks", params=params, headers=auth).status_code == 422
+
+    def test_more_than_ten_tags_is_a_422(self, client, auth):
+        params = [("tag", f"t{i}") for i in range(11)]
+        assert client.get("/tasks", params=params, headers=auth).status_code == 422
+
+    def test_no_refused_value_ever_reaches_the_binary(self, fake_task, client, auth):
+        """The fuzz check from the plan: a refused filter is a 400 or a 422, never a 500,
+        and never a token in an argument vector."""
+        poison = ["(", ")", " or ", "\n", "rc.data.location=/tmp/x", "-x", "+x", "z" * 10000]
+        fake_task.calls.clear()
+        for value in poison:
+            for field in ("project", "tag", "due_before", "completed_since"):
+                r = client.get("/tasks", params={field: value}, headers=auth)
+                assert r.status_code in (400, 422), (field, value, r.status_code)
+        for _user, args, _text in fake_task.calls:
+            for token in args:
+                assert not any(value in token for value in poison), args
+
+
+class TestTheTextSearch:
+    """`q` is ours, not Taskwarrior's.
+
+    It is a casefold substring of the description, applied in Python over the export, so no
+    part of what the user typed ever becomes an argv token — a description filter would sit
+    in the one position `--` cannot protect (ADR 0038).
+    """
+
+    def test_it_matches_case_insensitively_including_umlauts(self, client, auth):
+        _create(client, auth, description="Büro aufräumen")
+        _create(client, auth, description="Rechnung schreiben")
+        r = client.get("/tasks", params={"q": "büro"}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["Büro aufräumen"]
+
+    def test_a_duplicate_check_needs_the_waiting_status_too(self, client, auth):
+        """The skill's duplicate check: once pending, once waiting, because a hidden
+        tickler is not pending."""
+        _create(client, auth, description="Vertrag Meyer prüfen", wait="2026-10-01")
+        # A visible task and a second hidden one, neither matching: without them both
+        # assertions would hold with `q` ignored entirely.
+        _create(client, auth, description="Angebot Berg")
+        _create(client, auth, description="Rechnung Berg", wait="2026-10-01")
+        assert client.get("/tasks", params={"q": "meyer"}, headers=auth).json() == []
+        r = client.get("/tasks", params={"q": "meyer", "status": "waiting"}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["Vertrag Meyer prüfen"]
+
+    def test_it_narrows_before_the_limit_applies(self, client, auth):
+        _create(client, auth, description="Angebot Meyer", priority="H")
+        _create(client, auth, description="Angebot Berg", priority="M")
+        _create(client, auth, description="Rechnung Meyer", priority="L")
+        r = client.get("/tasks", params={"q": "meyer", "limit": 2}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["Angebot Meyer", "Rechnung Meyer"]
+
+    def test_it_is_bounded(self, client, auth):
+        assert client.get("/tasks", params={"q": "x" * 201}, headers=auth).status_code == 422
+
+    def test_no_part_of_it_ever_reaches_the_binary(self, fake_task, client, auth):
+        _create(client, auth, description="safe")
+        poison = ["(", " or ", "\n", "rc.data.location=/tmp/x", "description.has:x", "-x"]
+        fake_task.calls.clear()
+        for value in poison:
+            r = client.get("/tasks", params={"q": value}, headers=auth)
+            assert r.status_code == 200, (value, r.text)
+            assert r.json() == []
+        for _user, args, text in fake_task.calls:
+            for token in [*args, *text]:
+                assert not any(value in token for value in poison), args
