@@ -40,6 +40,7 @@ denied. Tool names are `mcp__runway__<operation id>`. Merge these entries into t
       "mcp__runway__projects_gtd_projects_get",
       "mcp__runway__project_tasks_gtd_projects__name__get",
       "mcp__runway__tickler_gtd_tickler_get",
+      "mcp__runway__summary_gtd_summary_get",
       "mcp__runway__get_plan_projects_plans__name__get"
     ],
     "ask": [
@@ -105,5 +106,6 @@ weekly_review: Freitag 15:00 (Kalendertermin)
   session starts. A reminder without an open session needs a push from the server itself
   (digest by e-mail or ntfy), once runway offers one. Do not build cloud agents that hold
   the API key just to send a reminder.
-- A hook should call the server's summary operation with a short timeout, stay silent when
-  nothing is due, and print at most one line.
+- A hook is a shell command, so it calls the REST route `GET /api/gtd/summary` with `curl`
+  and a short timeout, not the MCP tool. The summary contains no task titles, so it is safe
+  in a logged repository. Stay silent when nothing is due; print at most one line.

@@ -12,7 +12,7 @@ steps below where it calls for them.
 
 ## Prepare (you, silently)
 
-Summary (if available), inbox, next, waiting, someday, projects, tickler, and the tasks
+Summary, inbox, next, waiting, someday, projects, tickler, and the tasks
 completed in the last seven days: list tasks with `status=completed` and
 `completed_since=<today−7>`.
 

@@ -6,14 +6,21 @@ changes in one go.
 
 ## 1. Gather (no questions yet)
 
-If the server offers a summary operation, call it first and fetch only the lists whose
-counters are not zero. Otherwise two calls are enough: the pending tasks (sections 1, 3,
-4 and 6 are filters over that list) and the project list (section 5). In a scoped
-repository pass the scope tags as `tag` on the task list; the project list takes no `tag`
-and would name every area's projects, so take section 5 from the scoped task list instead
-of calling it. If the user named a context
-("daily @home"), filter section 6 by it yourself — a task without a context fits
-everywhere, and a server-side context filter would drop it.
+Call the summary first. It is the entry path: it names no task, and it says which lists are
+worth fetching at all. **Fetch a list only when its counter is above zero.** In a scoped
+repository pass the scope tags as `tag` to the summary and to every list call below.
+
+| Section | Counter | Call, only if the counter is above zero |
+|---|---|---|
+| 1 Overdue / due today | `overdue`, `due_today`, `scheduled_passed` | list tasks with `due_before=<tomorrow>`; if `scheduled_passed` is above zero also `scheduled_before=<tomorrow>`, and drop the `waiting` ones — they are section 3. `overdue` and `due_today` count parked tasks as well, which the list call does not return: a remainder is in the tickler, not missing |
+| 2 Inbox | `inbox`, `inbox_oldest_entry` | `gtd/inbox`, only if `inbox` is five or fewer and the repository is not scoped; otherwise report count and age and stop there |
+| 3 Waiting for | `waiting_followup_due` | `gtd/waiting`, keep those whose `scheduled` is today or earlier |
+| 4 In no list | `unclarified` | list tasks with `status=pending`, filtered locally (no project, none of `next`/`waiting`/`someday`). This is the one permitted full pending fetch, and only when the counter says there is something to find |
+| 5 Stalled projects | `stalled_projects` | none — the summary gives the names |
+| 6 Next actions | `next` | `gtd/next`, scoped by the area tags only |
+
+If the user named a context ("daily @home"), filter section 6 by it yourself — a task
+without a context fits everywhere, and a server-side context filter would drop it.
 
 ## 2. Show one numbered screen
 

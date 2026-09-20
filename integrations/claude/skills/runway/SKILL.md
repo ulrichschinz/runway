@@ -150,5 +150,5 @@ review cannot fix the lists: show the screen, then propose `reset` and stop ther
 - If a change fails because the server lacks a capability, say so plainly. Do not work
   around it by deleting and recreating tasks; that loses history, annotations and
   dependencies.
-- Prefer the server's summary and filter operations when they exist; fall back to the
-  plain lists when they do not.
+- Use the summary and the filter parameters; never fetch everything to count. The only
+  full pending fetch is daily-review §4, and only when `unclarified` is above zero.

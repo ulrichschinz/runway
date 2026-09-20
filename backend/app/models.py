@@ -240,5 +240,73 @@ class ProjectPlanUpdate(BaseModel):
     )
 
 
+# The GTD summary: what a review or a reminder needs before it decides whether to fetch
+# anything at all. Counters, one timestamp and project names — never a task description.
+# That is what makes it safe to print from a shell hook in a logged repository, and the
+# reason every field below is a number, a date or a name.
+_D_SUMMARY_SCOPE = "Narrowed by `tag` where the summary was called with one."
+
+
+class LastReview(BaseModel):
+    daily: str | None = Field(
+        default=None,
+        description="When the last daily review was recorded, `YYYYMMDDTHHMMSSZ` (UTC), or "
+        "null if none was.",
+    )
+    weekly: str | None = Field(
+        default=None,
+        description="When the last weekly review was recorded, `YYYYMMDDTHHMMSSZ` (UTC), or "
+        "null if none was.",
+    )
+
+
+class GtdSummary(BaseModel):
+    today: str = Field(
+        description="The server's current date, `YYYY-MM-DD`. Every day "
+        "counter below is relative to it."
+    )
+    inbox: int = Field(
+        description="Unprocessed tasks: no project, no tags, not hidden by a "
+        "`wait` date. Never narrowed by `tag` — the inbox is untagged by definition."
+    )
+    inbox_oldest_entry: str | None = Field(
+        default=None,
+        description="When the oldest inbox task was captured, `YYYYMMDDTHHMMSSZ` (UTC), or "
+        "null if the inbox is empty. An old entry is the finding, not the count.",
+    )
+    overdue: int = Field(
+        description=f"Open tasks whose `due` day is before today. {_D_SUMMARY_SCOPE}"
+    )
+    due_today: int = Field(description=f"Open tasks whose `due` day is today. {_D_SUMMARY_SCOPE}")
+    next: int = Field(description=f"Visible tasks tagged `next`. {_D_SUMMARY_SCOPE}")
+    waiting: int = Field(
+        description=f"Open tasks tagged `waiting`, hidden ones included. {_D_SUMMARY_SCOPE}"
+    )
+    waiting_followup_due: int = Field(
+        description="Tasks tagged `waiting` whose `scheduled` follow-up day is today or "
+        f"earlier. {_D_SUMMARY_SCOPE}"
+    )
+    someday: int = Field(description=f"Visible tasks tagged `someday`. {_D_SUMMARY_SCOPE}")
+    hidden: int = Field(
+        description=f"Tasks parked in the tickler by a future `wait` date. {_D_SUMMARY_SCOPE}"
+    )
+    tickler_returned_today: int = Field(
+        description=f"Tasks whose `wait` date passed today, so they are back. {_D_SUMMARY_SCOPE}"
+    )
+    scheduled_passed: int = Field(
+        description="Visible tasks that are not `waiting` and whose `scheduled` day is today "
+        f"or earlier — they could have been started. {_D_SUMMARY_SCOPE}"
+    )
+    unclarified: int = Field(
+        description="Visible tasks with tags but no project and none of `next`, `waiting` or "
+        f"`someday`: in no GTD list at all. {_D_SUMMARY_SCOPE}"
+    )
+    stalled_projects: list[str] = Field(
+        description="Names of active projects with no `next` action, nothing `waiting` and "
+        "nothing parked in the tickler. Names only, no tasks."
+    )
+    last_review: LastReview = Field(description="When reviews were last recorded.")
+
+
 class ApiKeyInfo(BaseModel):
     api_key: str

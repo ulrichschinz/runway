@@ -1,6 +1,11 @@
 """Characterization tests for the GTD views."""
 
+from datetime import UTC, datetime
+
 import pytest
+
+# A `wait` far past the fake's clock (2026-09-19T10:00:00Z), so the task is hidden.
+HIDDEN = "2026-10-01"
 
 
 def _create(client, auth, **body):
@@ -41,7 +46,17 @@ class TestViews:
         assert client.get("/gtd/next", headers=auth).json() == []
 
     def test_every_view_requires_authentication(self, client, registered):
-        for view in ("inbox", "next", "waiting", "someday", "tickler", "projects", "projects/p"):
+        views = (
+            "inbox",
+            "next",
+            "waiting",
+            "someday",
+            "tickler",
+            "summary",
+            "projects",
+            "projects/p",
+        )
+        for view in views:
             assert client.get(f"/gtd/{view}").status_code == 401, view
 
 
@@ -254,3 +269,172 @@ class TestTagScoping:
         for _user, args, _text in fake_task.calls:
             for token in args:
                 assert not any(value in token for value in poison), args
+
+
+class TestSummary:
+    """One call, every counter a review needs, and no task description anywhere (D14, D17).
+
+    The fake's clock stands at 2026-09-19T10:00:00Z, and the unit tier runs the day logic in
+    UTC, so "today" is 2026-09-19 throughout.
+    """
+
+    FIXTURE = [
+        ("unprocessed", {}),
+        ("returned from the tickler", {"wait": "2026-09-19"}),
+        ("overdue thing", {"due": "2026-09-18", "tags": ["next"]}),
+        ("due today thing", {"due": "2026-09-19", "tags": ["next"]}),
+        ("plain next thing", {"tags": ["next"]}),
+        ("could have started", {"tags": ["next"], "scheduled": "2026-09-18"}),
+        ("waiting on a reply", {"tags": ["waiting"]}),
+        ("follow up today", {"tags": ["waiting"], "scheduled": "2026-09-19"}),
+        ("maybe one day", {"tags": ["someday"]}),
+        ("parked until october", {"wait": "2026-10-01"}),
+        ("only a context", {"tags": ["@home"]}),
+        ("alpha step", {"project": "alpha", "tags": ["next"]}),
+        ("beta step", {"project": "beta"}),
+        # Six of the counters are defined by the visible/open difference, so each side of it
+        # needs a task carrying the same tag or date as its visible twin above. Without
+        # these, `waiting` (open) and `next` (visible) could be swapped without a red test.
+        ("chased and parked", {"tags": ["waiting"], "scheduled": "2026-09-18", "wait": HIDDEN}),
+        ("next but parked", {"tags": ["next"], "wait": HIDDEN}),
+        ("someday and parked", {"tags": ["someday"], "wait": HIDDEN}),
+        ("overdue and parked", {"tags": ["@home"], "due": "2026-09-18", "wait": HIDDEN}),
+        ("due today and parked", {"tags": ["@home"], "due": "2026-09-19", "wait": HIDDEN}),
+    ]
+
+    def _seed(self, client, auth):
+        for description, body in self.FIXTURE:
+            _create(client, auth, description=description, **body)
+
+    def test_every_counter(self, client, auth):
+        self._seed(client, auth)
+        r = client.get("/gtd/summary", headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "today": "2026-09-19",
+            # "parked until october" is inbox-shaped but hidden, so it is not in the inbox;
+            # "returned from the tickler" came back this morning, so it is.
+            "inbox": 2,
+            "inbox_oldest_entry": "20260804T090000Z",
+            # The parked twins land in the open counters and stay out of the visible ones:
+            # overdue, due today, waiting and its follow-up count them; next and someday
+            # do not, because a task the user parked is not on offer today.
+            "overdue": 2,
+            "due_today": 2,
+            "next": 5,
+            "waiting": 3,
+            "waiting_followup_due": 2,
+            "someday": 1,
+            "hidden": 6,
+            "tickler_returned_today": 1,
+            "scheduled_passed": 1,
+            "unclarified": 1,
+            "stalled_projects": ["beta"],
+            "last_review": {"daily": None, "weekly": None},
+        }
+
+    def test_it_names_no_task(self, client, auth):
+        """The summary is printable by a shell hook in a logged repository, which only holds
+        while it carries counters and project names and nothing else."""
+        self._seed(client, auth)
+        body = client.get("/gtd/summary", headers=auth).text
+        for description, _ in self.FIXTURE:
+            assert description not in body
+
+    def test_a_task_due_today_is_not_also_overdue(self, client, auth):
+        _create(client, auth, description="today only", due="2026-09-19")
+        summary = client.get("/gtd/summary", headers=auth).json()
+        assert (summary["overdue"], summary["due_today"]) == (0, 1)
+
+    def test_the_day_boundary_moves_the_counters(self, client, auth, fake_task):
+        """Both sides of midnight, on the same task: the clock is the only thing that moves."""
+        _create(client, auth, description="dated", due="2026-09-19")
+        fake_task.now = datetime(2026, 9, 19, 23, 59, tzinfo=UTC)
+        late = client.get("/gtd/summary", headers=auth).json()
+        assert (late["today"], late["overdue"], late["due_today"]) == ("2026-09-19", 0, 1)
+        fake_task.now = datetime(2026, 9, 20, 0, 1, tzinfo=UTC)
+        early = client.get("/gtd/summary", headers=auth).json()
+        assert (early["today"], early["overdue"], early["due_today"]) == ("2026-09-20", 1, 0)
+
+    def test_it_requires_authentication(self, client, registered):
+        assert client.get("/gtd/summary").status_code == 401
+
+
+class TestSummaryProjects:
+    """Which projects the summary calls stalled: active, no `next`, nothing waiting, nothing
+    parked in the tickler (D14). A project waiting on someone, or parked, is not stalled."""
+
+    def test_an_explicit_project_without_a_single_task_is_stalled(self, client, auth):
+        client.post("/projects", json={"name": "empty"}, headers=auth)
+        assert client.get("/gtd/summary", headers=auth).json()["stalled_projects"] == ["empty"]
+
+    def test_a_project_with_only_a_waiting_task_is_not_stalled(self, client, auth):
+        _create(client, auth, description="chasing", project="patient", tags=["waiting"])
+        assert client.get("/gtd/summary", headers=auth).json()["stalled_projects"] == []
+
+    def test_a_project_whose_only_task_is_parked_is_not_stalled(self, client, auth):
+        _create(client, auth, description="later", project="dormant", wait="2026-10-01")
+        assert client.get("/gtd/summary", headers=auth).json()["stalled_projects"] == []
+
+    def test_a_project_with_a_next_action_is_not_stalled(self, client, auth):
+        _create(client, auth, description="go", project="moving", tags=["next"])
+        assert client.get("/gtd/summary", headers=auth).json()["stalled_projects"] == []
+
+
+class TestSummaryScoping:
+    """`tag` narrows every counter but the inbox, and a scoped summary names no project of
+    another area (P1-5a, D14)."""
+
+    def test_the_inbox_stays_unscoped_while_everything_else_narrows(self, client, auth):
+        _create(client, auth, description="unprocessed")
+        _create(client, auth, description="mine", tags=["next", "ar"])
+        _create(client, auth, description="theirs", tags=["next", "privat"])
+        scoped = client.get("/gtd/summary", params={"tag": "ar"}, headers=auth).json()
+        assert (scoped["inbox"], scoped["next"]) == (1, 1)
+        whole = client.get("/gtd/summary", headers=auth).json()
+        assert (whole["inbox"], whole["next"]) == (1, 2)
+
+    def test_the_hidden_counter_is_narrowed_too(self, client, auth):
+        """`hidden` reads the scoped open tasks, not every open task: a tickler item of
+        another area is not this repository's business either."""
+        _create(client, auth, description="mine, parked", tags=["ar"], wait=HIDDEN)
+        _create(client, auth, description="theirs, parked", tags=["privat"], wait=HIDDEN)
+        scoped = client.get("/gtd/summary", params={"tag": "ar"}, headers=auth).json()
+        whole = client.get("/gtd/summary", headers=auth).json()
+        assert (scoped["hidden"], whole["hidden"]) == (1, 2)
+
+    def test_a_private_project_is_neither_named_nor_counted_under_a_scope(self, client, auth):
+        """The privacy property of scoping: a project with nothing in the scope is another
+        area's business, so it is dropped before the stalled test — whether it is an explicit
+        row with no task at all or a project whose open tasks all fall outside the scope,
+        and while both are findings in the unscoped summary."""
+        client.post("/projects", json={"name": "Privat X"}, headers=auth)
+        _create(client, auth, description="therapy notes", project="Privat Y")
+        _create(client, auth, description="work step", project="Arbeit", tags=["ar"])
+        scoped = client.get("/gtd/summary", params={"tag": "ar"}, headers=auth)
+        assert "Privat X" not in scoped.text
+        assert "Privat Y" not in scoped.text
+        assert scoped.json()["stalled_projects"] == ["Arbeit"]
+        whole = client.get("/gtd/summary", headers=auth).json()
+        assert whole["stalled_projects"] == ["Arbeit", "Privat X", "Privat Y"]
+
+    def test_a_project_named_by_the_scope_is_judged_by_all_of_its_tasks(self, client, auth):
+        """A scope decides which projects are named; it does not decide whether one has a
+        next action. Capture in a scoped repository stays untagged, so a project whose next
+        action carries no scope tag is moving, and saying otherwise is a finding the user
+        cannot check: section 5 of the daily review reports names and makes no further call."""
+        _create(client, auth, description="scoped step", project="shared", tags=["ar"])
+        _create(client, auth, description="stuck step", project="stuck", tags=["ar"])
+        _create(client, auth, description="the actual next step", project="shared", tags=["next"])
+        scoped = client.get("/gtd/summary", params={"tag": "ar"}, headers=auth).json()
+        assert scoped["stalled_projects"] == ["stuck"]
+
+    def test_two_tags_are_and_ed(self, client, auth):
+        _create(client, auth, description="both", tags=["next", "ar", "@home"])
+        _create(client, auth, description="one", tags=["next", "ar"])
+        params = [("tag", "ar"), ("tag", "@home")]
+        assert client.get("/gtd/summary", params=params, headers=auth).json()["next"] == 1
+
+    @pytest.mark.parametrize("tag", ["-next", "", "a,b", "1abc"])
+    def test_a_refused_tag_is_a_400(self, client, auth, tag):
+        assert client.get("/gtd/summary", params={"tag": tag}, headers=auth).status_code == 400

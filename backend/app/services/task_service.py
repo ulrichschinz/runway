@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, tzinfo
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.models import Task, TaskCreate, TaskModify, validate_project_name
+from app.models import GtdSummary, LastReview, Task, TaskCreate, TaskModify, validate_project_name
 from app.services import task_runner
 
 UUID_RE = re.compile(
@@ -541,3 +541,149 @@ def project_names(username: str) -> list[str]:
         if project:
             seen[project] = None
     return list(seen.keys())
+
+
+def _is_hidden(raw: dict, now: datetime) -> bool:
+    """Taskwarrior's virtual waiting, decided here: a `wait` date still in the future.
+
+    The export says `"status": "pending"` for such a task (ADR 0036), so hidden-ness is not
+    readable from the status and has to be derived from the date — which is why the summary
+    exports once with `OPEN` and sorts the tasks out in Python rather than running one
+    filtered export per counter.
+    """
+    wait: str | None = raw.get("wait")
+    return wait is not None and wait != "" and _parse_tw(wait) > now
+
+
+def _open_raw(username: str) -> list[dict]:
+    """One export of everything the user still owns and has not finished.
+
+    Every counter in `summarize` and every project in `project_rollup` is a view over this
+    one list. A counter per list would mean a dozen `task` invocations for one summary, and
+    they would not even agree with each other: each would see the store at its own instant.
+    """
+    return task_runner.export_tasks(username, OPEN)
+
+
+def project_rollup(raw: list[dict], now: datetime) -> dict[str, dict[str, int]]:
+    """Per project name, how many open tasks it has and of which kind. Pure.
+
+    `pending` counts the visible ones, `next` the visible `+next`, `waiting` every `+waiting`
+    including the hidden, and `hidden` those parked by a future `wait` — the same reading of
+    each list that `gtd_list` gives, so a project's numbers and its lists cannot disagree.
+    """
+    out: dict[str, dict[str, int]] = {}
+    for task in raw:
+        name = task.get("project")
+        if not name:
+            continue
+        counts = out.setdefault(name, {"pending": 0, "next": 0, "waiting": 0, "hidden": 0})
+        tags = task.get("tags", [])
+        if _is_hidden(task, now):
+            counts["hidden"] += 1
+        else:
+            counts["pending"] += 1
+            if "next" in tags:
+                counts["next"] += 1
+        if "waiting" in tags:
+            counts["waiting"] += 1
+    return out
+
+
+_NO_TASKS = {"pending": 0, "next": 0, "waiting": 0, "hidden": 0}
+
+
+def summarize(
+    username: str,
+    tags: list[str] | None = None,
+    statuses: dict[str, str] | None = None,
+    last_review: LastReview | None = None,
+) -> GtdSummary:
+    """The counters a review or a reminder starts from, from one export (D14, D17).
+
+    Counting happens here rather than in Taskwarrior because a dozen `+tag` exports would be
+    a dozen subprocesses and a dozen different instants, and because "due today" is a
+    local-day question the binary's filter grammar answers in its own dialect (`_local_day`,
+    D10). Nothing a caller sends is interpolated into a filter: `tags` is validated and then
+    compared in Python, and the export runs the module constant `OPEN`.
+
+    `tags` narrows every counter **except** `inbox` and `inbox_oldest_entry`: a scoped
+    repository still needs to know that unprocessed things exist, and an inbox item carries
+    no tags by definition, so a scoped inbox count would always be zero and would hide the
+    one thing GTD asks about first.
+
+    `statuses` maps every explicitly known project to its status; a project that exists only
+    because tasks name it counts as `active`. Its keys are what makes an explicit project
+    with no open task at all visible as stalled. Under a scope, explicit projects without a
+    single matching open task are dropped before the stalled test rather than reported: the
+    point of a scope is that another area's project names never reach the transcript. The
+    scope chooses which projects are named; each of them is then judged by all of its open
+    tasks, because "has a next action" is a fact about the project, not about the scope.
+    """
+    wanted = {token[1:] for token in _tag_filters(tags)}
+    statuses = statuses or {}
+    now = _now()
+    today = now.date()
+    raw = _open_raw(username)
+
+    visible = [t for t in raw if not _is_hidden(t, now)]
+    inbox = [t for t in visible if not t.get("project") and not t.get("tags")]
+    entries = sorted(t["entry"] for t in inbox if t.get("entry"))
+
+    scoped = [t for t in raw if wanted <= set(t.get("tags", []))]
+    scoped_visible = [t for t in scoped if not _is_hidden(t, now)]
+
+    def day_at_most(task: dict, field: str) -> bool:
+        return bool(task.get(field)) and _local_day(task[field]) <= today
+
+    # A scope decides which projects are *named*, never how one is judged. Whether a project
+    # has a next action is a fact about the project, and capture in a scoped repository stays
+    # untagged, so judging by the scoped tasks alone would call a project stalled whose next
+    # action simply does not carry the scope tag — a finding the review reports as a name,
+    # with no further call the user could check it against.
+    rollup = project_rollup(raw, now)
+    # An explicit project with no task of its own is stalled, so the names have to come from
+    # the rows as well as from the tasks — except under a scope, where a project with no
+    # matching task is another area's business and is not named at all.
+    names = set(project_rollup(scoped, now)) if wanted else set(rollup) | set(statuses)
+    stalled = sorted(
+        name
+        for name in names
+        if statuses.get(name, "active") == "active"
+        and rollup.get(name, _NO_TASKS)["next"] == 0
+        and rollup.get(name, _NO_TASKS)["waiting"] == 0
+        and rollup.get(name, _NO_TASKS)["hidden"] == 0
+    )
+
+    return GtdSummary(
+        today=today.isoformat(),
+        inbox=len(inbox),
+        inbox_oldest_entry=entries[0] if entries else None,
+        # A task due today is not also overdue: the boundary is strict on one side only.
+        overdue=sum(1 for t in scoped if t.get("due") and _local_day(t["due"]) < today),
+        due_today=sum(1 for t in scoped if t.get("due") and _local_day(t["due"]) == today),
+        next=sum(1 for t in scoped_visible if "next" in t.get("tags", [])),
+        waiting=sum(1 for t in scoped if "waiting" in t.get("tags", [])),
+        waiting_followup_due=sum(
+            1 for t in scoped if "waiting" in t.get("tags", []) and day_at_most(t, "scheduled")
+        ),
+        someday=sum(1 for t in scoped_visible if "someday" in t.get("tags", [])),
+        hidden=sum(1 for t in scoped if _is_hidden(t, now)),
+        tickler_returned_today=sum(
+            1 for t in scoped_visible if t.get("wait") and _local_day(t["wait"]) == today
+        ),
+        scheduled_passed=sum(
+            1
+            for t in scoped_visible
+            if "waiting" not in t.get("tags", []) and day_at_most(t, "scheduled")
+        ),
+        unclarified=sum(
+            1
+            for t in scoped_visible
+            if not t.get("project")
+            and t.get("tags")
+            and not {"next", "waiting", "someday"} & set(t["tags"])
+        ),
+        stalled_projects=stalled,
+        last_review=last_review or LastReview(),
+    )

@@ -47,6 +47,112 @@
         "title": "BrainstormItem",
         "type": "object"
       },
+      "GtdSummary": {
+        "properties": {
+          "due_today": {
+            "description": "Open tasks whose `due` day is today. Narrowed by `tag` where the summary was called with one.",
+            "title": "Due Today",
+            "type": "integer"
+          },
+          "hidden": {
+            "description": "Tasks parked in the tickler by a future `wait` date. Narrowed by `tag` where the summary was called with one.",
+            "title": "Hidden",
+            "type": "integer"
+          },
+          "inbox": {
+            "description": "Unprocessed tasks: no project, no tags, not hidden by a `wait` date. Never narrowed by `tag` \u2014 the inbox is untagged by definition.",
+            "title": "Inbox",
+            "type": "integer"
+          },
+          "inbox_oldest_entry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the oldest inbox task was captured, `YYYYMMDDTHHMMSSZ` (UTC), or null if the inbox is empty. An old entry is the finding, not the count.",
+            "title": "Inbox Oldest Entry"
+          },
+          "last_review": {
+            "$ref": "#/components/schemas/LastReview",
+            "description": "When reviews were last recorded."
+          },
+          "next": {
+            "description": "Visible tasks tagged `next`. Narrowed by `tag` where the summary was called with one.",
+            "title": "Next",
+            "type": "integer"
+          },
+          "overdue": {
+            "description": "Open tasks whose `due` day is before today. Narrowed by `tag` where the summary was called with one.",
+            "title": "Overdue",
+            "type": "integer"
+          },
+          "scheduled_passed": {
+            "description": "Visible tasks that are not `waiting` and whose `scheduled` day is today or earlier \u2014 they could have been started. Narrowed by `tag` where the summary was called with one.",
+            "title": "Scheduled Passed",
+            "type": "integer"
+          },
+          "someday": {
+            "description": "Visible tasks tagged `someday`. Narrowed by `tag` where the summary was called with one.",
+            "title": "Someday",
+            "type": "integer"
+          },
+          "stalled_projects": {
+            "description": "Names of active projects with no `next` action, nothing `waiting` and nothing parked in the tickler. Names only, no tasks.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Stalled Projects",
+            "type": "array"
+          },
+          "tickler_returned_today": {
+            "description": "Tasks whose `wait` date passed today, so they are back. Narrowed by `tag` where the summary was called with one.",
+            "title": "Tickler Returned Today",
+            "type": "integer"
+          },
+          "today": {
+            "description": "The server's current date, `YYYY-MM-DD`. Every day counter below is relative to it.",
+            "title": "Today",
+            "type": "string"
+          },
+          "unclarified": {
+            "description": "Visible tasks with tags but no project and none of `next`, `waiting` or `someday`: in no GTD list at all. Narrowed by `tag` where the summary was called with one.",
+            "title": "Unclarified",
+            "type": "integer"
+          },
+          "waiting": {
+            "description": "Open tasks tagged `waiting`, hidden ones included. Narrowed by `tag` where the summary was called with one.",
+            "title": "Waiting",
+            "type": "integer"
+          },
+          "waiting_followup_due": {
+            "description": "Tasks tagged `waiting` whose `scheduled` follow-up day is today or earlier. Narrowed by `tag` where the summary was called with one.",
+            "title": "Waiting Followup Due",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "today",
+          "inbox",
+          "overdue",
+          "due_today",
+          "next",
+          "waiting",
+          "waiting_followup_due",
+          "someday",
+          "hidden",
+          "tickler_returned_today",
+          "scheduled_passed",
+          "unclarified",
+          "stalled_projects",
+          "last_review"
+        ],
+        "title": "GtdSummary",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -93,6 +199,36 @@
           "description"
         ],
         "title": "InboxItem",
+        "type": "object"
+      },
+      "LastReview": {
+        "properties": {
+          "daily": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the last daily review was recorded, `YYYYMMDDTHHMMSSZ` (UTC), or null if none was.",
+            "title": "Daily"
+          },
+          "weekly": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the last weekly review was recorded, `YYYYMMDDTHHMMSSZ` (UTC), or null if none was.",
+            "title": "Weekly"
+          }
+        },
+        "title": "LastReview",
         "type": "object"
       },
       "PasswordChange": {
@@ -1945,6 +2081,83 @@
           }
         ],
         "summary": "Someday / maybe",
+        "tags": [
+          "gtd"
+        ]
+      }
+    },
+    "/gtd/summary": {
+      "get": {
+        "description": "Counters for a review or a reminder, from one pass over the open tasks: how much is in the inbox and how old it is, what is overdue or due today, how many next, waiting, someday and hidden tasks there are, which follow-ups are due, what is in no list, and which active projects are stalled. It carries no task descriptions, so it is safe to print anywhere. Fetch a list only when its counter is above zero.",
+        "operationId": "summary_gtd_summary_get",
+        "parameters": [
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. Every counter is narrowed except `inbox` and `inbox_oldest_entry`, which are always counted whole: an inbox item carries no tags by definition, so a scoped inbox count would always be zero.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. Every counter is narrowed except `inbox` and `inbox_oldest_entry`, which are always counted whole: an inbox item carries no tags by definition, so a scoped inbox count would always be zero.",
+              "title": "Tag"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GtdSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "GTD summary",
         "tags": [
           "gtd"
         ]

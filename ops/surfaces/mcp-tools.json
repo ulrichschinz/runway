@@ -1,5 +1,5 @@
 {
-  "count": 22,
+  "count": 23,
   "tools": [
     {
       "name": "annotate_task_tasks__uuid__annotate_post",
@@ -72,6 +72,10 @@
     {
       "name": "stop_task_tasks__uuid__stop_post",
       "summary": "Pause a task"
+    },
+    {
+      "name": "summary_gtd_summary_get",
+      "summary": "GTD summary"
     },
     {
       "name": "tickler_gtd_tickler_get",

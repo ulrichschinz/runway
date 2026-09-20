@@ -74,8 +74,8 @@ both.
 **Enforced**
 - `RULE-SEC-001` — every route in [`backend/app/routers/`](../backend/app/routers) declares its guard
   in [`rules/route-guards.toml`](../rules/route-guards.toml), the declaration must match the guard the
-  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-two
-  routes: twenty-five `user`, four `admin`, three `open`.
+  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-three
+  routes: twenty-six `user`, four `admin`, three `open`.
 - `RULE-GOV-001` — the live branch protection matches [`ops/github/ruleset.json`](../ops/github/ruleset.json),
   so the rule that an unverified commit cannot reach `main` is itself checked-in state.
 - `RULE-TEST-001` and `RULE-TEST-002` — the bootstrap branches, the last-admin refusal and the
@@ -83,8 +83,8 @@ both.
 
 **Asserted**
 - **The route-guard rule does not see the whole surface.** `tools/checks/route_guards.py` globs
-  `backend/app/routers/*.py` only. The served schema has **33** operations
-  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 32: the
+  `backend/app/routers/*.py` only. The served schema has **34** operations
+  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 33: the
   odd one is `GET /health` at [`backend/app/main.py:91-93`](../backend/app/main.py), declared on the
   app object. Harmless in itself, and the proof that the next route added there would need no guard
   declaration. `RISK-SEC-005`.

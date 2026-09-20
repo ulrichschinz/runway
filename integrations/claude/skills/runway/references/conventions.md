@@ -29,7 +29,7 @@ what they do.
 | inbox / next / waiting / someday / tickler | the matching gtd list, optional `tag` (repeatable, AND) |
 | overdue, done since, "in no list" | list tasks (`tasks`): `status`, `project`, `tag` (repeatable, AND), `due_before`/`due_after`/`completed_since` (YYYY-MM-DD), `limit` |
 | capture unclarified | inbox post (description, optional note) |
-| counters for reviews and hooks | gtd summary, if present |
+| counters for reviews and hooks | gtd summary (`gtd/summary`), optional `tag` |
 | hidden ticklers (future `wait`, soonest first) | gtd tickler (`gtd/tickler`) |
 | project plan | get plan / upsert plan |
 | change tags without reading first | modify task (`tasks/{uuid}`), `tags_add` / `tags_remove` |
@@ -73,8 +73,9 @@ When `runway_scope` is set, pass its tags as `tag` on **every** task list call, 
 areas' titles never reach the transcript. The project-name list takes no `tag` and returns
 every area's projects: derive the project names you need from a scoped task list instead of
 calling it. Do not list the inbox in a scoped repository; report its count instead (the
-summary operation gives it, where the server has one). Capture in a scoped repository stays
-untagged — it goes to the inbox, and adding the scope tag would mark it clarified.
+summary gives it, and a scoped summary names no other area's project). Capture in a scoped
+repository stays untagged — it goes to the inbox, and adding the scope tag would mark it
+clarified.
 
 ## Projects
 

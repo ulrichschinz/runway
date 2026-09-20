@@ -781,6 +781,81 @@ class TestTheBerlinZone:
             assert task_service._local_day("20260114T223000Z").isoformat() == "2026-01-14"
 
 
+class TestTheSummaryCounters:
+    """The summary against the real binary (D14, D17).
+
+    Everything it counts is Python over one export, so the fake covers the arithmetic. What
+    it cannot cover is what the binary puts in that export: whether a task with a `wait` an
+    hour in the past comes back as visible and still carries the `wait` the "returned today"
+    counter reads, and whether a bare `YYYY-MM-DD` due date lands on the day the counters
+    then call today. Both are the binary's date handling, and both are the whole counter.
+    """
+
+    @staticmethod
+    def _create(client, headers, **body):
+        r = client.post("/tasks", json=body, headers=headers)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    def test_hidden_and_returned_tickler_tasks_are_counted(self, real_client):
+        client, headers = real_client
+        now = datetime.now(UTC)
+        # Earlier today, never yesterday: just after local midnight `now - 1h` would be the
+        # previous day and "returned today" would rightly not count it.
+        returned = max(now - timedelta(hours=1), now.replace(hour=0, minute=0))
+        self._create(
+            client,
+            headers,
+            description="back in the inbox",
+            wait=returned.strftime("%Y-%m-%dT%H:%M"),
+        )
+        self._create(
+            client,
+            headers,
+            description="parked",
+            wait=(now + timedelta(days=30)).strftime("%Y-%m-%d"),
+        )
+        self._create(client, headers, description="plain")
+        r = client.get("/gtd/summary", headers=headers)
+        assert r.status_code == 200, r.text
+        summary = r.json()
+        assert summary["today"] == now.date().isoformat()
+        assert summary["hidden"] == 1
+        assert summary["tickler_returned_today"] == 1
+        # The returned one is visible again and untagged, so it is back in the inbox with
+        # the plain task; the parked one is not.
+        assert summary["inbox"] == 2
+        assert summary["inbox_oldest_entry"] and summary["inbox_oldest_entry"].endswith("Z")
+
+    def test_due_and_scheduled_days_are_the_binarys_own(self, real_client):
+        client, headers = real_client
+        today = datetime.now(UTC).date()
+        self._create(client, headers, description="due today", due=today.isoformat(), tags=["next"])
+        self._create(
+            client,
+            headers,
+            description="overdue",
+            due=(today - timedelta(days=3)).isoformat(),
+            tags=["next"],
+        )
+        self._create(
+            client,
+            headers,
+            description="chase",
+            scheduled=(today - timedelta(days=1)).isoformat(),
+            tags=["waiting"],
+        )
+        self._create(client, headers, description="stalls it", project="alpha")
+        summary = client.get("/gtd/summary", headers=headers).json()
+        assert summary["overdue"] == 1
+        assert summary["due_today"] == 1
+        assert summary["next"] == 2
+        assert summary["waiting"] == 1
+        assert summary["waiting_followup_due"] == 1
+        assert summary["scheduled_passed"] == 0, "a waiting-for belongs to its own counter"
+        assert summary["stalled_projects"] == ["alpha"]
+
+
 class TestWhatTheFakeClaims:
     """Each claim ``tests/fake_task.py`` makes about the binary, pinned against the binary.
 

@@ -1289,7 +1289,7 @@ residual_risks:
     statement: >
       The MCP endpoint itself is unauthenticated. `mount_http()` is mounted with no
       dependencies, so anyone who can reach /api/mcp may complete a handshake and list all
-      22 tools without presenting a credential. Every tool CALL is authenticated, by the
+      23 tools without presenting a credential. Every tool CALL is authenticated, by the
       REST endpoint the call is forwarded to — tests/unit/test_mcp_session.py pins that a
       call without a credential comes back 401 — so this discloses the tool inventory and
       nothing else. The inventory is published in README.md and ops/surfaces/mcp-tools.json
@@ -1400,7 +1400,7 @@ residual_risks:
       neither observed nor required to appear in rules/route-guards.toml. One route is outside
       it today: GET /health, declared on the app object in backend/app/main.py, unauthenticated,
       returning a fixed {"status": "ok"}. That route is harmless and it is also the proof of the
-      gap: the declaration file has thirty-two entries and the application serves thirty-three
+      gap: the declaration file has thirty-three entries and the application serves thirty-four
       routes, and nothing anywhere says so. The consequence is not the health check, it is the
       next route someone adds beside it — a guard forgotten there fails exactly the way
       RULE-SEC-001 was written to prevent, silently and for everybody, while the gate stays
