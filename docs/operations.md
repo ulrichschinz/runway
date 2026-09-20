@@ -10,6 +10,7 @@ push to main ──> Build and Deploy (deploy.yml)
                    └─ verify        (the same reusable workflow)
                         └─ build-and-push   needs: verify
                              └─ deploy      needs: build-and-push
+                                  └─ verify-deploy   needs: deploy
 ```
 
 **Nothing is built and nothing is shipped unless `verify` passes.** Before 2026-08-04 this pipeline went
@@ -45,6 +46,38 @@ tree plus that one file.
 `SSH_ORIGINAL_COMMAND` is ignored by the host. The commit sha in the `script:` line is not read by
 anything; it is kept because the action requires a non-empty script and it makes the connection legible in
 the host's auth log.
+
+### What says the deploy actually happened
+
+The `deploy` job is green when the SSH connection closed. That is a statement about the connection, not
+about production: the host script falls through silently for an image that carries no baked compose — six
+days of deploys did exactly that — and a container that starts and then dies leaves the previous one
+serving. Every earlier false claim about this service's production state was found by a human reading the
+host, never by anything failing.
+
+The `verify-deploy` job closes the narrowest, most valuable part of that gap with the only access CI has:
+HTTP to the public origin (`vars.RUNWAY_PUBLIC_URL`, defaulting to the literal). It asks the running server
+about itself, through [`GET /api/skill`](../backend/app/routers/skill.py) — the route that reports the
+commit its image was built from and the release record of the skill that image carries (ADR 0040):
+
+1. **Poll** `/api/skill` every ten seconds for up to six minutes, until `.server.commit` is the commit that
+   was just pushed. Until that matches, production is still serving the previous build.
+2. **Compare** `.skill.version` and `.skill.sha256` against
+   [`plugin.json`](../integrations/claude/.claude-plugin/plugin.json) and
+   [`ops/skill-release.json`](../ops/skill-release.json) at that commit.
+3. **Check** `/api/health` says `ok`.
+4. **Download** `/api/skill/runway.zip` and confirm it carries `runway/SKILL.md`.
+
+Steps 2 and 4 are there for a failure the gate structurally cannot see: it builds no image, so a
+`.dockerignore` or `Dockerfile` edit that stops admitting the skill tree passes every check and then answers
+**503** in production. The same comparison catches an image built from a different commit than the one
+being verified, and a deploy that never reached the host at all.
+
+What it does **not** do is read the host. `/opt/services/runway/docker-compose.yml` is still unobserved, so
+a compose that drifted — or a deploy that never rewrote it — looks exactly like one that did for as long as
+the containers already running answer correctly. `RISK-OPS-002` stays open, narrowed: "the deploy reported
+success" and "this commit is serving production" are now two separate claims, and the second one is
+checked.
 
 ### The correction of 2026-08-31
 
@@ -215,6 +248,12 @@ client.
 > **Do not read this as a standing guarantee.** It is one read on one date, and the sentence it replaces
 > was also true when it was written. Nothing continuously compares the host against the checked-in copy
 > (`RISK-OPS-002`); CI has no host access, so this paragraph starts ageing the moment it is committed.
+
+The healthcheck is Docker's opinion of one container. Since 2026-09-20 `/health` is also read from outside,
+once per deploy, by the `verify-deploy` job — after it has established that the commit answering is the one
+just pushed. That ordering is the whole point: a healthy container serving the *previous* image is what a
+silently failed deploy looks like, and a health probe alone cannot tell the two apart. See
+[*What says the deploy actually happened*](#what-says-the-deploy-actually-happened).
 
 ## The container clock
 

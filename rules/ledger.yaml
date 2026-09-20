@@ -1054,6 +1054,18 @@ residual_risks:
       baked file, which is exactly how this service spent six days shipping images without its
       configuration while every deploy reported success. A deploy that stops baking the file
       looks identical to one that never needed to.
+
+      Narrowed 2026-09-20. CI has no host access, but it does have HTTP, and the running
+      server can now answer for itself: the verify-deploy job in .github/workflows/deploy.yml
+      polls GET /api/skill until it reports the commit that was just pushed, then compares the
+      skill version and content hash it serves against plugin.json and ops/skill-release.json,
+      checks /api/health, and downloads the zip. So "the deploy reported success" and "this
+      commit is serving production" are no longer the same claim, and an image that lost the
+      skill tree to a .dockerignore edit — green in every gate, 503 in production — fails
+      here instead of being discovered by a user. What stays open is the host's own file:
+      nothing reads /opt/services/runway/docker-compose.yml, so a compose that drifted, or a
+      deploy that never rewrote it, still looks exactly like one that did as long as the
+      containers it already runs answer correctly.
     owner: maintainer
     re_open_trigger: "a check confirms after a deploy that the host's compose matches the deployed commit, or a documented topology claim is found to be false again"
     decision_record: docs/adr/0032-the-deploy-mechanism-correction.md

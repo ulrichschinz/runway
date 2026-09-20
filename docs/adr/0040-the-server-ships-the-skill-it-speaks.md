@@ -115,7 +115,33 @@ MCP.
 There is no changelog and no release checklist in this repository, and the second change order
 asked for a record. The running server is a better one than a file: it cannot drift from what is
 deployed, because it *is* what is deployed. `integrations/claude/README.md` now says so in the
-release section, and the post-deploy check (brief 0042) reads it.
+release section, and the post-deploy check ([brief 0044](../briefs/0044-the-post-deploy-check.md))
+reads it.
+
+## Decision 6 — the deploy verifies itself against that record (2026-09-20)
+
+Added after the route existed, in the commit that made the pipeline read it. `deploy.yml` gains a
+`verify-deploy` job, `needs: deploy`, which polls `GET /api/skill` until `.server.commit` is the
+pushed commit, then compares `.skill.version` and `.skill.sha256` against `plugin.json` and
+`ops/skill-release.json`, checks `/health`, and downloads the zip.
+
+This is the consumer Decision 1 was designed around, and it is why the record is a route rather than
+a file. The `deploy` job is green when an SSH connection closed; nothing before this asked production
+whether the commit it now serves is the one that was shipped, and the host's script falls through
+silently for an image that does not carry what it expects — which is how this service once spent six
+days deploying successfully into no change at all (ADR 0032, `RISK-OPS-002`).
+
+The hash comparison is the part no gate could replace. The gate builds no image, so an edit to
+`.dockerignore` or the Dockerfile that drops the skill tree is green everywhere and answers 503 on one
+route in production. The check for it has to run against a real image, and the first real image exists
+only after the deploy.
+
+**It is a job, not a gate rule.** It makes a statement about one host at one moment, and the thing it
+reads is not in this repository — `tools/checks/` holds checks that any clone can reproduce offline,
+and a rule whose result depends on whether a server was restarting would teach contributors that red
+is sometimes meaningless. It also cannot block anything: the deploy it verifies has already happened,
+so its only power is to say so loudly. That is the correct shape for it, and the reason `RISK-OPS-002`
+is narrowed rather than closed: nothing here reads the host's own compose file.
 
 ## Consequences
 
@@ -129,7 +155,7 @@ release section, and the post-deploy check (brief 0042) reads it.
   matches a particular server.
 - A `.dockerignore` that stops admitting the skill produces an image that passes every check and
   answers 503 on one route. The gate cannot see that — it builds no image (`RISK-OPS-002`) — so it
-  is caught in production, by the post-deploy check.
+  is caught in production, by the post-deploy check (Decision 6).
 - The zip is skill-only. When the plugin starts shipping hooks ([brief 0043](../briefs/0043-the-review-reminder.md)) the hash covers them
   too, and the zip still does not: a hook is a Claude Code plugin mechanism, and the zip is for
   clients that have no plugins.

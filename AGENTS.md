@@ -163,9 +163,9 @@ Recorded so a green gate is not mistaken for a broader guarantee:
 - **Frontend rendering, routing and gestures are untested** (`RISK-TEST-004`). The tests
   cover the pure logic where every shipped frontend defect actually was.
 - **The container test tier cannot run on arm64** (`RISK-TEST-001`); CI runs it.
-- **Nothing compares the deploy host against this repository** (`RISK-OPS-002`). Its compose
-  file is copied to `ops/deploy/docker-compose.yml` and matched on 2026-08-28; after that,
-  drift on either side is undetected. CI has no host access.
+- **Nothing compares the deploy host against this repository** (`RISK-OPS-002`). CI has no
+  host access; after a deploy it asks the running server which commit it serves. The host's
+  compose file is a copy, matched by hand on 2026-08-28.
 - **Transitive dependencies are not pinned as a whole.** One incident already came from
   that; `RULE-DEP-001` makes the gap survivable, not closed.
 - **What the gate does *not* hold** is written down section by section in
