@@ -1,6 +1,7 @@
 # Build context for backend/Dockerfile, whose context is the repository root rather than
-# ./backend. It needs exactly two things: the backend source tree, and the deployed compose
-# file that the image carries to the host at /opt/stack/docker-compose.yml.
+# ./backend. It needs exactly three things: the backend source tree, the deployed compose file
+# that the image carries to the host at /opt/stack/docker-compose.yml, and the Claude skill
+# the image serves from GET /skill.
 #
 # Written as deny-all-then-admit rather than a list of exclusions. An exclusion list is wrong
 # by default: every directory added to this repository afterwards is silently shipped into the
@@ -14,6 +15,18 @@
 
 !backend
 !ops/deploy/docker-compose.yml
+
+# The Claude skill the image serves from GET /skill (ADR 0040). Admitted file by file for the
+# same reason the rest of this file is deny-all: integrations/ also holds an installer, tests
+# and a README, and none of them belong in a runtime image.
+#
+# hooks/ is here although the zip does not carry it: since ADR 0041 the release hash covers
+# everything a plugin update delivers, so an image without the hooks would answer GET /skill
+# with a hash that does not match ops/skill-release.json — which is exactly what the
+# post-deploy check compares.
+!integrations/claude/skills
+!integrations/claude/hooks
+!integrations/claude/.claude-plugin/plugin.json
 
 # Re-excluded inside the admitted tree: build residue and local state that must never reach
 # an image, and would otherwise invalidate the layer cache on every run.

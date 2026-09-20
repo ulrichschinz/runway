@@ -526,6 +526,43 @@ printf '\nA sentence added without a version bump.\n' \
 	>>"$SANDBOX/integrations/claude/skills/runway/SKILL.md"
 expect_red "SURF-004" "tools/checks/skill.sh" "RULE-SURF-004"
 
+# --- RULE-SURF-004 — a hook changes and the version does not --------------------
+# The release hash covers hooks/ since ADR 0041, because a plugin update delivers the hook
+# and nothing else does. A hook edit with the same version reaches nobody who installed the
+# plugin — and, unlike stale skill text, a stale shell script is executed rather than read.
+printf '\n# a comment added without a version bump\n' \
+	>>"$SANDBOX/integrations/claude/hooks/runway-summary.sh"
+expect_red "SURF-004-hooks" "tools/checks/skill.sh" "RULE-SURF-004"
+
+# --- RULE-TEST-005 — the reminder hook stops being silent -----------------------
+# Its whole promise is negative: nothing on screen unless a review is due. Here it announces
+# itself before it has looked at anything, which is what a user would see at the top of every
+# session in every repository. The version IS raised and the record refreshed, so this arm
+# fails on the hook's behaviour alone and not on RULE-SURF-004 beside it.
+python3 - "$SANDBOX/integrations/claude/hooks/runway-summary.sh" <<'CHATTY'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = 'set -u\n'
+assert old in t, "the guard prologue was not found"
+p.write_text(t.replace(old, 'set -u\nprintf "runway: checking your reviews\\n"\n', 1))
+CHATTY
+python3 - "$SANDBOX/integrations/claude/.claude-plugin/plugin.json" <<'BUMP'
+import json
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+manifest = json.loads(p.read_text())
+major, minor, patch = (int(part) for part in manifest["version"].split("."))
+manifest["version"] = f"{major}.{minor}.{patch + 1}"
+p.write_text(json.dumps(manifest, indent=2) + "\n")
+BUMP
+(cd "$SANDBOX" && backend/.venv/bin/python tools/checks/skill_surface.py --update >/dev/null)
+expect_red "TEST-005-hook" "tools/checks/skill.sh" "RULE-TEST-005"
+
 # --- RULE-TEST-005 — install.sh stops refusing a symlinked target ---------------
 # The refusal that keeps ~/.claude from pointing into a working tree, deleted.
 python3 - "$SANDBOX/integrations/claude/install.sh" <<'UNREFUSE'

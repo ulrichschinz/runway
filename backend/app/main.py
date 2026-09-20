@@ -10,7 +10,7 @@ from app.config import cors_origin_list, settings
 from app.database import init_db
 from app.logging_setup import configure_logging, resolve_level
 from app.middleware import RequestIdMiddleware
-from app.routers import admin, auth, gtd, inbox, projects, tasks
+from app.routers import admin, auth, gtd, inbox, projects, skill, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,7 @@ app.include_router(gtd.router)
 app.include_router(projects.router)
 app.include_router(inbox.router)
 app.include_router(admin.router)
+app.include_router(skill.router)
 
 
 @app.get("/health", summary="Health check", description="Returns ok if the service is running.")

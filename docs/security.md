@@ -59,7 +59,7 @@ a passing test suite notices, and not something a reviewer reliably notices eith
 the evidence is one missing parameter default among thirty handlers.
 
 An `open` route must record a `reason`. A route anyone can reach is a decision, and a
-decision with no recorded reason cannot be told apart from an oversight. Three are open today:
+decision with no recorded reason cannot be told apart from an oversight. Five are open today:
 
 - `POST /auth/register` and `POST /auth/login` — the routes that create and exchange
   credentials cannot require them. Registration is additionally gated at runtime by the
@@ -68,6 +68,14 @@ decision with no recorded reason cannot be told apart from an oversight. Three a
   login page can hide the register option instead of inviting someone to type credentials and
   then refusing them. Discloses nothing that POSTing to `/auth/register` does not already
   reveal.
+- `GET /skill` and `GET /skill/runway.zip` — the Claude skill this build carries, and the
+  skill itself as a zip (ADR 0040). Both answer the same bytes to everyone: text from a public
+  repository, its content hash, and the commit sha of a build whose image tags are public too.
+  They are open because the consumers cannot send a header — a browser's `<a download>` on the
+  settings page — or do not yet hold a key — the post-deploy job, which reads `GET /skill` to
+  decide whether the build it just shipped is the one answering. Neither route takes a
+  parameter or reads a user's data, so there is nothing to vary by principal and nothing to
+  traverse.
 
 
 ## How an instance gets its first admin

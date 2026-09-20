@@ -138,6 +138,28 @@ route = "PUT /projects/{name}/status"
 guard = "user"
 
 [[routes]]
+route = "GET /skill"
+guard = "open"
+reason = """
+The skill this server ships is public: a public repository's text, its content hash, and the
+commit sha of a public build. The route exists to be read without a credential — the settings
+page links it from a browser, the post-deploy job checks it before anyone holds a key for the
+new build, and an operator debugging a version mismatch should not need one either. It
+discloses nothing about a user, and nothing about the deployment that the image tags in a
+public registry do not already say.
+"""
+
+[[routes]]
+route = "GET /skill/runway.zip"
+guard = "open"
+reason = """
+Same content, as a download. A plain `<a download>` cannot send a header, so requiring one
+would mean the settings page could not offer the file it points at. The bytes are the same
+for every caller and are built from a fixed file list with no parameter in the path, so there
+is nothing here to vary by principal and nothing to traverse.
+"""
+
+[[routes]]
 route = "GET /tasks"
 guard = "user"
 

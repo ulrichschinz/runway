@@ -48,6 +48,18 @@ COPY backend/taskrc_template.txt .
 COPY backend/log_config.json .
 COPY backend/app/ ./app/
 
+# The Claude skill, carried by the server that speaks it (ADR 0040). `GET /skill` reports the
+# version and content hash of exactly this copy, so a client can install the skill that
+# matches the API it is talking to instead of whatever `main` holds today. Three paths rather
+# than the whole directory: the skill text, the hooks the plugin ships (ADR 0041) and the
+# manifest that versions all of it are the release, and nothing else under integrations/
+# belongs in a runtime image. The hooks are hashed but not zipped — the hash is what the
+# post-deploy check compares against ops/skill-release.json, so it has to cover what a plugin
+# update delivers.
+COPY integrations/claude/skills/runway /app/integrations/claude/skills/runway
+COPY integrations/claude/hooks /app/integrations/claude/hooks
+COPY integrations/claude/.claude-plugin/plugin.json /app/integrations/claude/.claude-plugin/plugin.json
+
 RUN mkdir -p /app/data
 
 # The deployed compose file, carried by the image it belongs to.
@@ -66,6 +78,17 @@ RUN mkdir -p /app/data
 # reintroduce the drift this removes. It is static and secret-free; RULE-HYG-003 fails the
 # gate if a literal ever replaces a ${...} reference, and the host's .env is never touched.
 COPY ops/deploy/docker-compose.yml /opt/stack/docker-compose.yml
+
+# Which commit this image was built from, as the last layer so that every layer above it is
+# cacheable across builds. deploy.yml passes RUNWAY_COMMIT=${{ github.sha }}; a local build
+# leaves it unset and `GET /skill` then answers "dev".
+#
+# A file and not an environment variable: RULE-SURF-002 holds README.md and the settings
+# object together in both directions, and a build stamp is not configuration. Not
+# FastAPI(version=) either, which is a public surface RULE-SURF-001 snapshots — the sha would
+# make every build a schema change.
+ARG RUNWAY_COMMIT=unknown
+RUN printf '%s\n' "$RUNWAY_COMMIT" > /app/BUILD_COMMIT
 
 # --log-config replaces uvicorn's own loggers, so the access lines, the application lines and
 # any traceback all leave this container as JSON on one stream, through one redaction filter.

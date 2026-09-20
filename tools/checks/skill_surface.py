@@ -10,9 +10,10 @@ skipped. The snapshots are the reference, not the running app: RULE-SURF-001 alr
 them to the application, so this check stays static and fast.
 
 RULE-SURF-004 — plugin users receive an update only when `version` in plugin.json changes.
-`ops/skill-release.json` records the version and a content hash of `skills/`. A change to the
-skill with the same version is the failure; `./run surfaces --update` refreshes the record,
-and refuses to when the version was not raised.
+`ops/skill-release.json` records the version and a content hash of `skills/` **and `hooks/`**,
+the two directories the plugin delivers. A change to either with the same version is the
+failure; `./run surfaces --update` refreshes the record, and refuses to when the version was
+not raised.
 
     python tools/checks/skill_surface.py            check, print findings
     python tools/checks/skill_surface.py --update   rewrite ops/skill-release.json
@@ -29,6 +30,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "integrations" / "claude"
 SKILLS = PLUGIN / "skills"
+# What `claude plugin update` delivers, and therefore what the released hash covers. The
+# installer, the tests and the README are repository material: they never reach a user.
+RELEASED = ("hooks", "skills")
 MANIFEST = PLUGIN / ".claude-plugin" / "plugin.json"
 CONVENTIONS = SKILLS / "runway" / "references" / "conventions.md"
 RELEASE = ROOT / "ops" / "skill-release.json"
@@ -99,10 +103,22 @@ def check_references() -> list[str]:
 
 
 def _content_hash() -> str:
-    """sha256 over every file under skills/, path and bytes, in a stable order."""
+    """sha256 over every file the plugin delivers, path and bytes, in a stable order.
+
+    Paths are relative to `integrations/claude/`, so `skills/runway/SKILL.md` and
+    `hooks/runway-summary.sh` hash as the two different files they are. The backend copy in
+    `backend/app/services/skill_service.py` must produce the same digest for the same tree;
+    `backend/tests/unit/test_skill.py` runs both and compares.
+    """
     digest = hashlib.sha256()
-    for path in sorted(p for p in SKILLS.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
-        digest.update(path.relative_to(SKILLS).as_posix().encode() + b"\0")
+    files = [
+        path
+        for name in RELEASED
+        for path in (PLUGIN / name).rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts
+    ]
+    for path in sorted(files, key=lambda p: p.relative_to(PLUGIN).as_posix()):
+        digest.update(path.relative_to(PLUGIN).as_posix().encode() + b"\0")
         digest.update(path.read_bytes() + b"\0")
     return digest.hexdigest()
 
@@ -127,8 +143,8 @@ def check_release() -> list[str]:
         return [f"RULE-SURF-004|plugin version {version} is lower than the released {recorded['version']}"]
     if content != recorded["sha256"] and version == recorded["version"]:
         return [
-            f"RULE-SURF-004|integrations/claude/skills/ changed but the plugin version is still "
-            f"{version} — plugin users would never receive it; {fix}"
+            f"RULE-SURF-004|integrations/claude/skills/ or hooks/ changed but the plugin version "
+            f"is still {version} — plugin users would never receive it; {fix}"
         ]
     return [f"RULE-SURF-004|ops/skill-release.json records {recorded['version']}, the plugin is {version} — run `./run surfaces --update`"]
 

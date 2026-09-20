@@ -380,9 +380,18 @@ Four things are queued behind it, none blocking, in the order they should be tak
 3. **`SHIM-SEC-006`**, expiring 2026-11-25 — decide from `audit.db`, counting only rows written after the
    2026-09-18 deploy, for the reason in the banner.
 
-4. **The Claude skill's follow-up** ([ADR 0035](../adr/0035-the-skill-lives-with-the-api-it-drives.md)) — a
-   download route serving the skill as a zip that matches the running server version, and a "Connect Claude"
-   block on the settings page (MCP command, skill download, standing rule to copy). Not started.
+4. ~~**The Claude skill's follow-up**~~ ([ADR 0035](../adr/0035-the-skill-lives-with-the-api-it-drives.md)) —
+   built 2026-09-20 on `skill-distribution`, and deployed with that pull request rather than before it.
+   `GET /api/skill` and `GET /api/skill/runway.zip` serve the skill the running build carries
+   (`a4a43a2`, [ADR 0040](../adr/0040-the-server-ships-the-skill-it-speaks.md),
+   [brief 0041](../briefs/0041-the-server-ships-the-skill.md)); the settings page has the **Connect Claude**
+   card (`b90a0ed`, [brief 0042](../briefs/0042-connect-claude-from-the-settings-page.md)); the plugin ships
+   a SessionStart review reminder that was never part of the original follow-up (`22965f8`,
+   [ADR 0041](../adr/0041-the-plugin-ships-a-review-reminder.md),
+   [brief 0043](../briefs/0043-the-review-reminder.md)); and the deploy now asks production which commit it
+   serves (`968770d`, [brief 0044](../briefs/0044-the-post-deploy-check.md)). Because there is no changelog
+   and no release checklist, `GET /api/skill` is also the answer to the second change order's request for a
+   release record.
 
 **Dependabot is cleared as of 2026-09-19.** The small bumps were merged or taken by hand with their locks
 (#44, #45); node 26, pinia 4 and python 3.14 were closed as deferred major moves. Python bumps need

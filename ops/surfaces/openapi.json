@@ -555,6 +555,21 @@
         "title": "RoleUpdate",
         "type": "object"
       },
+      "ServerBuild": {
+        "description": "Which build of the server is answering.",
+        "properties": {
+          "commit": {
+            "description": "The commit this image was built from, or 'dev' when it was not built by the deploy workflow.",
+            "title": "Commit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "commit"
+        ],
+        "title": "ServerBuild",
+        "type": "object"
+      },
       "SiteSettings": {
         "properties": {
           "allow_registration": {
@@ -566,6 +581,56 @@
           "allow_registration"
         ],
         "title": "SiteSettings",
+        "type": "object"
+      },
+      "SkillInfo": {
+        "description": "What `GET /skill` answers with.",
+        "properties": {
+          "download": {
+            "description": "Path to the zip, as a client behind the /api prefix reaches it.",
+            "title": "Download",
+            "type": "string"
+          },
+          "server": {
+            "$ref": "#/components/schemas/ServerBuild"
+          },
+          "skill": {
+            "$ref": "#/components/schemas/SkillRelease"
+          }
+        },
+        "required": [
+          "skill",
+          "server",
+          "download"
+        ],
+        "title": "SkillInfo",
+        "type": "object"
+      },
+      "SkillRelease": {
+        "description": "Which release of the Claude skill this server carries.",
+        "properties": {
+          "name": {
+            "description": "The skill's directory name inside the zip \u2014 always 'runway'.",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Content hash of the skill tree, identical to ops/skill-release.json.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "version": {
+            "description": "The plugin version, from integrations/claude/.claude-plugin/plugin.json.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "sha256"
+        ],
+        "title": "SkillRelease",
         "type": "object"
       },
       "Task": {
@@ -3010,6 +3075,52 @@
         "summary": "Set a project's status",
         "tags": [
           "projects"
+        ]
+      }
+    },
+    "/skill": {
+      "get": {
+        "description": "Which release of the runway Claude skill this server carries, its content hash, the commit the image was built from, and where to download it. Unauthenticated: the answer is public repository content plus a public commit sha.",
+        "operationId": "skill_info_skill_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "description": "This build does not carry the skill (`SkillNotBundled`)."
+          }
+        },
+        "summary": "The skill this server ships",
+        "tags": [
+          "skill"
+        ]
+      }
+    },
+    "/skill/runway.zip": {
+      "get": {
+        "description": "The skill tree as a zip, with one directory `runway/` inside it, matching the version this server speaks. Deterministic: the same content always produces the same bytes, and the ETag is the content hash. Unauthenticated, so a browser link and a keyless curl both work.",
+        "operationId": "skill_zip_skill_runway_zip_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {}
+            },
+            "description": "The skill, zipped."
+          },
+          "503": {
+            "description": "This build does not carry the skill (`SkillNotBundled`)."
+          }
+        },
+        "summary": "Download the skill",
+        "tags": [
+          "skill"
         ]
       }
     },

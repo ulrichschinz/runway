@@ -89,7 +89,7 @@ expand → migrate → switch → contract — not a changelog line.
 
 | Surface | Promise |
 |---|---|
-| REST API (38 routes) | Breaking changes go through the migration pattern. The served OpenAPI schema is snapshotted in `ops/surfaces/openapi.json`. |
+| REST API (40 routes) | Breaking changes go through the migration pattern. The served OpenAPI schema is snapshotted in `ops/surfaces/openapi.json`. |
 | **MCP tools (27)** | Allowlist: tags `tasks`, `gtd`, `projects`, `inbox`, plus `health` and `me` (ADR 0037); auth/admin are REST-only. Tool names are FastAPI **operation ids** — function, path, method (`create_task_tasks_post`). Observed at boot; snapshot in `ops/surfaces/mcp-tools.json`, enforced by `RULE-SURF-001`. Renaming an exposed route's function renames its tool: a breaking change. Transport is Streamable HTTP at `/mcp` (`/api/mcp` externally); for eleven weeks no client could connect, so `backend/tests/unit/test_mcp_session.py` opens a real session (ADR 0033). |
 | Auth: `Authorization: Bearer <jwt>`, `X-Api-Key`, and Bearer-as-API-key everywhere | The third form is `SHIM-SEC-006`, a dated compatibility shim in `rules/shims.yaml`, not a design. `RULE-SEC-002` fails the gate when it expires. |
 | SQLite schema | Forward-only, additive. Migrations run in `init_db()` on every start, and the migrated schema is snapshotted in `ops/surfaces/db-schema.sql`. |
@@ -163,9 +163,9 @@ Recorded so a green gate is not mistaken for a broader guarantee:
 - **Frontend rendering, routing and gestures are untested** (`RISK-TEST-004`). The tests
   cover the pure logic where every shipped frontend defect actually was.
 - **The container test tier cannot run on arm64** (`RISK-TEST-001`); CI runs it.
-- **Nothing compares the deploy host against this repository** (`RISK-OPS-002`). Its compose
-  file is copied to `ops/deploy/docker-compose.yml` and matched on 2026-08-28; after that,
-  drift on either side is undetected. CI has no host access.
+- **Nothing compares the deploy host against this repository** (`RISK-OPS-002`). CI has no
+  host access; after a deploy it asks the running server which commit it serves. The host's
+  compose file is a copy, matched by hand on 2026-08-28.
 - **Transitive dependencies are not pinned as a whole.** One incident already came from
   that; `RULE-DEP-001` makes the gap survivable, not closed.
 - **What the gate does *not* hold** is written down section by section in

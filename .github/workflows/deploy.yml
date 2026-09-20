@@ -73,7 +73,8 @@ jobs:
       # /opt/stack/docker-compose.yml, and a file can only enter an image from inside its own
       # build context. Narrowing the context back to ./backend would silently drop the baked
       # compose and return this service to shipping images without its configuration.
-      # .dockerignore at the root keeps the context to the backend tree plus that one file.
+      # .dockerignore at the root keeps the context to the backend tree, that one file, and
+      # the Claude skill the image serves (ADR 0040).
       - name: Build and push backend
         uses: docker/build-push-action@v7
         with:
@@ -81,6 +82,11 @@ jobs:
           file: ./backend/Dockerfile
           push: true
           platforms: linux/amd64
+          # Baked into /app/BUILD_COMMIT and reported by GET /skill, so a reader of the
+          # running server can tell which commit is answering — the one fact that lets the
+          # skill version it serves be checked against this repository (ADR 0040).
+          build-args: |
+            RUNWAY_COMMIT=${{ github.sha }}
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository }}-backend:latest
             ${{ env.REGISTRY }}/${{ github.repository }}-backend:${{ github.sha }}
@@ -132,3 +138,110 @@ jobs:
           # compose from raw.githubusercontent at this commit. No such script was ever
           # installed, and the sha below was never read by anything. See ADR 0032.
           script: deploy ${{ github.sha }}
+
+  # The deploy job above reports success when the SSH connection closed, which is not the
+  # same thing as production running this commit. The host script falls through silently for
+  # an image that carries no baked compose — that is how this service spent six days shipping
+  # images without its configuration while every deploy was green (RISK-OPS-002) — and a
+  # container that starts and then dies leaves the previous one serving. Nothing here has
+  # host access and nothing here builds an image, so this job asks the only witness CI can
+  # reach: the running server, over HTTP, about itself.
+  #
+  # It reads GET /api/skill, which answers with the commit the image was built from and the
+  # release record of the skill that image carries (ADR 0040). Three questions get an answer
+  # they did not have before: is production running THIS commit, is the skill it hands out
+  # the one this repository recorded, and did the image lose the skill tree to a
+  # .dockerignore edit — a change that passes every gate and then answers 503 in production.
+  verify-deploy:
+    needs: deploy
+    runs-on: ubuntu-latest
+    # The deploy job above records the host's forced command as taking seconds and caps it at
+    # five minutes for a cold pull. Eight leaves the poll below its full six and still bounds
+    # a server that never comes back, rather than holding a runner to GitHub's own limit.
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    env:
+      # A repository variable, not a secret: the public origin of this service. The literal
+      # is the fallback so that a fork or a fresh clone needs no configuration to be correct
+      # about where production is.
+      RUNWAY_URL: ${{ vars.RUNWAY_PUBLIC_URL || 'https://runway.agentic-reach.com' }}
+
+    steps:
+      # For the two files the running server is compared against. Depth 1 is enough: this
+      # reads the working tree at this commit and never its history.
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: The running server answers for this commit
+        # POSIX sh, not bash: this step is short enough to be read in full by whoever it
+        # fails on, and `sh` is what it is driven with by hand — extracted from this file and
+        # run against a stub `curl`, which is how every branch below was watched to fail.
+        shell: sh
+        run: |
+          set -eu
+
+          base=${RUNWAY_URL%/}
+
+          # The deploy is asynchronous from here: the SSH command returned when the host
+          # STARTED the pull, and a container still has to come up behind it. Six minutes is
+          # the same order of headroom the deploy job gives the host's own step. Every
+          # failure of this loop is a real one — either the deploy did not reach the host, or
+          # the new container is not the one serving.
+          deadline=$(( $(date +%s) + 360 ))
+          commit=""
+          skill=""
+          while :; do
+            skill=$(curl -fsS -m 10 "$base/api/skill" || true)
+            commit=$(printf '%s\n' "$skill" | jq -r '.server.commit // ""' 2>/dev/null || true)
+            if [ "$commit" = "$GITHUB_SHA" ]; then
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              printf 'verify-deploy: %s still answers for "%s" after six minutes; expected %s\n' \
+                "$base" "$commit" "$GITHUB_SHA" >&2
+              printf 'The deploy reported success. Read docs/operations.md#the-deploy-mechanism.\n' >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+          # Now that it is this commit answering, what it hands out has to be what this
+          # commit recorded. The hash covers everything a plugin update delivers, so this
+          # also fails when the image was built without part of the skill tree — the .zip
+          # and the release record would otherwise be confidently wrong.
+          want_version=$(jq -r .version integrations/claude/.claude-plugin/plugin.json)
+          want_sha=$(jq -r .sha256 ops/skill-release.json)
+          got_version=$(printf '%s\n' "$skill" | jq -r '.skill.version // ""')
+          got_sha=$(printf '%s\n' "$skill" | jq -r '.skill.sha256 // ""')
+
+          if [ "$got_version" != "$want_version" ]; then
+            printf 'verify-deploy: serves skill %s, this commit records %s\n' \
+              "$got_version" "$want_version" >&2
+            exit 1
+          fi
+          if [ "$got_sha" != "$want_sha" ]; then
+            printf 'verify-deploy: serves skill content %s, this commit records %s\n' \
+              "$got_sha" "$want_sha" >&2
+            exit 1
+          fi
+
+          # The skill routes are open and read no database. /health is the narrowest thing
+          # that says the rest of the application came up with them.
+          status=$(curl -fsS -m 10 "$base/api/health" | jq -r '.status // ""')
+          if [ "$status" != "ok" ]; then
+            printf 'verify-deploy: /api/health said "%s", not "ok"\n' "$status" >&2
+            exit 1
+          fi
+
+          # A deterministic archive is still only useful if it has the skill in it. An
+          # image that lost the tree answers 503 here, which -f turns into a failure.
+          curl -fsS -m 30 -o skill.zip "$base/api/skill/runway.zip"
+          if ! unzip -l skill.zip | grep -q 'runway/SKILL.md'; then
+            printf 'verify-deploy: the downloaded zip carries no runway/SKILL.md\n' >&2
+            unzip -l skill.zip >&2
+            exit 1
+          fi
+
+          printf 'Verified in production: commit %s, skill %s (%s).\n' \
+            "$commit" "$got_version" "$got_sha" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

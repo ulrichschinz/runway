@@ -33,8 +33,10 @@ INSTALL="$REPO/integrations/claude/install.sh"
 export CLAUDE_CONFIG_DIR="$WORK/config"
 TARGET="$CLAUDE_CONFIG_DIR/skills/runway"
 
-# An uncommitted edit must never reach the installed copy.
+# An uncommitted edit must never reach the installed copy — neither of the skill nor of the
+# hook, which is a script the user's own session runs.
 printf '\nUNCOMMITTED EDIT\n' >>"$REPO/integrations/claude/skills/runway/SKILL.md"
+printf '\n# UNCOMMITTED EDIT\n' >>"$REPO/integrations/claude/hooks/runway-summary.sh"
 
 sh "$INSTALL" >/dev/null 2>&1 || fail "first install exited $?"
 [ -f "$TARGET/SKILL.md" ] || fail "installed no SKILL.md"
@@ -42,6 +44,13 @@ if grep -q 'UNCOMMITTED EDIT' "$TARGET/SKILL.md" 2>/dev/null; then
 	fail "installed an uncommitted edit — it must install the committed state"
 fi
 [ -f "$TARGET/.installed" ] || fail "wrote no .installed stamp"
+
+# The SessionStart reminder (ADR 0041): beside skills/, executable, committed state only.
+HOOK_TARGET="$CLAUDE_CONFIG_DIR/runway-summary.sh"
+[ -x "$HOOK_TARGET" ] || fail "installed no executable runway-summary.sh"
+if grep -q 'UNCOMMITTED EDIT' "$HOOK_TARGET" 2>/dev/null; then
+	fail "installed an uncommitted edit of the hook"
+fi
 
 # --check: 0 when the installed copy is what the ref holds, 1 when it is not.
 sh "$INSTALL" --check >/dev/null 2>&1 || fail "--check after install exited $?, expected 0"

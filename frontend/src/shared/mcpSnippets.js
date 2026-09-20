@@ -21,6 +21,22 @@ export function mcpUrl(origin) {
 }
 
 /**
+ * The one command that registers this deployment with Claude Code.
+ *
+ * It takes no key — deliberately. The earlier snippet form substituted the user's own key
+ * into a JSON block, which put a live credential into a clipboard, into screenshots, and
+ * into `~/.claude.json` in plain text. Single quotes keep `${RUNWAY_API_KEY}` a placeholder
+ * that the shell expands per call, so rotating the key is one edit to `~/.zshenv`.
+ *
+ * `--scope user` because a GTD system is not per-repository, and the skill's permission
+ * rules are written against the server name `runway`.
+ */
+export function mcpAddCommand(origin) {
+  return `claude mcp add --scope user --transport http runway ${mcpUrl(origin)} \\
+  --header 'X-Api-Key: \${RUNWAY_API_KEY}'`
+}
+
+/**
  * Client configuration snippets, keyed by the tab that shows them.
  *
  * `X-Api-Key` is used rather than `Authorization: Bearer` because both work and the Bearer
@@ -31,18 +47,9 @@ export function mcpSnippets(origin, apiKey) {
   const key = apiKey ?? '<your-api-key>'
 
   return {
-    // Native remote-server support: transport type plus static headers.
-    'Claude Code': `{
-  "mcpServers": {
-    "runway": {
-      "type": "http",
-      "url": "${url}",
-      "headers": {
-        "X-Api-Key": "${key}"
-      }
-    }
-  }
-}`,
+    // Claude Code registers a remote server from the command line; see mcpAddCommand for
+    // why this tab is a command with a placeholder rather than a config with a key.
+    'Claude Code': mcpAddCommand(origin),
     // Claude Desktop's config takes a command, not a URL, so a remote server is reached
     // through the mcp-remote wrapper. The key goes in `env` and is referenced, so the
     // header argument carries no space — which some shells and Windows handle badly.
