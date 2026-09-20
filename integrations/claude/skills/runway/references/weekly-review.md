@@ -48,7 +48,9 @@ completed in the last seven days: list tasks with `status=completed` and
 
 ## Close
 
-Record the review (server timestamp if supported, otherwise the repository's own marker).
+Record the review: POST `gtd/review` with kind `weekly` and, if `runway_scope` is declared,
+scope = its tags sorted and joined with `+` (e.g. `@work+ar`; the server canonicalizes). If
+the repository has its own marker as well, follow its instructions too.
 Finish with a short tally: inbox, projects reviewed, stalled fixed, waiting followed up,
 someday activated or dropped — and the two or three things the user named as most
 important for the coming week.
@@ -61,8 +63,9 @@ leave it at that.
 
 ## Reset — after a gap
 
-When the last review is more than ten days ago, do not start with the full weekly review
-and do not comment on the gap. A system that greets the user with guilt gets closed.
+When the last `weekly` review in `last_review` is more than ten days ago, do not start with
+the full weekly review and do not comment on the gap. A `null` there means none was ever
+recorded, not that there was a gap: judge by the overdue share instead. A system that greets the user with guilt gets closed.
 Offer a fifteen-minute reset; numbers only, neutral tone:
 
 1. **Inbox**: clarify what is quick, move the rest to one honest pass later.
@@ -71,5 +74,5 @@ Offer a fifteen-minute reset; numbers only, neutral tone:
 3. **One `next` action per active project.** Projects nobody wants to think about go on
    hold.
 
-Then record a review and suggest a fixed weekly slot in the calendar. A calendar
+Then record a `weekly` review and suggest a fixed weekly slot in the calendar. A calendar
 appointment is the most reliable reminder there is, and it needs no infrastructure.

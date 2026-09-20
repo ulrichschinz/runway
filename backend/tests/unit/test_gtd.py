@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 
+from tests.conftest import register_user
+
 # A `wait` far past the fake's clock (2026-09-19T10:00:00Z), so the task is hidden.
 HIDDEN = "2026-10-01"
 
@@ -53,6 +55,7 @@ class TestViews:
             "someday",
             "tickler",
             "summary",
+            "review",
             "projects",
             "projects/p",
         )
@@ -438,3 +441,133 @@ class TestSummaryScoping:
     @pytest.mark.parametrize("tag", ["-next", "", "a,b", "1abc"])
     def test_a_refused_tag_is_a_400(self, client, auth, tag):
         assert client.get("/gtd/summary", params={"tag": tag}, headers=auth).status_code == 400
+
+
+class TestReviewTimestamps:
+    """When a review last happened: the one piece of GTD state Taskwarrior cannot hold.
+
+    Without it an agent has to guess from the newest `modified` date among the tasks, which
+    answers a different question — touching one task is not reviewing the lists — and quietly
+    says "reviewed today" to a user who has not looked at anything for three weeks.
+    """
+
+    def test_a_recorded_review_comes_back(self, client, auth):
+        posted = client.post("/gtd/review", json={"kind": "daily"}, headers=auth)
+        assert posted.status_code == 201, posted.text
+        assert posted.json()["kind"] == "daily"
+        assert posted.json()["scope"] == ""
+        assert client.get("/gtd/review", headers=auth).json() == [posted.json()]
+
+    def test_nothing_recorded_is_an_empty_list_not_an_error(self, client, auth):
+        assert client.get("/gtd/review", headers=auth).json() == []
+
+    def test_reviewed_at_is_taskwarriors_own_stamp_format(self, client, auth):
+        """The summary carries this next to `entry` and `wait`, which come from the binary."""
+        at = client.post("/gtd/review", json={"kind": "weekly"}, headers=auth).json()["reviewed_at"]
+        assert datetime.strptime(at, "%Y%m%dT%H%M%SZ").tzinfo is None  # parses, and is UTC by form
+
+    def test_recording_the_same_kind_again_moves_the_timestamp_without_adding_a_row(
+        self, client, auth
+    ):
+        first = client.post("/gtd/review", json={"kind": "daily"}, headers=auth).json()
+        second = client.post("/gtd/review", json={"kind": "daily"}, headers=auth).json()
+        rows = client.get("/gtd/review", headers=auth).json()
+        assert len(rows) == 1
+        assert rows[0]["reviewed_at"] == second["reviewed_at"] >= first["reviewed_at"]
+
+    def test_the_two_kinds_are_separate_rows(self, client, auth):
+        client.post("/gtd/review", json={"kind": "daily"}, headers=auth)
+        client.post("/gtd/review", json={"kind": "weekly"}, headers=auth)
+        assert {r["kind"] for r in client.get("/gtd/review", headers=auth).json()} == {
+            "daily",
+            "weekly",
+        }
+
+    def test_another_user_never_sees_the_review(self, client, auth):
+        """Cross-user isolation, asserted rather than assumed: every other row in this
+        database is scoped by username, and a review timestamp leaking would tell one user
+        how another works."""
+        client.post("/gtd/review", json={"kind": "daily"}, headers=auth)
+        bob = register_user(client, "bob")
+        bobs = {"Authorization": f"Bearer {bob['token']}"}
+        assert client.get("/gtd/review", headers=bobs).json() == []
+        client.post("/gtd/review", json={"kind": "weekly"}, headers=bobs)
+        assert [r["kind"] for r in client.get("/gtd/review", headers=auth).json()] == ["daily"]
+
+    def test_it_requires_authentication(self, client, registered):
+        assert client.get("/gtd/review").status_code == 401
+        assert client.post("/gtd/review", json={"kind": "daily"}).status_code == 401
+
+    @pytest.mark.parametrize("kind", ["monthly", "", "DAILY"])
+    def test_a_kind_the_server_does_not_know_is_a_422(self, client, auth, kind):
+        assert client.post("/gtd/review", json={"kind": kind}, headers=auth).status_code == 422
+
+
+class TestReviewScope:
+    """A review covers what it covered. A repository that reviews its own area has not
+    reviewed the whole system, and one key for both would say otherwise (D16)."""
+
+    def test_the_scope_key_is_canonical_however_it_arrives(self, client, auth):
+        posted = client.post(
+            "/gtd/review", json={"kind": "daily", "scope": "ar+@work"}, headers=auth
+        )
+        assert posted.json()["scope"] == "@work+ar"
+
+    def test_the_same_scope_in_another_order_updates_the_same_row(self, client, auth):
+        client.post("/gtd/review", json={"kind": "daily", "scope": "ar+@work"}, headers=auth)
+        client.post("/gtd/review", json={"kind": "daily", "scope": "@work+ar"}, headers=auth)
+        client.post("/gtd/review", json={"kind": "daily", "scope": "@work+ar+ar"}, headers=auth)
+        rows = client.get("/gtd/review", headers=auth).json()
+        assert [(r["kind"], r["scope"]) for r in rows] == [("daily", "@work+ar")]
+
+    def test_a_scoped_review_is_a_different_row_from_the_unscoped_one(self, client, auth):
+        client.post("/gtd/review", json={"kind": "daily"}, headers=auth)
+        client.post("/gtd/review", json={"kind": "daily", "scope": "ar"}, headers=auth)
+        rows = client.get("/gtd/review", headers=auth).json()
+        assert sorted(r["scope"] for r in rows) == ["", "ar"]
+
+    @pytest.mark.parametrize(
+        "scope", ["-x", "a++b", "+ar", "ar+", "a b", "a\nb", "+".join("abcdefghijk")]
+    )
+    def test_a_scope_that_is_not_a_set_of_tags_is_a_400(self, client, auth, scope):
+        r = client.post("/gtd/review", json={"kind": "daily", "scope": scope}, headers=auth)
+        assert r.status_code == 400, r.text
+
+    def test_a_scope_longer_than_the_field_allows_is_a_422(self, client, auth):
+        body = {"kind": "daily", "scope": "a" * 201}
+        assert client.post("/gtd/review", json=body, headers=auth).status_code == 422
+
+
+class TestSummaryLastReview:
+    """The summary answers "how current are these lists" in the same call as the counters,
+    because a reminder that needs two calls to decide whether to speak will not be written."""
+
+    def test_the_summary_reports_the_unscoped_review(self, client, auth):
+        assert client.get("/gtd/summary", headers=auth).json()["last_review"] == {
+            "daily": None,
+            "weekly": None,
+        }
+        at = client.post("/gtd/review", json={"kind": "weekly"}, headers=auth).json()["reviewed_at"]
+        assert client.get("/gtd/summary", headers=auth).json()["last_review"] == {
+            "daily": None,
+            "weekly": at,
+        }
+
+    def test_the_summary_matches_its_tag_list_to_the_scope_key(self, client, auth):
+        """`?tag=ar&tag=@work` and the stored `@work+ar` are the same scope, whichever order
+        the caller sends — and `?tag=ar` alone is a smaller scope, which was never reviewed."""
+        at = client.post(
+            "/gtd/review", json={"kind": "daily", "scope": "ar+@work"}, headers=auth
+        ).json()["reviewed_at"]
+        both = [("tag", "ar"), ("tag", "@work")]
+        assert client.get("/gtd/summary", params=both, headers=auth).json()["last_review"] == {
+            "daily": at,
+            "weekly": None,
+        }
+        narrower = client.get("/gtd/summary", params={"tag": "ar"}, headers=auth).json()
+        assert narrower["last_review"] == {"daily": None, "weekly": None}
+
+    def test_an_unscoped_review_does_not_answer_for_a_scope(self, client, auth):
+        client.post("/gtd/review", json={"kind": "daily"}, headers=auth)
+        scoped = client.get("/gtd/summary", params={"tag": "ar"}, headers=auth).json()
+        assert scoped["last_review"]["daily"] is None

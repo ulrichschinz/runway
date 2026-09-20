@@ -1,4 +1,5 @@
 import re
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -306,6 +307,30 @@ class GtdSummary(BaseModel):
         "nothing parked in the tickler. Names only, no tasks."
     )
     last_review: LastReview = Field(description="When reviews were last recorded.")
+
+
+# A review timestamp: the one piece of GTD state the task store cannot hold. "When did I last
+# look at all of this" is a fact about the reviewing, not about any task, and deriving it from
+# the newest `modified` date — which is what an agent has to do without this — answers a
+# different question, because touching one task is not reviewing the lists.
+_D_SCOPE = (
+    "Which part of the system the review covered: the scope tags, sorted and joined with `+` "
+    "(`@work+ar`), or empty for the whole system. Order and duplicates do not matter; the "
+    "server returns the canonical form, which is what the summary's `tag` resolves to."
+)
+
+
+class ReviewCreate(BaseModel):
+    kind: Literal["daily", "weekly"] = Field(
+        description="`daily` for the short daily pass, `weekly` for the full weekly review."
+    )
+    scope: str = Field(default="", max_length=200, description=_D_SCOPE)
+
+
+class Review(BaseModel):
+    kind: str = Field(description="`daily` or `weekly`.")
+    scope: str = Field(description=_D_SCOPE)
+    reviewed_at: str = Field(description="When this review was recorded, `YYYYMMDDTHHMMSSZ` (UTC).")
 
 
 class ApiKeyInfo(BaseModel):

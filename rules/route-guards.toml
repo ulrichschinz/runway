@@ -90,6 +90,14 @@ route = "GET /gtd/projects/{name}"
 guard = "user"
 
 [[routes]]
+route = "GET /gtd/review"
+guard = "user"
+
+[[routes]]
+route = "POST /gtd/review"
+guard = "user"
+
+[[routes]]
 route = "GET /gtd/someday"
 guard = "user"
 

@@ -41,6 +41,8 @@ denied. Tool names are `mcp__runway__<operation id>`. Merge these entries into t
       "mcp__runway__project_tasks_gtd_projects__name__get",
       "mcp__runway__tickler_gtd_tickler_get",
       "mcp__runway__summary_gtd_summary_get",
+      "mcp__runway__last_reviews_gtd_review_get",
+      "mcp__runway__record_review_gtd_review_post",
       "mcp__runway__get_plan_projects_plans__name__get"
     ],
     "ask": [

@@ -74,9 +74,10 @@ Overdue items get exactly one of three outcomes: done, a new honest date, or no 
 
 ## 4. Close
 
-- Record the review on the server if it supports review timestamps. Otherwise, if the
-  repository has its own marker for reviews, follow its instructions; if neither exists,
-  do nothing — do not invent a state file.
+- Record the review: POST `gtd/review` with kind `daily` and, if `runway_scope` is
+  declared, scope = its tags sorted and joined with `+` (e.g. `@work+ar`; the server
+  canonicalizes). Pass the same tags as `tag` to the summary, so `last_review` matches.
+  If the repository has its own marker for reviews as well, follow its instructions too.
 - End with the focus list and nothing else. No task dump into journals or logs; at most
   counters ("Inbox 0, 2 überfällige geklärt, Fokus 3").
 

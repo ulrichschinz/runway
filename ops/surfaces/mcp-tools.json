@@ -1,5 +1,5 @@
 {
-  "count": 23,
+  "count": 25,
   "tools": [
     {
       "name": "annotate_task_tasks__uuid__annotate_post",
@@ -38,6 +38,10 @@
       "summary": "GTD inbox"
     },
     {
+      "name": "last_reviews_gtd_review_get",
+      "summary": "Last reviews"
+    },
+    {
       "name": "list_tasks_tasks_get",
       "summary": "List tasks"
     },
@@ -60,6 +64,10 @@
     {
       "name": "projects_gtd_projects_get",
       "summary": "List projects"
+    },
+    {
+      "name": "record_review_gtd_review_post",
+      "summary": "Record a review"
     },
     {
       "name": "someday_gtd_someday_get",

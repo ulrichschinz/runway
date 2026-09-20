@@ -74,8 +74,8 @@ both.
 **Enforced**
 - `RULE-SEC-001` — every route in [`backend/app/routers/`](../backend/app/routers) declares its guard
   in [`rules/route-guards.toml`](../rules/route-guards.toml), the declaration must match the guard the
-  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-three
-  routes: twenty-six `user`, four `admin`, three `open`.
+  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-five
+  routes: twenty-eight `user`, four `admin`, three `open`.
 - `RULE-GOV-001` — the live branch protection matches [`ops/github/ruleset.json`](../ops/github/ruleset.json),
   so the rule that an unverified commit cannot reach `main` is itself checked-in state.
 - `RULE-TEST-001` and `RULE-TEST-002` — the bootstrap branches, the last-admin refusal and the
@@ -83,8 +83,8 @@ both.
 
 **Asserted**
 - **The route-guard rule does not see the whole surface.** `tools/checks/route_guards.py` globs
-  `backend/app/routers/*.py` only. The served schema has **34** operations
-  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 33: the
+  `backend/app/routers/*.py` only. The served schema has **36** operations
+  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 35: the
   odd one is `GET /health` at [`backend/app/main.py:91-93`](../backend/app/main.py), declared on the
   app object. Harmless in itself, and the proof that the next route added there would need no guard
   declaration. `RISK-SEC-005`.
@@ -357,9 +357,9 @@ reachable from outside the compose network except through the frontend.
 
 Four stores, three of them on one partition on the deploy host.
 
-**`users.db`** — accounts, password hashes, API keys, roles, profile fields, project plans and site
-settings. Four tables, created and migrated at
-[`backend/app/database.py:13-59`](../backend/app/database.py) and lines 65-70. Bind-mounted from
+**`users.db`** — accounts, password hashes, API keys, roles, profile fields, project plans, site
+settings and when each kind of review last happened. Five tables, created and migrated at
+[`backend/app/database.py:13-83`](../backend/app/database.py) and lines 89-94. Bind-mounted from
 `/opt/services/runway/users.db` ([`ops/deploy/docker-compose.yml:22-24`](../ops/deploy/docker-compose.yml)).
 Its schema is a protected surface, snapshotted at
 [`ops/surfaces/db-schema.sql`](../ops/surfaces/db-schema.sql).

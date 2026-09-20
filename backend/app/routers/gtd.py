@@ -1,11 +1,16 @@
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.database import get_db
+# `record_review` is the name of the handler below, because the handler name is half of the
+# MCP tool name and `record_review_gtd_review_post` is what an agent reads. The storage
+# function keeps its own name behind an alias rather than the route giving up a good one.
+from app.database import get_db, get_reviews
+from app.database import record_review as store_review
 from app.dependencies import get_current_user
-from app.models import GtdSummary, Task
+from app.models import GtdSummary, LastReview, Review, ReviewCreate, Task
 from app.services import task_service
 
 router = APIRouter(prefix="/gtd", tags=["gtd"])
@@ -137,7 +142,50 @@ async def summary(
     ) as cur:
         rows = await cur.fetchall()
     statuses = {row["name"]: "active" for row in rows}
-    return _mapped(task_service.summarize, username, tag, statuses, None)
+    # The scope the caller is asking about, resolved to the same canonical key POST /gtd/review
+    # stores (D16, D17). Asking for `?tag=ar` and getting the unscoped review back would read
+    # as "this area was reviewed" when only the whole system ever was — and the other way
+    # round, a repository that reviews its own area would look untouched.
+    key = _mapped(task_service.scope_key, tag)
+    rows = await get_reviews(db, username)
+    at = {row["kind"]: row["reviewed_at"] for row in rows if row["scope"] == key}
+    last_review = LastReview(daily=at.get("daily"), weekly=at.get("weekly"))
+    return _mapped(task_service.summarize, username, tag, statuses, last_review)
+
+
+@router.get(
+    "/review",
+    response_model=list[Review],
+    summary="Last reviews",
+    description="When each kind of review was last recorded, one entry per kind and scope. "
+    "An empty list means none was ever recorded — not that the system is unreviewed, only "
+    "that nothing said so here.",
+)
+async def last_reviews(username: str = Depends(get_current_user), db=Depends(get_db)):
+    return [Review(**dict(row)) for row in await get_reviews(db, username)]
+
+
+@router.post(
+    "/review",
+    response_model=Review,
+    status_code=201,
+    summary="Record a review",
+    description="Note that a daily or weekly review just finished, so the next session knows "
+    "how current the lists are. Recording the same kind and scope again moves the timestamp; "
+    "nothing else is stored, and no task is touched.",
+)
+async def record_review(
+    payload: ReviewCreate,
+    username: str = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    # `''` is the whole system and is not a tag; anything else is the `+`-joined scope key,
+    # which is re-derived here rather than trusted, so the row can be found again from the
+    # summary's `tag` list however the caller happened to order it.
+    scope = _mapped(task_service.scope_key, payload.scope.split("+") if payload.scope else [])
+    reviewed_at = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    await store_review(db, username, payload.kind, scope, reviewed_at)
+    return Review(kind=payload.kind, scope=scope, reviewed_at=reviewed_at)
 
 
 @router.get(

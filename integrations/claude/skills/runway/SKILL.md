@@ -136,10 +136,12 @@ If the repository has its own routine for the same kind of review (its instructi
 one), that routine leads and calls this skill for the runway part. Do not run a second,
 competing review of the same kind.
 
-**When to propose a reset instead.** If the server records reviews, use that. If it does
-not, take the newest `modified` date among pending tasks as a stand-in. When that is more
-than about ten days old, or more than half of the pending tasks are overdue, a daily
-review cannot fix the lists: show the screen, then propose `reset` and stop there.
+**When to propose a reset instead.** Use `last_review` from the summary: when the last
+`weekly` review is more than ten days ago, or more than half of the pending tasks are
+overdue, a daily review cannot fix the lists. Show the screen, then propose `reset` and
+stop there. A `null` weekly means none was ever recorded here — not that the system is
+unreviewed — so judge by the overdue share alone and record the review at the end, which
+is what makes the next answer evidence.
 
 ## Guardrails
 

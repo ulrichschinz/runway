@@ -390,6 +390,57 @@
         "title": "ProjectPlanUpdate",
         "type": "object"
       },
+      "Review": {
+        "properties": {
+          "kind": {
+            "description": "`daily` or `weekly`.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "description": "When this review was recorded, `YYYYMMDDTHHMMSSZ` (UTC).",
+            "title": "Reviewed At",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Which part of the system the review covered: the scope tags, sorted and joined with `+` (`@work+ar`), or empty for the whole system. Order and duplicates do not matter; the server returns the canonical form, which is what the summary's `tag` resolves to.",
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "scope",
+          "reviewed_at"
+        ],
+        "title": "Review",
+        "type": "object"
+      },
+      "ReviewCreate": {
+        "properties": {
+          "kind": {
+            "description": "`daily` for the short daily pass, `weekly` for the full weekly review.",
+            "enum": [
+              "daily",
+              "weekly"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "scope": {
+            "default": "",
+            "description": "Which part of the system the review covered: the scope tags, sorted and joined with `+` (`@work+ar`), or empty for the whole system. Order and duplicates do not matter; the server returns the canonical form, which is what the summary's `tag` resolves to.",
+            "maxLength": 200,
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "ReviewCreate",
+        "type": "object"
+      },
       "RoleUpdate": {
         "properties": {
           "role": {
@@ -2000,6 +2051,128 @@
           }
         ],
         "summary": "Project tasks",
+        "tags": [
+          "gtd"
+        ]
+      }
+    },
+    "/gtd/review": {
+      "get": {
+        "description": "When each kind of review was last recorded, one entry per kind and scope. An empty list means none was ever recorded \u2014 not that the system is unreviewed, only that nothing said so here.",
+        "operationId": "last_reviews_gtd_review_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Review"
+                  },
+                  "title": "Response Last Reviews Gtd Review Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Last reviews",
+        "tags": [
+          "gtd"
+        ]
+      },
+      "post": {
+        "description": "Note that a daily or weekly review just finished, so the next session knows how current the lists are. Recording the same kind and scope again moves the timestamp; nothing else is stored, and no task is touched.",
+        "operationId": "record_review_gtd_review_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Review"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record a review",
         "tags": [
           "gtd"
         ]

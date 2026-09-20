@@ -206,6 +206,20 @@ def _tag_filters(tags: list[str] | None) -> list[str]:
     return [f"+{_validate_tag(t)}" for t in tags]
 
 
+def scope_key(tags: list[str] | None) -> str:
+    """The canonical name of a set of scope tags: sorted, deduplicated, joined with `+` (D16).
+
+    A review is recorded against the scope it covered, and the summary has to find that row
+    again from the `tag` parameter it was called with. Two clients naming the same area in a
+    different order — `ar+@work` and `@work+ar` — mean the same review, so the key is derived
+    here rather than stored as sent, and `''` means "the whole system".
+
+    `+` is the separator precisely because `TAG_RE` cannot contain one: Taskwarrior reads a
+    leading `+` as a modifier, so no tag we would ever write can be mistaken for two.
+    """
+    return "+".join(sorted({token[1:] for token in _tag_filters(tags)}))
+
+
 def list_tasks(username: str, filter_args: list[str] | None = None) -> list[Task]:
     raw_list = task_runner.export_tasks(username, filter_args)
     tasks = [_raw_to_task(r) for r in raw_list]

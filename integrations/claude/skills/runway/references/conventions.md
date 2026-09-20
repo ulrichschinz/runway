@@ -30,6 +30,7 @@ what they do.
 | overdue, done since, "in no list" | list tasks (`tasks`): `status`, `project`, `tag` (repeatable, AND), `due_before`/`due_after`/`completed_since` (YYYY-MM-DD), `limit` |
 | capture unclarified | inbox post (description, optional note) |
 | counters for reviews and hooks | gtd summary (`gtd/summary`), optional `tag` |
+| record / read the last review | review (`gtd/review`) |
 | hidden ticklers (future `wait`, soonest first) | gtd tickler (`gtd/tickler`) |
 | project plan | get plan / upsert plan |
 | change tags without reading first | modify task (`tasks/{uuid}`), `tags_add` / `tags_remove` |
@@ -76,6 +77,10 @@ calling it. Do not list the inbox in a scoped repository; report its count inste
 summary gives it, and a scoped summary names no other area's project). Capture in a scoped
 repository stays untagged — it goes to the inbox, and adding the scope tag would mark it
 clarified.
+
+The scope key for reviews is the scope tags sorted and joined with `+` (e.g. `@work+ar`);
+the server canonicalizes it, so any order will do. Pass the same tags as `tag` to the
+summary, or its `last_review` will report the whole system's review instead of this area's.
 
 ## Projects
 

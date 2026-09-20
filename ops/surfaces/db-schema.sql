@@ -27,6 +27,16 @@ CREATE TABLE projects (
     UNIQUE(username, name)
 );
 
+-- table reviews
+CREATE TABLE reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('daily', 'weekly')),
+    scope TEXT NOT NULL DEFAULT '',
+    reviewed_at TEXT NOT NULL,
+    UNIQUE(username, kind, scope)
+);
+
 -- table site_settings
 CREATE TABLE site_settings (
     key TEXT PRIMARY KEY,
