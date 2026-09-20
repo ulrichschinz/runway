@@ -10,6 +10,7 @@ runway settings page and belongs in an environment variable, never in a reposito
 
 ```sh
 export RUNWAY_API_KEY=…            # e.g. in ~/.zshenv; GUI apps do not see shell variables
+export RUNWAY_URL='https://<host>'  # origin only, no path — the reminder in section 6 reads it
 claude mcp add --scope user --transport http runway https://<host>/api/mcp \
   --header 'X-Api-Key: ${RUNWAY_API_KEY}'
 ```
@@ -111,10 +112,30 @@ weekly_review: Freitag 15:00 (Kalendertermin)
 ## 6. Reminders
 
 - **Weekly review**: a recurring calendar appointment. Nothing beats it.
-- **Daily review**: a SessionStart hook can mention that a review is due, but only when a
-  session starts. A reminder without an open session needs a push from the server itself
+- **Daily review**: the plugin ships a SessionStart hook that prints one line when a review
+  is due — no daily review in the last 24 hours with something in the inbox, overdue or
+  waiting, or a weekly review older than ten days — and says nothing at all otherwise. A
+  review recorded in any scope counts, so recording one at the end of a review is what
+  silences it. It needs
+  `RUNWAY_URL` and `RUNWAY_API_KEY` from section 1 and nothing else. A hook only fires when
+  a session starts; a reminder without an open session needs a push from the server itself
   (digest by e-mail or ntfy), once runway offers one. Do not build cloud agents that hold
   the API key just to send a reminder.
-- A hook is a shell command, so it calls the REST route `GET /api/gtd/summary` with `curl`
-  and a short timeout, not the MCP tool. The summary contains no task titles, so it is safe
-  in a logged repository. Stay silent when nothing is due; print at most one line.
+- A hook is a shell command, so it calls the REST routes `GET /api/gtd/summary` (counters)
+  and `GET /api/gtd/review` (when each kind of review was last recorded, in every scope)
+  with `curl` and a short timeout, not the MCP tools. Neither answer contains a task title,
+  so it is safe in a logged repository; the hook prints counters only and never a project
+  name.
+- **With `install.sh` instead of the plugin**, the script is copied to
+  `~/.claude/runway-summary.sh` and nothing runs it yet. Show this diff and get a yes before
+  merging it into `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/runway-summary.sh\"", "timeout": 5 } ] }
+    ]
+  }
+}
+```

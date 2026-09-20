@@ -33,6 +33,20 @@ def _missing_root() -> Path:
     raise skill_service.SkillNotBundled("the skill is not bundled with this image")
 
 
+def _plugin_tree(root: Path, version: str = "9.9.9") -> Path:
+    """A minimal `integrations/claude`: the three parts the Dockerfile copies, and nothing else."""
+    plugin = root / "integrations" / "claude"
+    (plugin / "skills" / "runway").mkdir(parents=True)
+    (plugin / "skills" / "runway" / "SKILL.md").write_text("# runway\n", encoding="utf-8")
+    (plugin / "hooks").mkdir(parents=True)
+    (plugin / "hooks" / "runway-summary.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "runway", "version": version}), encoding="utf-8"
+    )
+    return plugin
+
+
 @pytest.fixture
 def cold_cache():
     """The zip is cached per root; clear it so each test measures a real build."""
@@ -125,13 +139,57 @@ class TestNotBundled:
         assert client.get("/skill/runway.zip").status_code == 503
 
 
-class TestHalfBundled:
-    """The manifest arrived and the skill text did not.
+class TestTheReleasedTree:
+    """What a plugin update delivers is what the release hash covers: `skills/` and `hooks/`.
 
-    `.dockerignore` admits the two on two lines and the Dockerfile copies them on two, so
-    losing one half is likelier than losing both — and this is the half that has nothing to
-    trip over: `rglob` on a directory that is not there yields nothing instead of raising.
-    Answering 200 with the sha256 of the empty string and a valid, empty zip would be worse
+    A hook is a script that runs on a user's machine at the start of every session, and it
+    reaches them through the same version bump the skill does — so a hook edit that leaves
+    the version alone reaches nobody, which is the failure `RULE-SURF-004` exists to name.
+    The zip is the other half of that decision and stays skill-only: it is for clients that
+    have no plugin system, and a hook they cannot register is a file they cannot use.
+    """
+
+    @pytest.fixture
+    def plugin(self, tmp_path):
+        return _plugin_tree(tmp_path)
+
+    def test_a_changed_hook_changes_the_release_hash(self, plugin):
+        before = skill_service._content_hash(plugin)
+        (plugin / "hooks" / "runway-summary.sh").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        assert skill_service._content_hash(plugin) != before
+
+    def test_a_changed_skill_changes_it_too(self, plugin):
+        before = skill_service._content_hash(plugin)
+        (plugin / "skills" / "runway" / "SKILL.md").write_text("# other\n", encoding="utf-8")
+        assert skill_service._content_hash(plugin) != before
+
+    def test_the_two_directories_are_told_apart_inside_one_digest(self, tmp_path):
+        """Paths are hashed relative to the plugin root, not to each directory.
+
+        Hashing `runway-summary.sh` and `SKILL.md` by their bare names would make moving a
+        file from one directory to the other invisible — the same bytes under the same name.
+        """
+        one = _plugin_tree(tmp_path / "one")
+        other = _plugin_tree(tmp_path / "other")
+        (other / "hooks" / "runway-summary.sh").write_text("# runway\n", encoding="utf-8")
+        (other / "skills" / "runway" / "SKILL.md").write_text(
+            "#!/bin/sh\nexit 0\n", encoding="utf-8"
+        )
+        assert skill_service._content_hash(one) != skill_service._content_hash(other)
+
+    def test_the_zip_carries_the_skill_and_not_the_hooks(self, plugin, monkeypatch, cold_cache):
+        monkeypatch.setattr(skill_service, "_root", lambda: plugin)
+        with zipfile.ZipFile(io.BytesIO(skill_service.skill_zip())) as archive:
+            assert archive.namelist() == ["runway/SKILL.md"]
+
+
+class TestHalfBundled:
+    """One part of the bundle arrived and another did not.
+
+    `.dockerignore` admits the three on three lines and the Dockerfile copies them on three,
+    so losing one part is likelier than losing all of them — and the two directories have
+    nothing to trip over: `rglob` on a directory that is not there yields nothing instead of
+    raising. Answering 200 with a hash taken over the files that did arrive would be worse
     than 503, because the release record would be wrong rather than absent.
     """
 
@@ -144,6 +202,14 @@ class TestHalfBundled:
         )
         return plugin
 
+    @pytest.fixture
+    def without_hooks(self, tmp_path):
+        plugin = _plugin_tree(tmp_path)
+        for path in sorted((plugin / "hooks").iterdir()):
+            path.unlink()
+        (plugin / "hooks").rmdir()
+        return plugin
+
     def test_the_metadata_route_answers_503(self, client, monkeypatch, manifest_only):
         monkeypatch.setattr(skill_service, "_root", lambda: manifest_only)
         r = client.get("/skill")
@@ -153,6 +219,14 @@ class TestHalfBundled:
     def test_the_download_answers_503(self, client, monkeypatch, cold_cache, manifest_only):
         monkeypatch.setattr(skill_service, "_root", lambda: manifest_only)
         assert client.get("/skill/runway.zip").status_code == 503
+
+    def test_an_image_without_the_hooks_answers_503_rather_than_a_wrong_hash(
+        self, client, monkeypatch, without_hooks
+    ):
+        monkeypatch.setattr(skill_service, "_root", lambda: without_hooks)
+        r = client.get("/skill")
+        assert r.status_code == 503
+        assert "hooks" in r.json()["detail"]
 
 
 class TestTheRoutes:

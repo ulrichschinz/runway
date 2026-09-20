@@ -28,7 +28,13 @@ export { mcpAddCommand }
 /** The environment variable the MCP header and the SessionStart hook both read. */
 export const KEY_ENV = 'RUNWAY_API_KEY'
 
-/** The origin variable the SessionStart hook reads. */
+/**
+ * The origin variable the SessionStart hook reads.
+ *
+ * Pinned against `integrations/claude/hooks/runway-summary.sh` in the test: the hook is a
+ * shell script in another directory, nothing imports it, and a renamed variable there would
+ * leave this page telling users to export something nobody reads.
+ */
 export const URL_ENV = 'RUNWAY_URL'
 
 /** Shown until `/auth/apikey` has answered — the same placeholder `mcpSnippets` uses. */
@@ -90,9 +96,13 @@ export const RUNWAY_PROJECT_LINE = 'runway_project: website-relaunch'
 export function connectClaudeSteps(origin, apiKey) {
   return [
     {
+      // Both variables in one step, in one file: the MCP header reads the key, the
+      // SessionStart hook the plugin ships reads both (ADR 0041), and a user who exports one
+      // of them today and the other after the next restart has a hook that stays silent for
+      // the wrong reason.
       id: 'key',
-      title: 'Put your API key in the shell',
-      text: keyExportLine(apiKey),
+      title: 'Put your API key and this server in the shell',
+      text: `${keyExportLine(apiKey)}\n${urlExportLine(origin)}`,
       containsSecret: true,
     },
     {

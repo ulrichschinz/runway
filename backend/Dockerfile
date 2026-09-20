@@ -50,10 +50,14 @@ COPY backend/app/ ./app/
 
 # The Claude skill, carried by the server that speaks it (ADR 0040). `GET /skill` reports the
 # version and content hash of exactly this copy, so a client can install the skill that
-# matches the API it is talking to instead of whatever `main` holds today. Two paths rather
-# than the whole directory: the skill text and the manifest that versions it are the release,
-# and nothing else under integrations/ belongs in a runtime image.
+# matches the API it is talking to instead of whatever `main` holds today. Three paths rather
+# than the whole directory: the skill text, the hooks the plugin ships (ADR 0041) and the
+# manifest that versions all of it are the release, and nothing else under integrations/
+# belongs in a runtime image. The hooks are hashed but not zipped — the hash is what the
+# post-deploy check compares against ops/skill-release.json, so it has to cover what a plugin
+# update delivers.
 COPY integrations/claude/skills/runway /app/integrations/claude/skills/runway
+COPY integrations/claude/hooks /app/integrations/claude/hooks
 COPY integrations/claude/.claude-plugin/plugin.json /app/integrations/claude/.claude-plugin/plugin.json
 
 RUN mkdir -p /app/data

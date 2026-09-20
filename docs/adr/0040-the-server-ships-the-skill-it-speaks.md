@@ -130,7 +130,7 @@ release section, and the post-deploy check (brief 0042) reads it.
 - A `.dockerignore` that stops admitting the skill produces an image that passes every check and
   answers 503 on one route. The gate cannot see that — it builds no image (`RISK-OPS-002`) — so it
   is caught in production, by the post-deploy check.
-- The zip is skill-only. When the plugin starts shipping hooks (brief 0044) the hash covers them
+- The zip is skill-only. When the plugin starts shipping hooks ([brief 0043](../briefs/0043-the-review-reminder.md)) the hash covers them
   too, and the zip still does not: a hook is a Claude Code plugin mechanism, and the zip is for
   clients that have no plugins.
 

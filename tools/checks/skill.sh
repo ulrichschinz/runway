@@ -1,7 +1,7 @@
 #!/bin/sh
 # RULE-SURF-003  Every route and MCP tool the Claude skill names MUST exist on the surface.
-# RULE-SURF-004  A change to the skill MUST ship with a raised plugin version.
-# RULE-TEST-005  integrations/claude/install.sh MUST pass its test.
+# RULE-SURF-004  A change to the skill or its hooks MUST ship with a raised plugin version.
+# RULE-TEST-005  integrations/claude/install.sh and hooks/runway-summary.sh MUST pass theirs.
 #
 # The skill in integrations/claude/ is a consumer of this repository's public surface that
 # lives inside the repository, so the gate can hold it to that surface directly: a renamed
@@ -21,6 +21,11 @@ findings=$("$PY" tools/checks/skill_surface.py) || {
 installer=$(sh integrations/claude/tests/install_test.sh 2>&1) || {
 	findings=$(printf '%s\n%s' "$findings" "$(printf '%s\n' "$installer" | sed 's/^/RULE-TEST-005|/')")
 }
+# The other shipped script. It runs at the start of every session on a user's machine, so
+# its promise is silence: the test holds it to that without a server or a key (ADR 0041).
+hook=$(sh integrations/claude/tests/hook_test.sh 2>&1) || {
+	findings=$(printf '%s\n%s' "$findings" "$(printf '%s\n' "$hook" | sed 's/^/RULE-TEST-005|/')")
+}
 
 if [ -n "$findings" ]; then
 	printf '%s\n' "$findings" | while IFS='|' read -r rule message; do
@@ -29,5 +34,5 @@ if [ -n "$findings" ]; then
 	exit "$EX_RULE"
 fi
 
-ok "the skill names only existing routes and tools, its release record is current, install.sh holds"
+ok "the skill names only existing routes and tools, its release record is current, install.sh and the hook hold"
 exit "$EX_OK"

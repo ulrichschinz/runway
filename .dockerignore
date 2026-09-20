@@ -19,7 +19,13 @@
 # The Claude skill the image serves from GET /skill (ADR 0040). Admitted file by file for the
 # same reason the rest of this file is deny-all: integrations/ also holds an installer, tests
 # and a README, and none of them belong in a runtime image.
+#
+# hooks/ is here although the zip does not carry it: since ADR 0041 the release hash covers
+# everything a plugin update delivers, so an image without the hooks would answer GET /skill
+# with a hash that does not match ops/skill-release.json — which is exactly what the
+# post-deploy check compares.
 !integrations/claude/skills
+!integrations/claude/hooks
 !integrations/claude/.claude-plugin/plugin.json
 
 # Re-excluded inside the admitted tree: build residue and local state that must never reach

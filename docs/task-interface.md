@@ -512,19 +512,36 @@ Each carries an owner and a teardown path, and the ratchet fails if either is fi
 
 `RULE-SURF-003`, `RULE-SURF-004`, `RULE-TEST-005`, all in `tools/checks/skill.sh`.
 [`integrations/claude/`](../integrations/claude/README.md) is a Claude Code plugin with one skill, `runway`,
-that drives this server over MCP. It is a consumer of the public surface that ships from this repository,
-so the gate holds it to that surface. Why it lives here: [ADR 0035](adr/0035-the-skill-lives-with-the-api-it-drives.md).
+that drives this server over MCP, and one SessionStart hook that says when a review is due
+([ADR 0041](adr/0041-the-plugin-ships-a-review-reminder.md)). It is a consumer of the public surface that
+ships from this repository, so the gate holds it to that surface. Why it lives here:
+[ADR 0035](adr/0035-the-skill-lives-with-the-api-it-drives.md).
 
 | Rule | Fails when |
 |---|---|
 | `RULE-SURF-003` | a route in the skill's operation table (`references/conventions.md`, "Which operation for what") is not in `ops/surfaces/openapi.json`, or an `mcp__runway__…` name anywhere under `integrations/claude/` is not in `ops/surfaces/mcp-tools.json`. A line containing "if present" is exempt: that is how the skill names an operation a newer server may have |
-| `RULE-SURF-004` | anything under `integrations/claude/skills/` changed and `version` in `integrations/claude/.claude-plugin/plugin.json` did not rise. Plugin users receive an update only when the version changes |
-| `RULE-TEST-005` | `integrations/claude/install.sh` fails its test: it must install the committed state of a ref and never an uncommitted edit, answer `--check` with 0 or 1, refuse a symlinked target with 73, and fail on an unknown ref with 66 |
+| `RULE-SURF-004` | anything under `integrations/claude/skills/` or `integrations/claude/hooks/` changed and `version` in `integrations/claude/.claude-plugin/plugin.json` did not rise. Plugin users receive an update only when the version changes |
+| `RULE-TEST-005` | `integrations/claude/install.sh` fails its test: it must install the committed state of a ref and never an uncommitted edit, answer `--check` with 0 or 1, refuse a symlinked target with 73, and fail on an unknown ref with 66. Or `integrations/claude/hooks/runway-summary.sh` fails `tests/hook_test.sh`: it must stay silent without `RUNWAY_URL`/`RUNWAY_API_KEY`, on any HTTP or parse error and when nothing is due, and print exactly one line of counters — no task or project name, no key — when a review is due |
 
-`RULE-SURF-004` compares against `ops/skill-release.json` — the released version and a hash of `skills/` —
-rather than against a git base, so it gives the same answer in CI, locally and in the fixture sandbox. To
-ship a skill change: raise `version` (patch for wording, minor for a new mode or a newly used operation,
-major when older servers stop working), then `./run surfaces --update`, and commit both.
+`RULE-SURF-004` compares against `ops/skill-release.json` — the released version and a hash of `skills/`
+**and `hooks/`**, which is what a plugin update delivers — rather than against a git base, so it gives the
+same answer in CI, locally and in the fixture sandbox. To ship a skill or hook change: raise `version`
+(patch for wording, minor for a new mode or a newly used operation, major when older servers stop working),
+then `./run surfaces --update`, and commit both. The same hash is served by `GET /api/skill` from the
+running image, so the post-deploy check can compare a deployment against this record.
+
+**The hook's contract.** `hooks/runway-summary.sh` runs from `hooks/hooks.json` on `SessionStart`, calls
+`GET /api/gtd/summary` for the counters and `GET /api/gtd/review` for the records, each with `curl -m 2`
+and the key in a header, and prints at most one line: a review is due when no daily review has been
+recorded in the last 24 hours and the inbox, overdue, due-today or follow-up counters are non-zero, or when
+the weekly review is older than ten days. Both ages are durations between UTC instants — the record is UTC
+and the summary's `today` is the server's local day, and a hook that slices a day out of one and compares
+it against the other reminds the user of a review they finished an hour ago. It reads the review route
+rather than the summary's own `last_review` because reviews are stored per scope and a shell command has no
+repository scope to ask about: the newest record of each kind, in any scope, is the one that counts.
+Everything else — no `RUNWAY_URL`, no `RUNWAY_API_KEY`, no `curl`, no `python3`, any HTTP error on either
+route, a body that is not the summary, nothing due — is silence and exit 0. It prints counters only; `stalled_projects` is the one field with names in it and the
+hook never reads it, so the line is safe in a repository whose sessions are logged.
 
 **When a GTD API change lands, the skill changes in the same commit**: drop the matching "if present" or
 "older servers cannot" caveat, add the operation to the table, extend the permission allow-list in
@@ -543,7 +560,7 @@ changes in flight.
 It reports two numbers, and they are not the same number:
 
 ```
-  54 fixture arm(s) passed, 0 failed
+  56 fixture arm(s) passed, 0 failed
   46 of 49 executable rules proven able to fail; 3 declare no automated fixture (…)
 ```
 

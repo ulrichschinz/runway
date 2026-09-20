@@ -5,9 +5,10 @@ Things Done on a runway server through runway's MCP surface: look up and capture
 from any repository, offer tasks when commitments come up in conversation, clarify the
 inbox, daily and weekly review, project planning with the Natural Planning Model.
 
-This directory is a Claude Code **plugin**. It ships the skill only. It does not ship the
-MCP connection, because every runway instance has its own URL and API key; the one-time
-setup is described in `skills/runway/references/setup.md`.
+This directory is a Claude Code **plugin**. It ships the skill and one SessionStart hook
+that says when a review is due. It does not ship the MCP connection, because every runway
+instance has its own URL and API key; the one-time setup is described in
+`skills/runway/references/setup.md`.
 
 ## Deploying and keeping it up to date
 
@@ -20,7 +21,7 @@ There are three parts to deploy. They are versioned differently, so keep them ap
 
 | Part | Where it lives | How it is updated |
 |---|---|---|
-| The skill (this directory) | `~/.claude/skills/runway` or the plugin cache | plugin update, or `install.sh` |
+| The skill and the hook (this directory) | `~/.claude/skills/runway` or the plugin cache | plugin update, or `install.sh` |
 | The MCP connection | user scope of Claude Code, key in `RUNWAY_API_KEY` | once; only when URL or key change |
 | Personal setup: standing rule, permissions, profile | `~/.claude/CLAUDE.md`, `~/.claude/settings.json`, `~/.config/runway/profile.md` | by hand; see `skills/runway/references/setup.md` |
 
@@ -55,7 +56,10 @@ There are three parts to deploy. They are versioned differently, so keep them ap
    The script exports the skill from a **git ref** (`git archive`), so uncommitted edits
    are never installed. It refuses to write through a symlink, keeps the previous copy in
    `~/.claude/backups/runway-skill.previous`, and records what it installed in
-   `~/.claude/skills/runway/.installed`.
+   `~/.claude/skills/runway/.installed`. It also places the review reminder at
+   `~/.claude/runway-summary.sh` — nothing runs it yet: this channel has no plugin manifest
+   for Claude Code to read `hooks/hooks.json` from, so registering it is one paste into
+   `~/.claude/settings.json` (`references/setup.md`, section 6).
 
    Do not use both channels at once; the agent would see two skills with the same job.
 
@@ -119,6 +123,11 @@ Other clients that can send a fixed `X-Api-Key` header to a remote MCP server: d
 speaks — and install it there. The skill is useless without the runway MCP server connected
 in the same client. Updating means downloading the zip again after the server is deployed.
 
+The zip carries the skill text only. The SessionStart hook is a Claude Code plugin
+mechanism, and a client that has no plugins has nowhere to register it; anyone who wants the
+reminder on such a client can take `hooks/runway-summary.sh` from the repository and run it
+from whatever that client calls a startup command.
+
 Not claude.ai: its remote connectors authenticate by OAuth or not at all, and runway has no
 OAuth. That is a statement about the connector, not about the zip.
 
@@ -132,6 +141,8 @@ OAuth. That is a statement about the connector, not about the zip.
       weekly-review.md  get clear / get current / get creative, plus the 15-minute reset
       planning.md       Natural Planning Model on top of the project plan endpoints
       setup.md          MCP connection, permissions, standing rule, profile, reminders
+    hooks/hooks.json                       SessionStart, registered by the plugin channel
+    hooks/runway-summary.sh                one line when a review is due, silence otherwise
     .claude-plugin/plugin.json             plugin manifest; bump `version` on every change
     install.sh                             installs a git ref into ~/.claude (no symlinks)
 
@@ -162,9 +173,13 @@ Design decisions worth knowing before changing anything:
   one system and filters by context at the moment of choice. `runway_scope` exists as an
   opt-in for repositories whose conversations are logged.
 - **What is not in the skill.** Proactive task suggestions need a standing rule in the
-  user's always-loaded instructions (a skill is not loaded until it triggers), and
-  reminders need a hook or a server-side digest (a skill never starts by itself). Both are
-  described in `setup.md`, neither can be shipped as skill text.
+  user's always-loaded instructions (a skill is not loaded until it triggers); it is
+  described in `setup.md` and cannot be shipped as skill text. Reminders are no longer in
+  that category: the plugin ships a SessionStart hook that prints one line when a review is
+  due and nothing otherwise ([ADR 0041](../../docs/adr/0041-the-plugin-ships-a-review-reminder.md)).
+  It is a shell command that calls `GET /api/gtd/summary` and `GET /api/gtd/review`, not an
+  MCP tool, and it only fires when a session starts — a reminder without an open session
+  still needs a push from the server itself.
 - **Personal data stays out.** User conventions live in `~/.config/runway/profile.md`,
   the repository link is one line (`runway_project:`) in that repository's instructions.
 

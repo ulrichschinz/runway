@@ -4,7 +4,10 @@ A client that drives runway through MCP needs the skill text that matches the op
 this particular server has. The repository is one source for it and it moves with `main`;
 the running server is the other, and it is the one the client is actually talking to. This
 module is that second source: the version, the content hash and the build commit of what is
-mounted right here, plus a deterministic zip of the skill tree (ADR 0040).
+mounted right here, plus a deterministic zip of the skill tree (ADR 0040). The hash covers
+what a plugin update delivers — `skills/` and `hooks/` — while the zip carries the skill
+alone, because a hook is a plugin mechanism and the zip is for clients that have no plugins
+(ADR 0041).
 
 Stdlib only, and no Taskwarrior anywhere near it — architecture.toml withholds
 be/adapters/task from this unit, so that is a rule rather than a habit.
@@ -66,14 +69,18 @@ def _candidates() -> tuple[Path, ...]:
 # serve different bytes, and the ETag would stop meaning "this content".
 _EPOCH = (1980, 1, 1, 0, 0, 0)
 
+# What a plugin update delivers, and therefore what the release hash covers. Kept in the
+# same order the gate script uses it in; the digest sorts by path either way.
+_RELEASED = ("hooks", "skills")
+
 
 class SkillNotBundled(RuntimeError):
     """The image was built without the skill tree.
 
-    A `.dockerignore` that stops admitting `integrations/claude` — or one of its two halves,
-    the skill text or the plugin manifest — produces an image that builds, starts and serves
-    every other route, so the failure has to be loud at the one route that depends on it,
-    and 503 (not 404) says "this server, not this path".
+    A `.dockerignore` that stops admitting `integrations/claude` — or one of its three parts,
+    the skill text, the hooks or the plugin manifest — produces an image that builds, starts
+    and serves every other route, so the failure has to be loud at the one route that depends
+    on it, and 503 (not 404) says "this server, not this path".
     """
 
 
@@ -96,31 +103,48 @@ def _build_commit_file() -> Path:
     return _APP_ROOT / "BUILD_COMMIT"
 
 
-def _skill_files(skills: Path) -> list[Path]:
-    """Every file of the skill tree, in one stable order — and never an empty list.
+def _tree(plugin: Path, name: str) -> list[Path]:
+    """Every file of one delivered directory, in one stable order — never an empty list.
 
-    The Dockerfile copies the skill text and the plugin manifest on two separate lines,
-    which `.dockerignore` admits on two separate lines, so an image can lose one half and
-    keep the other. The missing manifest already raises. This is the other half, and it
-    would otherwise be silent: `rglob` on a directory that does not exist yields nothing
-    rather than raising, so the hash would be the sha256 of the empty string and the zip a
-    valid archive with nothing in it — a release record that is confidently wrong, served
-    with 200. An empty tree is not a release, so it is `SkillNotBundled` like the rest.
+    The Dockerfile copies the skill text, the hooks and the plugin manifest on separate
+    lines, which `.dockerignore` admits on separate lines, so an image can lose one part and
+    keep the others. The missing manifest already raises. These are the other parts, and
+    they would otherwise be silent: `rglob` on a directory that does not exist yields
+    nothing rather than raising, so the hash would be one taken over fewer files and the
+    zip a valid archive with nothing in it — a release record that is confidently wrong,
+    served with 200. An incomplete tree is not a release, so it is `SkillNotBundled` like
+    the rest.
     """
-    files = sorted(p for p in skills.rglob("*") if p.is_file() and "__pycache__" not in p.parts)
+    files = sorted(
+        p for p in (plugin / name).rglob("*") if p.is_file() and "__pycache__" not in p.parts
+    )
     if not files:
         raise SkillNotBundled(
-            "this build carries the plugin manifest but no skill text — the image is "
-            "missing integrations/claude/skills; install the skill from the repository"
+            f"this build carries the plugin manifest but no {name}/ — the skill is "
+            f"incomplete, because the image is missing integrations/claude/{name}; install "
+            "the skill from the repository instead"
         )
     return files
 
 
-def _content_hash(skills: Path) -> str:
-    """sha256 over every file under skills/, path and bytes, in a stable order."""
+def _skill_files(plugin: Path) -> list[Path]:
+    """The skill text — what the zip contains, named relative to `skills/`."""
+    return _tree(plugin, "skills")
+
+
+def _content_hash(plugin: Path) -> str:
+    """sha256 over every file the plugin delivers, path and bytes, in a stable order.
+
+    The released tree is `skills/` **and** `hooks/`: a plugin update carries both, so a hook
+    that changed without a version bump reaches nobody, exactly as a skill edit would not
+    (`RULE-SURF-004`). Paths are relative to `integrations/claude/`, which is what makes the
+    two directories distinguishable inside one digest. The zip is skill-only all the same —
+    a hook is a Claude Code plugin mechanism, and the zip exists for clients that have none.
+    """
     digest = hashlib.sha256()
-    for path in _skill_files(skills):
-        digest.update(path.relative_to(skills).as_posix().encode() + b"\0")
+    files = [path for name in _RELEASED for path in _tree(plugin, name)]
+    for path in sorted(files, key=lambda p: p.relative_to(plugin).as_posix()):
+        digest.update(path.relative_to(plugin).as_posix().encode() + b"\0")
         digest.update(path.read_bytes() + b"\0")
     return digest.hexdigest()
 
@@ -146,7 +170,7 @@ def skill_info() -> SkillInfo:
         skill=SkillRelease(
             name="runway",
             version=_version(plugin),
-            sha256=_content_hash(plugin / "skills"),
+            sha256=_content_hash(plugin),
         ),
         server=ServerBuild(commit=_commit()),
         # Absolute and prefixed, because the SPA and every external client reach this
@@ -162,7 +186,7 @@ def _zip_bytes(plugin: Path) -> bytes:
     skills = plugin / "skills"
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in _skill_files(skills):
+        for path in _skill_files(plugin):
             info = zipfile.ZipInfo(path.relative_to(skills).as_posix(), date_time=_EPOCH)
             info.compress_type = zipfile.ZIP_DEFLATED
             # 0o644 in the high half of external_attr, so an extracted file is readable

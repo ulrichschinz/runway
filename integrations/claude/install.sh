@@ -9,7 +9,11 @@
 #   integrations/claude/install.sh --ref v1.4.0   install a tag, branch or commit
 #   integrations/claude/install.sh --check        compare installed vs. available, change nothing
 #
-# Target: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/runway
+# Targets: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/runway  — the skill
+#          ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/runway-summary.sh  — the SessionStart
+#          reminder (ADR 0041). The plugin channel registers it through hooks/hooks.json;
+#          on this channel the script is only placed, and references/setup.md section 6
+#          holds the settings.json snippet that calls it.
 set -eu
 
 REF=HEAD
@@ -18,7 +22,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --ref) REF="$2"; shift 2 ;;
     --check) CHECK=1; shift ;;
-    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 64 ;;
   esac
 done
@@ -26,7 +30,9 @@ done
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 SRC=integrations/claude/skills/runway
 MANIFEST=integrations/claude/.claude-plugin/plugin.json
+HOOK=integrations/claude/hooks/runway-summary.sh
 TARGET="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/runway"
+HOOK_TARGET="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/runway-summary.sh"
 STAMP="$TARGET/.installed"
 # Kept outside skills/, or Claude would load the old copy as a second skill named runway.
 PREVIOUS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/backups/runway-skill.previous"
@@ -56,9 +62,18 @@ if [ -L "$TARGET" ]; then
   exit 73
 fi
 
+# The hook is newer than the skill, so a ref that predates it is exported without it rather
+# than refused: rolling back to an older tag is one of the reasons --ref exists.
+HAS_HOOK=0
+if git -C "$ROOT" cat-file -e "$COMMIT:$HOOK" 2>/dev/null; then HAS_HOOK=1; fi
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-git -C "$ROOT" archive "$COMMIT" "$SRC" | tar -x -C "$TMP"
+if [ "$HAS_HOOK" -eq 1 ]; then
+  git -C "$ROOT" archive "$COMMIT" "$SRC" "$HOOK" | tar -x -C "$TMP"
+else
+  git -C "$ROOT" archive "$COMMIT" "$SRC" | tar -x -C "$TMP"
+fi
 
 mkdir -p "$(dirname "$TARGET")"
 if [ -d "$TARGET" ]; then
@@ -69,6 +84,18 @@ fi
 mv "$TMP/$SRC" "$TARGET"
 printf '%s\nref: %s\ninstalled: %s\n' "$AVAILABLE" "$REF" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STAMP"
 
+# The reminder script, beside skills/ rather than inside it: it is not skill text, and a
+# stray executable under skills/runway would be part of what Claude loads as the skill.
+# Refusing a symlink here for the same reason as above — never write into a working tree.
+if [ "$HAS_HOOK" -eq 1 ] && [ ! -L "$HOOK_TARGET" ]; then
+  cp "$TMP/$HOOK" "$HOOK_TARGET"
+  chmod +x "$HOOK_TARGET"
+  HOOK_INSTALLED=1
+else
+  HOOK_INSTALLED=0
+fi
+
 echo "runway skill $AVAILABLE installed to $TARGET (was: $INSTALLED)"
+[ "$HOOK_INSTALLED" -eq 1 ] && echo "review reminder at $HOOK_TARGET — see references/setup.md section 6 to run it at session start"
 [ -d "$PREVIOUS" ] && echo "previous version kept at $PREVIOUS"
 echo "start a new Claude session to load it"

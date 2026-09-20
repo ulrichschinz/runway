@@ -34,7 +34,8 @@ def _image(root: Path, version: str = "9.9.9") -> Path:
 
     `/app` holds the application under `app/`, the skill at `integrations/claude` and the
     build stamp at `BUILD_COMMIT`. The application file is empty on purpose — only its
-    position is under test.
+    position is under test. The hooks are here because the Dockerfile copies them (ADR
+    0041): they are hashed with the skill, so an image without them is not a release.
     """
     app = root / "app"
     (app / "app" / "services").mkdir(parents=True)
@@ -44,6 +45,8 @@ def _image(root: Path, version: str = "9.9.9") -> Path:
     (skill / "references").mkdir(parents=True)
     (skill / "SKILL.md").write_text("# runway\n", encoding="utf-8")
     (skill / "references" / "conventions.md").write_text("conventions\n", encoding="utf-8")
+    (plugin / "hooks").mkdir(parents=True)
+    (plugin / "hooks" / "runway-summary.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     (plugin / ".claude-plugin").mkdir(parents=True)
     (plugin / ".claude-plugin" / "plugin.json").write_text(
         json.dumps({"name": "runway", "version": version}), encoding="utf-8"

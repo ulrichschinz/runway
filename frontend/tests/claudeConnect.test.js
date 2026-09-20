@@ -8,6 +8,7 @@ import {
   PLUGIN_UPDATE,
   RUNWAY_PROJECT_LINE,
   STANDING_RULE,
+  URL_ENV,
   connectClaudeSteps,
   keyExportLine,
   mcpAddCommand,
@@ -33,6 +34,10 @@ const setup = readFileSync(
 )
 const integrationReadme = readFileSync(
   new URL('../../integrations/claude/README.md', import.meta.url),
+  'utf8',
+)
+const hook = readFileSync(
+  new URL('../../integrations/claude/hooks/runway-summary.sh', import.meta.url),
   'utf8',
 )
 
@@ -99,6 +104,14 @@ describe('the export lines', () => {
       "export RUNWAY_URL='https://runway.example.com'",
     )
   })
+
+  it('names the two variables the shipped hook actually reads', () => {
+    // A drift pin, not a style check: the hook is a shell script nothing imports, so a
+    // renamed variable there would leave this card telling users to export a name no code
+    // reads — and the hook's failure mode is silence, which nobody reports.
+    expect(hook).toContain('${' + KEY_ENV + ':-}')
+    expect(hook).toContain('${' + URL_ENV + ':-}')
+  })
 })
 
 describe('skillZipUrl', () => {
@@ -120,6 +133,11 @@ describe('connectClaudeSteps', () => {
 
   it('is ordered: the key exists before the command that references it', () => {
     expect(steps.map((s) => s.id)).toEqual(['key', 'mcp', 'skill', 'rule'])
+  })
+
+  it('exports the origin beside the key, in the one step that touches the shell', () => {
+    expect(steps[0].text).toContain(urlExportLine('https://runway.example.com'))
+    expect(steps[0].text).toContain(`export ${KEY_ENV}=`)
   })
 
   it('marks exactly the one step whose text has to be masked on screen', () => {

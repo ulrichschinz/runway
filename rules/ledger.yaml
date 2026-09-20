@@ -180,6 +180,10 @@ rules:
       integrations/claude/install.sh MUST pass integrations/claude/tests/install_test.sh: it
       installs the committed state of a ref and never an uncommitted edit, reports --check as
       exit 0 or 1, refuses a symlinked target with 73, and fails on an unknown ref with 66.
+      integrations/claude/hooks/runway-summary.sh MUST pass
+      integrations/claude/tests/hook_test.sh: silent without its environment, silent on any
+      error and when nothing is due, and exactly one line of counters — no task or project
+      name, no key — when a review is due.
     class: executable
     check: tools/checks/skill.sh
     fixture: tools/fixtures/negative.sh
@@ -192,6 +196,13 @@ rules:
       released state somebody chose to install. Its two refusals — the working tree and a
       symlink into it — are the whole point of it, and a script whose refusals nobody has
       watched fire is not holding them. See ADR 0035.
+
+      The hook is the second script this repository ships to a user's machine, and the only
+      one that runs by itself: at the start of every session, in every repository. Its whole
+      promise is negative — no output, no traceback, no credential, no task title, no delay —
+      and a promise of silence is exactly the kind nobody notices breaking until it has been
+      broken for weeks. The test stubs curl, so it holds without a server or a key. See
+      ADR 0041.
 
   - id: RULE-IDX-001
     statement: "The index MUST be current with the working tree."
@@ -512,9 +523,9 @@ rules:
 
   - id: RULE-SURF-004
     statement: >
-      A change to anything under integrations/claude/skills/ MUST come with a raised
-      `version` in integrations/claude/.claude-plugin/plugin.json, recorded in
-      ops/skill-release.json.
+      A change to anything under integrations/claude/skills/ or integrations/claude/hooks/
+      MUST come with a raised `version` in integrations/claude/.claude-plugin/plugin.json,
+      recorded in ops/skill-release.json.
     class: executable
     check: tools/checks/skill.sh
     fixture: tools/fixtures/negative.sh
@@ -528,6 +539,11 @@ rules:
       content hash of the skill, which makes the check independent of any git base: it works
       the same in CI, locally and in the fixture sandbox. `./run surfaces --update` refuses to
       rewrite the record when the content changed and the version did not. See ADR 0035.
+
+      Since ADR 0041 the hash covers hooks/ as well: the plugin delivers a shell script that
+      runs at the start of every session, it reaches users through the same version bump the
+      skill does, and a stale copy of it is worse than stale skill text — the skill is read
+      by a model that can notice it is wrong, the hook is executed.
 
   - id: RULE-DEP-002
     statement: >
