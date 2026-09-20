@@ -202,3 +202,60 @@ class TestTheSurfaceIsAnAllowlist:
         text = " ".join(getattr(c, "text", "") for c in result.content)
         assert "Unknown tool" in text
         assert api_key not in text
+
+
+def _payload(result: Any) -> Any:
+    """The JSON body a tool call returned, as a client receives it."""
+    assert not result.isError, result.content[0].text
+    return json.loads(result.content[0].text)
+
+
+class TestQueryAndPathParametersSurviveTheHop:
+    """The filters are only useful if an MCP client can actually send them.
+
+    ``fastapi-mcp`` turns a tool's arguments back into an HTTP request itself: query values
+    go through httpx's ``params=``, while a path parameter is substituted into the template
+    **unencoded** (``server.py:515``). Neither is covered by ``mcp-tools.json``, which records
+    names and summaries only — so a repeated ``tag``, a non-ASCII ``q`` and a project name
+    holding a space and an umlaut are asserted here, through a real client session.
+    """
+
+    def test_a_repeated_tag_arrives_as_a_list_and_ands(self, client, auth, api_key):
+        client.post(
+            "/tasks", json={"description": "both", "tags": ["next", "ar", "@home"]}, headers=auth
+        )
+        client.post("/tasks", json={"description": "one", "tags": ["next", "ar"]}, headers=auth)
+        _, result = _run(
+            {"X-Api-Key": api_key},
+            tool="next_actions_gtd_next_get",
+            arguments={"tag": ["ar", "@home"]},
+        )
+        assert [t["description"] for t in _payload(result)] == ["both"]
+
+    def test_a_non_ascii_text_search_reaches_the_server(self, client, auth, api_key):
+        # Both tasks are completed, so `status` alone would return two rows: only an applied
+        # `q` can yield one. Without the second `done` the assertion would pass even if `q`
+        # were dropped somewhere on the hop.
+        done = client.post("/tasks", json={"description": "Büro aufräumen"}, headers=auth).json()
+        other = client.post("/tasks", json={"description": "Rechnung"}, headers=auth).json()
+        client.post(f"/tasks/{done['uuid']}/done", headers=auth)
+        client.post(f"/tasks/{other['uuid']}/done", headers=auth)
+        _, result = _run(
+            {"X-Api-Key": api_key},
+            tool="list_tasks_tasks_get",
+            arguments={"status": "completed", "q": "büro"},
+        )
+        assert [t["description"] for t in _payload(result)] == ["Büro aufräumen"]
+
+    @pytest.mark.parametrize("name", ["Haus Umbau", "Büro"])
+    def test_a_project_name_with_a_space_or_an_umlaut_survives_the_path(
+        self, client, auth, api_key, name
+    ):
+        client.post("/tasks", json={"description": "renovieren", "project": name}, headers=auth)
+        client.post("/tasks", json={"description": "other", "project": "sonst"}, headers=auth)
+        _, result = _run(
+            {"X-Api-Key": api_key},
+            tool="project_tasks_gtd_projects__name__get",
+            arguments={"name": name},
+        )
+        assert [t["description"] for t in _payload(result)] == ["renovieren"]

@@ -532,6 +532,17 @@ class TestListSemantics:
         r = client.post("/tasks", json={"description": "r", "recur": "weekly"}, headers=headers)
         assert r.status_code == 400, r.text
 
+    def test_a_repeated_tag_filter_ands_on_the_real_binary(self, real_client):
+        """Two `+tag` tokens in one filter are an AND on Taskwarrior 3.5 — the whole point
+        of scoping a list by an area tag, and nothing but the binary can prove it."""
+        client, headers = real_client
+        self._create(client, headers, description="both", tags=["next", "@home", "ar"])
+        self._create(client, headers, description="one context", tags=["next", "@home"])
+        self._create(client, headers, description="one area", tags=["next", "ar"])
+        r = client.get("/gtd/next", params=[("tag", "@home"), ("tag", "ar")], headers=headers)
+        assert r.status_code == 200, r.text
+        assert [t["description"] for t in r.json()] == ["both"]
+
 
 class TestSearchFilters:
     """The task-list filters against the real binary (ADR 0038).

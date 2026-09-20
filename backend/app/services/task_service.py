@@ -199,6 +199,7 @@ def search_tasks(
     due_after: str | None = None,
     scheduled_before: str | None = None,
     completed_since: str | None = None,
+    q: str | None = None,
     limit: int | None = None,
 ) -> list[Task]:
     """The task list with filters (ADR 0038).
@@ -209,9 +210,12 @@ def search_tasks(
       built into a token, because a filter is one of the two positions `--` cannot protect.
       The project match is `project.is:`, which is exact; the older `project:` is a prefix
       match, so `alpha` also returned `alpha.sub` and `alphabet`.
-    * **Ours** — the four date filters and `limit`, applied in Python over the exported
-      tasks. Taskwarrior's date grammar is a language of its own (`eom`, `now+3d`,
-      `due.before`), and none of it needs to reach the binary for "the day before D".
+    * **Ours** — the four date filters, the text search and `limit`, applied in Python over
+      the exported tasks. Taskwarrior's date grammar is a language of its own (`eom`,
+      `now+3d`, `due.before`), and none of it needs to reach the binary for "the day before
+      D". `q` stays here for a second reason: a description filter would put the user's own
+      words into a filter position, the one place `--` cannot protect, and Taskwarrior would
+      read `(`, `or` or `rc.` in them as grammar.
 
     Every value is validated before anything is exported, so a refused call never runs
     `task` at all.
@@ -259,6 +263,9 @@ def search_tasks(
         ]
     if "completed_since" in days:
         tasks = [t for t in tasks if t.end and _local_day(t.end) >= days["completed_since"]]
+    if q:
+        needle = q.casefold()
+        tasks = [t for t in tasks if needle in t.description.casefold()]
 
     if status == "completed":
         # Urgency is meaningless once a task is done; what a caller wants is the newest.

@@ -8,8 +8,12 @@ changes in one go.
 
 If the server offers a summary operation, call it first and fetch only the lists whose
 counters are not zero. Otherwise two calls are enough: the pending tasks (sections 1, 3,
-4 and 6 are filters over that list) and the project list (section 5). If the user named a
-context ("daily @home"), filter section 6 by it.
+4 and 6 are filters over that list) and the project list (section 5). In a scoped
+repository pass the scope tags as `tag` on the task list; the project list takes no `tag`
+and would name every area's projects, so take section 5 from the scoped task list instead
+of calling it. If the user named a context
+("daily @home"), filter section 6 by it yourself — a task without a context fits
+everywhere, and a server-side context filter would drop it.
 
 ## 2. Show one numbered screen
 

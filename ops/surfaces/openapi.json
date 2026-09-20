@@ -1556,6 +1556,28 @@
         "operationId": "inbox_gtd_inbox_get",
         "parameters": [
           {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
+          {
             "in": "header",
             "name": "x-api-key",
             "required": false,
@@ -1614,6 +1636,28 @@
         "description": "List tasks tagged +next \u2014 concrete actions you can do right now.",
         "operationId": "next_actions_gtd_next_get",
         "parameters": [
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
           {
             "in": "header",
             "name": "x-api-key",
@@ -1742,6 +1786,28 @@
             }
           },
           {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
+          {
             "in": "header",
             "name": "x-api-key",
             "required": false,
@@ -1800,6 +1866,28 @@
         "description": "List tasks tagged +someday \u2014 ideas and intentions not yet committed to.",
         "operationId": "someday_gtd_someday_get",
         "parameters": [
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
           {
             "in": "header",
             "name": "x-api-key",
@@ -1860,6 +1948,28 @@
         "operationId": "tickler_gtd_tickler_get",
         "parameters": [
           {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
+          {
             "in": "header",
             "name": "x-api-key",
             "required": false,
@@ -1918,6 +2028,28 @@
         "description": "List tasks tagged +waiting \u2014 things delegated or blocked on someone/something else.",
         "operationId": "waiting_gtd_waiting_get",
         "parameters": [
+          {
+            "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tasks carrying ALL of these tags, written without `+`. Repeat the parameter for more than one. The inbox is untagged by definition, so any tag yields an empty inbox.",
+              "title": "Tag"
+            }
+          },
           {
             "in": "header",
             "name": "x-api-key",
@@ -2394,6 +2526,25 @@
               ],
               "description": "Only tasks completed on or after this day. `YYYY-MM-DD`. It implies `status=completed` when no status is given, and is refused with `pending` or `waiting`.",
               "title": "Completed Since"
+            }
+          },
+          {
+            "description": "Case-insensitive substring of the description. It is filtered on the server and never passed to Taskwarrior, so it takes plain text, not a search expression. Useful as a duplicate check: run it once with `status=pending` and once with `status=waiting`.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring of the description. It is filtered on the server and never passed to Taskwarrior, so it takes plain text, not a search expression. Useful as a duplicate check: run it once with `status=pending` and once with `status=waiting`.",
+              "title": "Q"
             }
           },
           {

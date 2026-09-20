@@ -386,3 +386,52 @@ class TestListFiltersOverHttp:
         for _user, args, _text in fake_task.calls:
             for token in args:
                 assert not any(value in token for value in poison), args
+
+
+class TestTheTextSearch:
+    """`q` is ours, not Taskwarrior's.
+
+    It is a casefold substring of the description, applied in Python over the export, so no
+    part of what the user typed ever becomes an argv token — a description filter would sit
+    in the one position `--` cannot protect (ADR 0038).
+    """
+
+    def test_it_matches_case_insensitively_including_umlauts(self, client, auth):
+        _create(client, auth, description="Büro aufräumen")
+        _create(client, auth, description="Rechnung schreiben")
+        r = client.get("/tasks", params={"q": "büro"}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["Büro aufräumen"]
+
+    def test_a_duplicate_check_needs_the_waiting_status_too(self, client, auth):
+        """The skill's duplicate check: once pending, once waiting, because a hidden
+        tickler is not pending."""
+        _create(client, auth, description="Vertrag Meyer prüfen", wait="2026-10-01")
+        # A visible task and a second hidden one, neither matching: without them both
+        # assertions would hold with `q` ignored entirely.
+        _create(client, auth, description="Angebot Berg")
+        _create(client, auth, description="Rechnung Berg", wait="2026-10-01")
+        assert client.get("/tasks", params={"q": "meyer"}, headers=auth).json() == []
+        r = client.get("/tasks", params={"q": "meyer", "status": "waiting"}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["Vertrag Meyer prüfen"]
+
+    def test_it_narrows_before_the_limit_applies(self, client, auth):
+        _create(client, auth, description="Angebot Meyer", priority="H")
+        _create(client, auth, description="Angebot Berg", priority="M")
+        _create(client, auth, description="Rechnung Meyer", priority="L")
+        r = client.get("/tasks", params={"q": "meyer", "limit": 2}, headers=auth)
+        assert [t["description"] for t in r.json()] == ["Angebot Meyer", "Rechnung Meyer"]
+
+    def test_it_is_bounded(self, client, auth):
+        assert client.get("/tasks", params={"q": "x" * 201}, headers=auth).status_code == 422
+
+    def test_no_part_of_it_ever_reaches_the_binary(self, fake_task, client, auth):
+        _create(client, auth, description="safe")
+        poison = ["(", " or ", "\n", "rc.data.location=/tmp/x", "description.has:x", "-x"]
+        fake_task.calls.clear()
+        for value in poison:
+            r = client.get("/tasks", params={"q": value}, headers=auth)
+            assert r.status_code == 200, (value, r.text)
+            assert r.json() == []
+        for _user, args, text in fake_task.calls:
+            for token in [*args, *text]:
+                assert not any(value in token for value in poison), args

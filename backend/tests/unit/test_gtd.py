@@ -1,5 +1,7 @@
 """Characterization tests for the GTD views."""
 
+import pytest
+
 
 def _create(client, auth, **body):
     body.setdefault("description", "a task")
@@ -190,3 +192,65 @@ class TestProjectTasksMatchExactly:
         r = client.get("/gtd/projects/a(b)", headers=auth)
         assert r.status_code == 400
         assert "Invalid project name" in r.json()["detail"]
+
+
+class TestTagScoping:
+    """Every GTD list takes `tag`, repeatable and AND-ed (D13).
+
+    A repository that declares a scope passes its tags on every list call, so the titles of
+    everything else never reach the transcript. The filter is Taskwarrior's `+tag`, built
+    from validated values only.
+    """
+
+    @staticmethod
+    def _names(client, auth, view, params=None):
+        r = client.get(f"/gtd/{view}", params=params or [], headers=auth)
+        assert r.status_code == 200, r.text
+        return [t["description"] for t in r.json()]
+
+    def test_each_status_list_narrows_to_the_tagged_tasks(self, client, auth):
+        for view in ("next", "waiting", "someday"):
+            _create(client, auth, description=f"{view} mine", tags=[view, "ar"])
+            _create(client, auth, description=f"{view} theirs", tags=[view, "privat"])
+            assert self._names(client, auth, view, [("tag", "ar")]) == [f"{view} mine"]
+
+    def test_the_tickler_and_a_project_narrow_too(self, client, auth):
+        _create(client, auth, description="parked mine", wait="2026-10-01", tags=["ar"])
+        _create(client, auth, description="parked theirs", wait="2026-10-02", tags=["privat"])
+        _create(client, auth, description="alpha mine", project="alpha", tags=["ar"])
+        _create(client, auth, description="alpha theirs", project="alpha", tags=["privat"])
+        assert self._names(client, auth, "tickler", [("tag", "ar")]) == ["parked mine"]
+        assert self._names(client, auth, "projects/alpha", [("tag", "ar")]) == ["alpha mine"]
+
+    def test_two_tags_are_and_ed(self, client, auth):
+        _create(client, auth, description="both", tags=["next", "ar", "@home"])
+        _create(client, auth, description="one", tags=["next", "ar"])
+        params = [("tag", "ar"), ("tag", "@home")]
+        assert self._names(client, auth, "next", params) == ["both"]
+
+    def test_any_tag_empties_the_inbox_because_the_inbox_is_untagged(self, client, auth):
+        _create(client, auth, description="unprocessed")
+        assert self._names(client, auth, "inbox") == ["unprocessed"]
+        assert self._names(client, auth, "inbox", [("tag", "ar")]) == []
+
+    @pytest.mark.parametrize("tag", ["-next", "", "a,b", "1abc"])
+    def test_a_refused_tag_is_a_400_on_every_list(self, client, auth, tag):
+        for view in ("inbox", "next", "waiting", "someday", "tickler", "projects/alpha"):
+            r = client.get(f"/gtd/{view}", params={"tag": tag}, headers=auth)
+            assert r.status_code == 400, (view, tag)
+            assert "Invalid tag" in r.json()["detail"]
+
+    def test_more_than_ten_tags_is_a_422(self, client, auth):
+        params = [("tag", f"t{i}") for i in range(11)]
+        assert client.get("/gtd/next", params=params, headers=auth).status_code == 422
+
+    def test_no_refused_tag_ever_reaches_the_binary(self, fake_task, client, auth):
+        poison = ["(", ")", " or ", "\n", "rc.data.location=/tmp/x", "-x", "+x", "z" * 200]
+        fake_task.calls.clear()
+        for value in poison:
+            for view in ("next", "waiting", "someday", "tickler", "projects/alpha"):
+                r = client.get(f"/gtd/{view}", params={"tag": value}, headers=auth)
+                assert r.status_code in (400, 422), (view, value, r.status_code)
+        for _user, args, _text in fake_task.calls:
+            for token in args:
+                assert not any(value in token for value in poison), args

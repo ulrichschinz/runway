@@ -137,7 +137,11 @@ every such value is also shaped before it is built into a token: the project nam
 parentheses, quotes, backslash, `:`, `/ ? # %`, no leading sign or space, at most 100
 characters), each filter tag (`TAG_RE`, at most ten of them, at most 100 characters each), and
 the four date filters (`YYYY-MM-DD` only, then compared in Python — Taskwarrior's own date
-grammar never sees them). Validation runs before the export, so a refused value never reaches
+grammar never sees them). The text search `q` is the opposite case and is listed here so it is
+not mistaken for one: it is bounded at 200 characters and compared in Python against the
+exported descriptions, so no part of it is ever built into a token — a description filter would
+put the user's own words back into the one position `--` cannot protect, which is the mistake
+`create_task` made below. Validation runs before the export, so a refused value never reaches
 an argument vector at all; `backend/tests/unit/test_tasks.py` asserts exactly that for a fuzz
 list, and the container tier repeats it against the binary.
 

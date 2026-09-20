@@ -66,6 +66,14 @@ def list_tasks(
         "`status=completed` when no status is given, and is refused with `pending` or "
         "`waiting`.",
     ),
+    q: str | None = Query(
+        None,
+        max_length=200,
+        description="Case-insensitive substring of the description. It is filtered on the "
+        "server and never passed to Taskwarrior, so it takes plain text, not a search "
+        "expression. Useful as a duplicate check: run it once with `status=pending` and "
+        "once with `status=waiting`.",
+    ),
     limit: int | None = Query(
         None, ge=1, le=500, description="Return at most this many tasks, after sorting."
     ),
@@ -86,6 +94,7 @@ def list_tasks(
         due_after=due_after,
         scheduled_before=scheduled_before,
         completed_since=completed_since,
+        q=q,
         limit=limit,
     )
 

@@ -26,13 +26,14 @@ what they do.
 |---|---|
 | tasks of one project | gtd project tasks (`gtd/projects/{name}`) |
 | project names | gtd projects |
-| inbox / next / waiting / someday | the matching gtd list |
+| inbox / next / waiting / someday / tickler | the matching gtd list, optional `tag` (repeatable, AND) |
 | overdue, done since, "in no list" | list tasks (`tasks`): `status`, `project`, `tag` (repeatable, AND), `due_before`/`due_after`/`completed_since` (YYYY-MM-DD), `limit` |
 | capture unclarified | inbox post (description, optional note) |
 | counters for reviews and hooks | gtd summary, if present |
 | hidden ticklers (future `wait`, soonest first) | gtd tickler (`gtd/tickler`) |
 | project plan | get plan / upsert plan |
 | change tags without reading first | modify task (`tasks/{uuid}`), `tags_add` / `tags_remove` |
+| duplicate check | list tasks (`tasks`) with `q` = a distinctive word, once with `status=pending` and once with `status=waiting` (hidden ticklers are not pending) |
 
 ## Status tags
 
@@ -57,7 +58,7 @@ right. Work and private life are not kept apart by a label of their own; `@offic
   `@errands`, `@phone`. Look at the tags already in use before inventing a new one.
 - One context per task is the norm; two only when the task really can be done in either.
   No context means "anywhere".
-- A context is not a topic. Topics are projects, or findable by text search.
+- A context is not a topic. Topics are projects, or findable with `q` on list tasks.
 - For recurring conversations with one person use `@agenda-<name>`.
 - The `@` is part of the tag name (`"@phone"`).
 
@@ -66,9 +67,14 @@ right. Work and private life are not kept apart by a label of their own; `@offic
 A repository may declare `runway_scope: <tags>`. Then unasked lists (next, waiting,
 reviews) show only tasks carrying those tags and give the rest as one line of counts. This
 exists for repositories whose conversations are logged or shared with others. An explicit
-request by name always wins. Without the declaration, nothing is hidden. Be aware that
-scoping filters what you say, not what the tools return; use the server's tag filter when
-it has one.
+request by name always wins. Without the declaration, nothing is hidden.
+
+When `runway_scope` is set, pass its tags as `tag` on **every** task list call, so other
+areas' titles never reach the transcript. The project-name list takes no `tag` and returns
+every area's projects: derive the project names you need from a scoped task list instead of
+calling it. Do not list the inbox in a scoped repository; report its count instead (the
+summary operation gives it, where the server has one). Capture in a scoped repository stays
+untagged — it goes to the inbox, and adding the scope tag would mark it clarified.
 
 ## Projects
 

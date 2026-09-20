@@ -37,8 +37,9 @@ Look in the instructions already in your context (CLAUDE.md, AGENTS.md) for:
 
 - `runway_project: <name>` — the runway project this repository belongs to.
 - `runway_scope: <tag> [<tag> …]` — optional. Only if the repository declares it, limit
-  what you list unasked to tasks carrying these tags (see "Scoping" in
-  `references/conventions.md`). Most users never need it.
+  what you list unasked to tasks carrying these tags: pass them as `tag` on every task list
+  call, so nothing else even arrives (see "Scoping" in `references/conventions.md`, which
+  also says what to do about the project-name list). Most users never need it.
 
 The user's personal conventions (contexts, language) live in
 `~/.config/runway/profile.md`. Read it once per session before the first write or review;
@@ -49,7 +50,7 @@ if it is missing, use the defaults in `references/conventions.md` and mention on
 set of lists, and what separates them at the moment of choice is the **context** — where
 the user is and what they have at hand. So do not sort tasks into areas of life and do not
 hide anything by default. When the user wants a narrower view they say so ("nur @home",
-"alles zum Umzug"), and you filter by context, project or text.
+"alles zum Umzug"), and you filter by context, project or text (`q` on list tasks).
 
 If no project is declared and the user asks about "this project", list the project names
 and ask once; suggest adding the `runway_project:` line so you never have to ask again.
@@ -78,6 +79,8 @@ offer `plan` or a review. Do not fix anything unasked.
   It gets clarified later; nothing is lost.
 - Confirm in one line: what was created, where. No follow-up questions unless the project
   is genuinely ambiguous.
+- In a scoped repository, capture without tags; never add the scope tag to an inbox item —
+  a tag means clarified.
 - `due` is for hard deadlines only. A date promised to someone else ("bis Mittwoch an
   Frau Berg") is a hard deadline; a date the user merely sets for themselves is not, and
   such wish dates turn into a wall of overdue items. "Not before" is `scheduled`; "hide
@@ -89,7 +92,8 @@ appears in the conversation, offer it: one line at the end of your answer, e.g.
 *"Soll ich dafür ein Todo anlegen: 'Angebot an Meyer schicken' (Projekt website-relaunch)?"*
 At most one offer per answer. Do not offer for things you are completing in this session,
 for hypotheticals, or again after a "no". Check for duplicates only after the user says
-yes — a lookup before every offer costs time for nothing.
+yes — a lookup before every offer costs time for nothing (list tasks with `q` = a
+distinctive word, once pending and once waiting).
 
 A commitment often comes with a follow-on wait ("ich schicke ihr X, dann meldet sie
 sich"). Offer the user's own action and mention the wait in the same line. When creating
@@ -107,8 +111,9 @@ annotation; then create the waiting-for it names.
 ### Engage ("what should I do now?")
 Context is the main filter in this system. If the user has not said where they are, ask
 for context and available time first ("Wo bist du, wie viel Zeit hast du?"), then filter
-the `next` list by that context tag and show at most five. Tasks without a context fit
-everywhere; include them. GTD picks by context, time and
+the `next` list by that context tag and show at most five. Fetch `next` scoped only by the
+area tag and filter by context yourself: tasks without a context fit everywhere, and a
+server-side context filter would drop exactly those. GTD picks by context, time and
 energy before priority; a list sorted by urgency alone ignores that the user may be on a
 train with twenty minutes.
 
