@@ -15,7 +15,7 @@ passlib[bcrypt]==1.7.4
 # bytes` on every hash, because bcrypt 5 dropped the silent truncation passlib relies on.
 # Bumping this breaks every login. Dependabot will offer 5.0.0; do not take it without
 # replacing passlib first.
-bcrypt==4.0.1
+bcrypt==5.0.0
 python-multipart==0.0.12
 pydantic-settings==2.15.0
 aiosqlite==0.22.1
