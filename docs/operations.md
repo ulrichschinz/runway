@@ -713,6 +713,18 @@ Nothing compares the checked-in copy against the host. A gate check cannot do it
 deploy host — so the honest options are a scheduled job that reports divergence from somewhere that does, or
 accepting that this file is correct as of the date on it.
 
+## Defect fixed 2026-10-12: a wrong password reloaded the login page without a word
+
+Until this date, logging in with a wrong username or password in the web UI brought the login form back
+empty, with no message. The API client treated every 401 as an expired session and reloaded `/login`, and
+`POST /auth/login` answers 401 for refused credentials — so "Invalid credentials" was discarded before it
+could be shown, and a typo could not be told apart from a broken login. In production from the first
+release; the backend refused correctly throughout, and no session or data was affected.
+
+What would have caught it: a test that submits a wrong password and looks at what the user is left with.
+The decision is now a pure, tested function (`frontend/src/shared/sessionEnd.js`); the wiring around it
+remains under `RISK-TEST-004` ([brief 0045](briefs/0045-a-refused-login-stays-on-the-page.md)).
+
 ## Defect fixed 2026-09-19: removing a tag did nothing
 
 Until this date, removing a tag in the web UI, or sending a shorter `tags` list to `PUT /tasks/{uuid}`
