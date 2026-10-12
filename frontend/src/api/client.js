@@ -1,5 +1,7 @@
 import axios from 'axios'
 
+import { endsSession } from '../shared/sessionEnd.js'
+
 const client = axios.create({ baseURL: '/api' })
 
 client.interceptors.request.use((config) => {
@@ -11,7 +13,7 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err.response?.status === 401) {
+    if (endsSession(err)) {
       localStorage.removeItem('token')
       window.location.href = '/login'
     }
