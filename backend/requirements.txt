@@ -16,7 +16,7 @@ passlib[bcrypt]==1.7.4
 # Bumping this breaks every login. Dependabot will offer 5.0.0; do not take it without
 # replacing passlib first.
 bcrypt==4.0.1
-python-multipart==0.0.12
+python-multipart==0.0.32
 pydantic-settings==2.15.0
 aiosqlite==0.22.1
 # 0.3.3 held here until 2026-09-18, and for most of that time the MCP server did not work.
