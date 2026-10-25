@@ -31,4 +31,4 @@ fastapi-mcp==0.4.0
 # The upper bound survives for its original reason: mcp 2.0.0 changed Server.__init__ and
 # makes `import app.main` raise TypeError, so a fresh build produces an image whose backend
 # cannot start. Pinned until fastapi-mcp supports mcp 2.x. See ADR 0004.
-mcp==1.29.0
+mcp==1.30.0
