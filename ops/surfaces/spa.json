@@ -17,6 +17,7 @@
     "/next",
     "/projects",
     "/projects/:name",
+    "/review",
     "/settings",
     "/someday",
     "/waiting"

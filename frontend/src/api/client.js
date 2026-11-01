@@ -1,5 +1,6 @@
 import axios from 'axios'
 
+import { loginHref } from '../shared/returnPath.js'
 import { endsSession } from '../shared/sessionEnd.js'
 
 const client = axios.create({ baseURL: '/api' })
@@ -15,7 +16,9 @@ client.interceptors.response.use(
   (err) => {
     if (endsSession(err)) {
       localStorage.removeItem('token')
-      window.location.href = '/login'
+      // Keep where the visit was going (a Custom Tab's /next?task=…), as the router guard does.
+      const { pathname, search, hash } = window.location
+      window.location.href = loginHref(pathname + search + hash)
     }
     return Promise.reject(err)
   }

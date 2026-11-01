@@ -21,7 +21,7 @@
  */
 
 import { allTagParts, contextTagsOf, splitTagParts } from './contextTags.js'
-import { dayOf } from './dates.js'
+import { dayOf, plusDays } from './dates.js'
 
 // The other rule modules read tags through this one, so the comma rule has one entry
 // point for the new UI (and `contextTags.js` keeps its fan-in).
@@ -277,4 +277,19 @@ export function projectNameError(name, existing = []) {
   if (['overview', 'plans'].includes(n)) return 'proj.err.reserved'
   if (existing.some((p) => p.toLowerCase() === n.toLowerCase())) return 'proj.err.exists'
   return ''
+}
+
+/**
+ * The weekly review is due (06 web.js: the rail's yellow ring and `fällig`): never recorded, or
+ * the last one was seven or more calendar days before `today`. Days are compared in server time
+ * (`dayOf`), so a timestamp just before or after a DST night counts for its own day.
+ *
+ * @param {string|null|undefined} lastWeekly  the last weekly review stamp (`/gtd/summary`)
+ * @param {string|null} today  `YYYY-MM-DD`, or null before the first load (then never due)
+ * @returns {boolean}
+ */
+export function reviewDue(lastWeekly, today) {
+  if (!today) return false
+  const last = lastWeekly ? dayOf(lastWeekly) : null
+  return !last || last <= plusDays(today, -7)
 }

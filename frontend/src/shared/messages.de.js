@@ -19,6 +19,16 @@ export default {
   'title.inbox': 'Inbox', 'title.next': 'Nächste', 'title.waiting': 'Warten auf', 'title.projects': 'Projekte', 'title.someday': 'Irgendwann',
   'title.review': 'Rückblick', 'title.all': 'Alle', 'title.settings': 'Einstellungen',
   stand: 'Stand {t}', close: 'schließen', undo: 'Rückgängig', 'shell.margin': 'Randspalte', 'shell.today': 'Heute',
+  // the shell (brief 0050)
+  'brand.name': 'Agentic Reach', 'brand.product': 'runway', 'shell.offline': 'kein Netz', 'shell.coming': 'kommt',
+  'shell.taskMissing': 'Dieses Todo gibt es nicht mehr.', 'shell.moreClose': 'Mehr schließen',
+  // login (pinned on Android: Benutzername, Passwort, Anmelden)
+  'h.login': ['Bei runway ', 'anmelden', ''], 'h.register': ['Ein Konto ', 'anlegen', ''],
+  'login.user': 'Benutzername', 'login.password': 'Passwort', 'login.submit': 'Anmelden', 'login.create': 'Konto erstellen',
+  'login.busy': 'Einen Moment …', 'login.toRegister': 'Noch kein Konto? Registrieren', 'login.toLogin': 'Schon ein Konto? Anmelden',
+  'login.refused': 'Benutzername oder Passwort stimmt nicht.', 'login.tooMany': 'Zu viele Versuche. Bitte in ein paar Minuten noch einmal.',
+  'login.taken': 'Diesen Benutzernamen gibt es schon.', 'login.closed': 'Registrieren ist auf diesem Server abgeschaltet.',
+  'login.failed': 'Das hat nicht geklappt. Bitte noch einmal.',
   // headings: [before, accent word, after]; exactly one Fraunces word each
   'h.inbox': ['Was ist ', 'das', '?'], 'h.inboxEmpty': ['Inbox ist ', 'leer', '.'], 'h.next': ['Was jetzt ', 'zählt', ''],
   'h.waiting': ['Worauf du ', 'wartest', ''], 'h.projects': ['Was du ', 'bewegst', ''], 'h.someday': ['Später, ', 'vielleicht', ''],
