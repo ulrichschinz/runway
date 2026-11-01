@@ -1,0 +1,53 @@
+== node drive.mjs keepalive
+complete 8d97e269-932a-475b-896a-5d0a0479ea53 at 2026-11-01T13:24:09.481Z
+outbox after tick: [["done","held"]]
+close page at 2026-11-01T13:24:11.486Z (hold ends 2026-11-01T13:24:15.481Z)
+server status: completed end 20261101T132411Z
+2026-11-01T13:24:09.476Z 127.0.0.1:51829 - "GET /tasks?completed_since=2026-10-26 HTTP/1.1" 200
+2026-11-01T13:24:09.476Z 127.0.0.1:51831 - "GET /gtd/inbox HTTP/1.1" 200
+2026-11-01T13:24:09.494Z 127.0.0.1:51834 - "GET /gtd/next HTTP/1.1" 200
+2026-11-01T13:24:09.496Z 127.0.0.1:51837 - "GET /gtd/someday HTTP/1.1" 200
+2026-11-01T13:24:09.501Z 127.0.0.1:51840 - "GET /gtd/waiting HTTP/1.1" 200
+2026-11-01T13:24:09.503Z 127.0.0.1:51843 - "GET /gtd/inbox HTTP/1.1" 200
+2026-11-01T13:24:09.507Z 127.0.0.1:51846 - "GET /gtd/next HTTP/1.1" 200
+2026-11-01T13:24:09.509Z 127.0.0.1:51849 - "GET /gtd/someday HTTP/1.1" 200
+2026-11-01T13:24:09.512Z 127.0.0.1:51852 - "GET /gtd/waiting HTTP/1.1" 200
+2026-11-01T13:24:11.511Z 127.0.0.1:51861 - "POST /tasks/8d97e269-932a-475b-896a-5d0a0479ea53/done HTTP/1.1" 204
+2026-11-01T13:24:13.217Z 127.0.0.1:51802 - "POST /auth/login HTTP/1.1" 200
+2026-11-01T13:24:13.228Z 127.0.0.1:51868 - "GET /tasks/8d97e269-932a-475b-896a-5d0a0479ea53 HTTP/1.1" 200
+
+== node drive.mjs undo
+hidden during hold: true undo: true back in list: true server status: pending outbox: {"v":1,"ops":[]}
+
+== node drive.mjs offline
+offline op: [["put","failed",{"reason":"network","message":""},false]]
+row overlay: [["someday"],"failed"]
+in someday list: true
+refresh offline: stand/rows before [ '14:25', 26 ] after [ '14:25', 26, true ]
+after online: outbox [] offline flag false
+server tags: ["someday"] scheduled null
+undo sent move: true server tags: ["waiting"] scheduled 20261030T230000Z
+
+== node drive.mjs refused
+refused op: [["put","failed",{"reason":"refused","message":"Invalid tag: a/b"}]]
+PUT requests after auto-retry events: 0
+PUT requests after Erneut senden: 1 [["failed"]]
+dismiss (undo): true {"v":1,"ops":[]}
+
+== node drive.mjs auth
+after 401 reload: http://127.0.0.1:5173/login token: null outbox: [["done","auth",false]]
+server status before login: pending
+after login: outbox {"v":1,"ops":[]} server status: completed
+
+== node drive.mjs capture-close
+stored at once: [["capture","sending"]]
+after reopen: outbox {"v":1,"ops":[]} server copies: 1 in inbox: 1
+
+== node drive.mjs hidden
+1 s into the hold, tab hidden: done requests [
+  '2026-11-01T13:26:10.552Z 127.0.0.1:52609 - "POST /tasks/8c0c3587-9a36-4ce6-b957-0d5788bba6dc/done HTTP/1.1" 204'
+] outbox {"v":1,"ops":[]}
+
+== node drive.mjs throttle
+summary reads after 5 focus events within 2 s of load: 0
+
