@@ -6,7 +6,8 @@
  * It assembles what `layout/AppFrame.vue` shows — counts, Stand, the outbox line, the user, the
  * colour scheme — from the stores and provides it to every page (`useFrame`). Pages in any feature
  * unit read it there, so no page has to reach into another feature's store. It also reads the todo
- * a `?task=<uuid>` link names (Android's Custom Tab) and keeps the document title.
+ * a `?task=<uuid>` link names (Android's Custom Tab; the list pages open their detail from the same
+ * query) — a deferred one the lists leave out is held for the detail — and keeps the document title.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -63,11 +64,13 @@ watch([view, () => gtd.inboxDot], ([v, dot]) => {
   if (v === 'inbox' && dot) gtd.seeInbox()
 }, { immediate: true })
 
-// ?task=<uuid>: read the todo once the link names one; a later link replaces it.
+// ?task=<uuid>: the todo whose detail is open. Read once the link names one (the detail shows
+// a todo the snapshot does not hold by this); a later link replaces it.
+const taskId = computed(() => taskParam(route.query.task))
 const task = ref(null)
 let asked = null
 watch(
-  () => taskParam(route.query.task),
+  taskId,
   async (uuid) => {
     asked = uuid
     if (!uuid) {
@@ -77,7 +80,13 @@ watch(
     let found = null
     try {
       const { data } = await client.get(`/tasks/${uuid}`)
-      found = data.status === 'deleted' ? { uuid, missing: true } : { uuid, description: data.description }
+      if (data.status === 'deleted') found = { uuid, missing: true }
+      else if (data.status === 'completed') found = { uuid, description: data.description, done: true }
+      else {
+        found = { uuid, description: data.description }
+        // Deferred by a future `wait`, it is in no list; the store holds it for the detail.
+        gtd.keepAside(data)
+      }
     } catch (error) {
       // The API answers an unknown uuid with 400; a network failure says nothing about the todo.
       const status = error.response?.status
@@ -88,13 +97,19 @@ watch(
   { immediate: true },
 )
 
+/** Open a todo's detail: the address carries it, so a reload or Android's link means the same. */
+function openTask(uuid) {
+  if (taskId.value === uuid) return
+  router.replace({ query: { ...route.query, task: uuid } })
+}
+
 function closeTask() {
   const query = { ...route.query }
   delete query.task
   router.replace({ query })
 }
 
-provideFrame({ props, on, task, closeTask })
+provideFrame({ props, on, taskId, task, openTask, closeTask })
 
 // The tab says where you are; the old UI keeps the page's own title.
 const oldTitle = document.title

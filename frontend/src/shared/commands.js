@@ -27,7 +27,11 @@ export const COMMANDS = [
   go('settings', ',', 'nav.settings'),
   { id: 'cursor.down', keys: [['j'], ['ArrowDown']], scope: 'rows', group: 'keys.g.rows', label: 'keys.move', repeats: true },
   { id: 'cursor.up', keys: [['k'], ['ArrowUp']], scope: 'rows', group: 'keys.g.rows', label: 'keys.move', repeats: true },
+  { id: 'open', keys: [['Enter'], ['o']], scope: 'rows', group: 'keys.g.rows', label: 'keys.open' },
+  { id: 'close', keys: [['Escape']], scope: 'rows', group: 'keys.g.rows', label: 'keys.close' },
+  { id: 'edit', keys: [['e']], scope: 'rows', group: 'keys.g.rows', label: 'keys.edit' },
   { id: 'check', keys: [['x']], scope: 'rows', group: 'keys.g.rows', label: 'keys.check' },
+  { id: 'start', keys: [['s']], scope: 'rows', group: 'keys.g.rows', label: 'keys.start' },
   { id: 'plan', keys: [['t']], scope: 'rows', group: 'keys.g.rows', label: 'keys.plan' },
   { id: 'delete', keys: [['Delete'], ['Backspace']], scope: 'rows', group: 'keys.g.rows', label: 'keys.delete' },
   ...['0', '1', '2', '3', '4', '5', '6'].map((k) => ({
@@ -37,11 +41,12 @@ export const COMMANDS = [
 ]
 
 /** How a key is shown in the sheet. */
-const KEY_NAMES = { Delete: 'Entf', Backspace: '⌫', ArrowDown: '↓', ArrowUp: '↑' }
+const KEY_NAMES = { Enter: '⏎', Escape: 'Esc', Delete: 'Entf', Backspace: '⌫', ArrowDown: '↓', ArrowUp: '↑' }
 
 /**
  * Whether a key event is for the page's keymap at all: not while typing in a field or
- * inside a dialog, not during IME composition, and never with a modifier.
+ * inside a dialog, not during IME composition, never with a modifier, and not Enter or Space
+ * on a button or link.
  *
  * @param {{key: string, ctrlKey?: boolean, metaKey?: boolean, altKey?: boolean, isComposing?: boolean,
  *   target?: {tagName?: string, isContentEditable?: boolean, closest?: Function}}} event
@@ -51,6 +56,8 @@ export function ownsKey(event) {
   const target = event.target
   if (!target) return true
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) return false
+  // Enter and Space on a button or link are that control's own click.
+  if (['BUTTON', 'A'].includes(target.tagName) && (event.key === 'Enter' || event.key === ' ')) return false
   return !target.closest?.('[role="dialog"]')
 }
 

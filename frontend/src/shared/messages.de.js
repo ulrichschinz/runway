@@ -21,7 +21,7 @@ export default {
   stand: 'Stand {t}', close: 'schließen', undo: 'Rückgängig', 'shell.margin': 'Randspalte', 'shell.today': 'Heute',
   // the shell (brief 0050)
   'brand.name': 'Agentic Reach', 'brand.product': 'runway', 'shell.offline': 'kein Netz', 'shell.coming': 'kommt',
-  'shell.taskMissing': 'Dieses Todo gibt es nicht mehr.', 'shell.moreClose': 'Mehr schließen',
+  'shell.taskMissing': 'Dieses Todo gibt es nicht mehr.', 'shell.taskDone': 'Dieses Todo ist erledigt.', 'shell.moreClose': 'Mehr schließen',
   // login (pinned on Android: Benutzername, Passwort, Anmelden)
   'h.login': ['Bei runway ', 'anmelden', ''], 'h.register': ['Ein Konto ', 'anlegen', ''],
   'login.user': 'Benutzername', 'login.password': 'Passwort', 'login.submit': 'Anmelden', 'login.create': 'Konto erstellen',
@@ -103,6 +103,12 @@ export default {
   'd.recur.daily': 'täglich', 'd.recur.weekly': 'wöchentlich', 'd.recur.monthly': 'monatlich', 'd.recur.yearly': 'jährlich',
   'd.dep': 'Hängt ab von', 'd.depNone': 'nichts', 'd.more': 'Mehr', 'd.less': 'weniger', 'd.notes': '¶ Notizen', 'd.notePh': 'Notiz hinzufügen, Enter',
   'd.check': 'Abhaken', 'd.needCtx': 'Nächste braucht einen Kontext. Wähl einen, dann wandert das Todo.',
+  'd.id': 'ID {id}', 'd.titleField': 'Text des Todos', 'd.scheduled': 'Geplant', 'd.tags': 'Tags', 'd.tagPh': 'Tag hinzufügen, Enter',
+  'd.tagBad': 'Ein Tag ist ein Wort ohne Leerzeichen und Komma.', 'd.tagList': 'Die Liste wählst du oben unter „Liste“.', 'd.tagHas': 'Das Todo hat diesen Tag schon.',
+  'd.deferredUntil': 'zurückgestellt bis {d}',
+  'd.remove': '{x} entfernen', 'd.recurPh': 'anderer Rhythmus, Enter', 'd.depAdd': 'hinzufügen …', 'd.recurKeeps': 'wiederkehrend: bleibt',
+  'd.legacyTag': 'Ein alter Komma-Tag lässt sich hier nicht aufteilen. Bereinige ihn zuerst.', 'd.discard': 'Verwerfen',
+  'd.recurring': 'Wiederholt sich jetzt. Jede Wiederholung ist ein eigenes Todo in deinen Listen.',
   // projects
   'proj.one': 'Projekt', 'proj.active': '{n} aktiv', 'proj.stalled': 'steckt fest', 'proj.stalledN': '{n} steckt fest', 'proj.allMoving': 'alle in Bewegung',
   'proj.state.active': 'aktiv', 'proj.state.on_hold': 'ruht', 'proj.state.done': 'abgeschlossen',

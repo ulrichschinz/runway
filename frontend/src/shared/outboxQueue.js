@@ -355,7 +355,7 @@ export function captureRow(op) {
   }
 }
 
-/** Fields a `put` body sets directly (beyond tags, project and scheduled). */
+/** Fields a `put` body sets directly (beyond tags, project, scheduled and depends). */
 const PLAIN_FIELDS = ['priority', 'due', 'wait', 'until', 'recur']
 
 /** A task as a `put` body leaves it, for the row until the server's reply replaces it. */
@@ -363,6 +363,7 @@ function patchTask(t, body) {
   const next = applyPayload(t, body)
   if (body.description) next.description = body.description
   for (const field of PLAIN_FIELDS) if (field in body) next[field] = body[field] || null
+  if (Array.isArray(body.depends)) next.depends = [...body.depends]
   return next
 }
 

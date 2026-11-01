@@ -132,6 +132,15 @@ button.tick:hover::before { box-shadow: inset 0 0 0 1.5px var(--rw-text); }
 }
 .line.swiping { background: var(--rw-hover); transition: none; }
 
+/* a narrow page column on a wide screen (the detail docked beside it, 06 `.app.dock`): the title
+   keeps its room, only the last meta column (the day) stays */
+@media (min-width: 761px) {
+  @container page (max-width: 600px) {
+    .line, .line.k-inbox, .line.k-waiting, .line.k-someday { grid-template-columns: 44px minmax(0, 1fr) 128px; }
+    .m:not(:last-child) { display: none; }
+  }
+}
+
 /* the phone: ring, then the title over one meta line; at most 60 px */
 @media (max-width: 760px) {
   .line, .line.k-inbox, .line.k-waiting, .line.k-someday {

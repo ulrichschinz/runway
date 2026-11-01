@@ -13,6 +13,10 @@
  * (`applyOutbox`), then M2's rules sort them into lists and sections. Every reply that
  * carries a task replaces the local one (F3: no timestamp is made up here).
  *
+ * A todo hidden by a future `wait` outside Warten auf is in none of these reads. When the detail
+ * opens one (a `?task=` link, or one just deferred), it is held aside (`keepAside`): `taskOf`
+ * and the writes reach it, the lists never show it (plan M7, brief 0053).
+ *
  * Writes (plan §6.4): captures and moves go out at once, Rückgängig sends the exact inverse
  * or a DELETE; done and delete wait 6 s; field edits, start/stop and notes have no undo.
  */
@@ -26,10 +30,11 @@ import { contextCounts, orderContexts, presentContexts } from '../../shared/cont
 import { dayOf, plusDays, timeOf } from '../../shared/dates.js'
 import { countsAsPlanned, dayProgress, lensCaption } from '../../shared/dayProgress.js'
 import {
-  beforeOf, clarifyPayload, contextPayload, inversePayload, listOf, listPayload, planPayload, projectNameError,
+  beforeOf, clarifyPayload, contextPayload, inversePayload, listOf, listPayload, planPayload, projectNameError, tagPayload,
   reviewDue as reviewDueRule,
 } from '../../shared/gtdRules.js'
 import { cap } from '../../shared/capping.js'
+import { isDeferred } from '../../shared/detailFields.js'
 import { applyOutbox, captureRow, withSettled } from '../../shared/outboxQueue.js'
 import { byWeight, followUpOf, nextSections } from '../../shared/sections.js'
 
@@ -79,12 +84,25 @@ export const useGtdStore = defineStore('gtd', () => {
   const plannedAtDone = ref([])
   /** A capture the Inbox has not been visited since: the yellow dot on its count (plan M6). */
   const inboxDot = ref(false)
+  /** Uuids a rhythm turned into Taskwarrior's template: the detail says why they are gone. */
+  const recurred = ref([])
   /** Per task uuid, the state the last reply gave it and when (`withSettled`). */
   const settled = new Map()
+  /** Deferred todos the detail shows although no list does (`keepAside`). */
+  const aside = ref([])
+
+  /** Hold a deferred todo for its detail; any other state lets it go. */
+  function keepAside(task) {
+    if (!task?.uuid) return
+    const rest = aside.value.filter((t) => t.uuid !== task.uuid)
+    const deferred = isDeferred(task, summary.value?.today ?? clientToday(Date.now()))
+    if (deferred || rest.length !== aside.value.length) aside.value = deferred ? [...rest, task] : rest
+  }
 
   function settleTask(uuid, task, at = Date.now()) {
     settled.set(uuid, { at, task })
     snapshot.value = withSettled(snapshot.value, new Map([[uuid, { at, task }]]), at)
+    keepAside(task ?? { uuid, status: 'deleted' })
   }
 
   async function readTask(uuid) {
@@ -99,6 +117,16 @@ export const useGtdStore = defineStore('gtd', () => {
     if (lastAction.value?.id === op.id) lastAction.value = op // a capture now has its server uuid
     switch (op.kind) {
       case 'put':
+        // Given a rhythm and a due day, Taskwarrior turns the todo into a template
+        // (`recurring`) and makes the first occurrence under a new uuid: drop the template,
+        // and read the snapshot again so the occurrence shows up.
+        if (reply?.status === 'recurring') {
+          recurred.value = [...recurred.value, reply.uuid]
+          settleTask(reply.uuid, null)
+          freshness.refresh({ force: true })
+        } else if (reply?.uuid) settleTask(reply.uuid, reply)
+        else readTask(op.uuid)
+        break
       case 'start':
       case 'stop':
       case 'annotate':
@@ -158,9 +186,21 @@ export const useGtdStore = defineStore('gtd', () => {
   const stand = computed(() => (freshness.at.value == null ? '' : timeOf(freshness.at.value)))
   const offline = freshness.offline
 
-  const view = computed(() => applyOutbox(snapshot.value, outbox.ops.value))
+  /** Held-aside todos the snapshot does not have (any more): in the view, in no list. */
+  const hidden = computed(() => {
+    const known = new Set(snapshot.value.tasks.map((t) => t.uuid))
+    return aside.value.filter((t) => !known.has(t.uuid))
+  })
+  const view = computed(() =>
+    applyOutbox({ ...snapshot.value, tasks: [...snapshot.value.tasks, ...hidden.value] }, outbox.ops.value))
   /** Every open todo the user should see, unconfirmed writes applied. */
-  const open = computed(() => view.value.tasks)
+  const open = computed(() => {
+    if (!hidden.value.length) return view.value.tasks
+    const ids = new Set(hidden.value.map((t) => t.uuid))
+    return view.value.tasks.filter((t) => !ids.has(t.uuid))
+  })
+  /** One open todo for its detail, a deferred one held aside included. */
+  const taskOf = (uuid) => view.value.tasks.find((t) => t.uuid === uuid) ?? null
   const inList = (list) => open.value.filter((t) => listOf(t) === list)
   const inbox = computed(() => inList('inbox').sort(byEntryDesc))
   const next = computed(() => inList('next').sort(byWeight))
@@ -195,7 +235,7 @@ export const useGtdStore = defineStore('gtd', () => {
   // ── writes ──────────────────────────────────────────────────────────────────────────
   // A capture the server has not named yet (`local:…`) cannot be written to: its uuid would
   // reach the API. Its own Rückgängig works through the op, not through this lookup.
-  const find = (uuid) => (String(uuid).startsWith('local:') ? null : open.value.find((t) => t.uuid === uuid))
+  const find = (uuid) => (String(uuid).startsWith('local:') ? null : taskOf(uuid))
   const remember = (op) => {
     lastAction.value = op
     return op
@@ -280,6 +320,12 @@ export const useGtdStore = defineStore('gtd', () => {
     return t ? move(t, contextPayload(t, ctx)) : null
   }
 
+  /** Add or remove one other tag (the detail's Tags), as a delta. @throws {NeedsAnswer} */
+  function toggleTag(uuid, tag) {
+    const t = find(uuid)
+    return t ? move(t, tagPayload(t, tag)) : null
+  }
+
   /** `t`: plan for today, or take it off today's plan. null where planning is refused. */
   function togglePlanned(uuid) {
     const t = find(uuid)
@@ -327,15 +373,15 @@ export const useGtdStore = defineStore('gtd', () => {
 
   return {
     // state
-    summary, today, loaded, stand, offline, lastAction, inboxDot,
+    summary, today, loaded, stand, offline, lastAction, inboxDot, recurred,
     // lists
-    open, inbox, next, waiting, someday, unlisted, doneToday, doneWeek, projects,
+    open, taskOf, keepAside, inbox, next, waiting, someday, unlisted, doneToday, doneWeek, projects,
     contexts, contextCount, progress, caption, reviewDue, sectionsFor,
     // the outbox
     ops: outbox.ops, failed, paused, held,
     // actions
     refresh: freshness.refresh,
-    capture, captureOnLeave, seeInbox, complete, remove, undo, clarify, setList, setContext, togglePlanned, update,
+    capture, captureOnLeave, seeInbox, complete, remove, undo, clarify, setList, setContext, toggleTag, togglePlanned, update,
     start, stop, annotate, createProject, setProjectStatus, recordReview, retry,
   }
 })

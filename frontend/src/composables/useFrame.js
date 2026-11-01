@@ -12,8 +12,10 @@ import { inject, provide } from 'vue'
  * @property {import('vue').ComputedRef<object>} props  AppFrame's props: view, counts, flags,
  *   stand, offline, failedCount, user, themeChoice
  * @property {object} on  AppFrame's event handlers: retry, theme, signout
+ * @property {import('vue').ComputedRef<string|null>} taskId  the uuid `?task=` names (validated)
  * @property {import('vue').Ref<null|{uuid: string, description?: string, missing?: boolean}>} task
  *   the todo a `?task=` link asked for, once read
+ * @property {(uuid: string) => void} openTask  puts `?task=<uuid>` into the address (the detail opens)
  * @property {() => void} closeTask  drops `?task=` from the address
  */
 

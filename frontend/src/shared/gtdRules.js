@@ -25,7 +25,7 @@ import { dayOf, plusDays } from './dates.js'
 
 // The other rule modules read tags through this one, so the comma rule has one entry
 // point for the new UI (and `contextTags.js` keeps its fan-in).
-export { contextTagsOf }
+export { allTagParts, contextTagsOf }
 
 export const STATUS_TAGS = ['next', 'waiting', 'someday']
 
@@ -146,27 +146,38 @@ export function listPayload(t, list) {
 }
 
 /**
- * Toggle one context. Never touches next, waiting or someday.
+ * Toggle one tag (a context, or any other tag the detail edits): add it when no tag part
+ * of the todo is `tag`, else remove it. Never touches next, waiting or someday unless asked.
  *
- * Removing a context that sits in a legacy comma tag removes the raw tag and adds back
- * its other parts, which repairs the tag (F2). Refused like `listPayload` when such a
- * part cannot be added back.
+ * Removing a tag that sits in a legacy comma tag removes the raw tag and adds back its
+ * other parts, which repairs the tag (F2). Refused like `listPayload` when such a part
+ * cannot be added back.
+ *
+ * @returns {object} the PUT body
+ * @throws {NeedsAnswer} `'legacyTag'`
+ */
+export function tagPayload(t, tag) {
+  if (!hasTag(t, tag)) return { tags_add: [tag] }
+  const raws = rawTagsWith(t, tag)
+  if (raws.every((raw) => raw === tag)) return { tags_remove: raws }
+  const remaining = (t.tags || []).filter((raw) => !raws.includes(raw))
+  const keep = raws
+    .flatMap(splitTagParts)
+    .filter((part) => part && part !== tag && !remaining.includes(part))
+  refuseUnaddable(keep)
+  const body = { tags_remove: raws }
+  if (keep.length) body.tags_add = addAll([], keep)
+  return body
+}
+
+/**
+ * Toggle one context: `tagPayload` for an `@` tag (a context part is a tag part).
  *
  * @returns {object} the PUT body
  * @throws {NeedsAnswer} `'legacyTag'`
  */
 export function contextPayload(t, ctx) {
-  if (!contextTagsOf(t).includes(ctx)) return { tags_add: [ctx] }
-  const raws = rawTagsWith(t, ctx)
-  if (raws.every((tag) => tag === ctx)) return { tags_remove: raws }
-  const remaining = (t.tags || []).filter((tag) => !raws.includes(tag))
-  const keep = raws
-    .flatMap(splitTagParts)
-    .filter((part) => part && part !== ctx && !remaining.includes(part))
-  refuseUnaddable(keep)
-  const body = { tags_remove: raws }
-  if (keep.length) body.tags_add = addAll([], keep)
-  return body
+  return tagPayload(t, ctx)
 }
 
 /**
