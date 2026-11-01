@@ -21,7 +21,7 @@
  */
 
 import { allTagParts, contextTagsOf, splitTagParts } from './contextTags.js'
-import { dayOf, plusDays } from './dates.js'
+import { dayOf, minuteOf, plusDays } from './dates.js'
 
 // The other rule modules read tags through this one, so the comma rule has one entry
 // point for the new UI (and `contextTags.js` keeps its fan-in).
@@ -124,14 +124,19 @@ export function clarifyPayload(to, opts = {}) {
  * Leaving Warten auf clears `scheduled`: there it was the follow-up day, not a plan, and
  * kept it would count as "für heute". The inverse restores it.
  *
+ * `ctx`, the answer to Nächste's question for a todo without a context, goes into the same
+ * PUT, so one inverse takes back both (brief 0054).
+ *
  * @param {object} t the task
  * @param {'next'|'waiting'|'someday'} list
+ * @param {string} [ctx] the context chosen for Nächste
  * @returns {object} the PUT body
- * @throws {NeedsAnswer} Nächste for a todo without a context
+ * @throws {NeedsAnswer} Nächste for a todo without a context and no `ctx`
  */
-export function listPayload(t, list) {
+export function listPayload(t, list, ctx = '') {
   if (!STATUS_TAGS.includes(list)) throw new Error(`not a list move: ${list}`)
-  if (list === 'next' && contextTagsOf(t).length === 0) throw new NeedsAnswer('context')
+  const missing = list === 'next' && contextTagsOf(t).length === 0
+  if (missing && !ctx) throw new NeedsAnswer('context')
   const leaving = STATUS_TAGS.filter((s) => s !== list)
   const tagsRemove = addAll([], leaving.flatMap((s) => rawTagsWith(t, s)))
   const remaining = (t.tags || []).filter((tag) => !tagsRemove.includes(tag))
@@ -139,7 +144,7 @@ export function listPayload(t, list) {
     .flatMap(splitTagParts)
     .filter((part) => part && !leaving.includes(part) && !remaining.includes(part))
   refuseUnaddable(keptParts)
-  const body = { tags_add: addAll([list], keptParts) }
+  const body = { tags_add: addAll([list], [...keptParts, ...(missing ? [ctx] : [])]) }
   if (tagsRemove.length) body.tags_remove = tagsRemove
   if (isWaiting(t) && list !== 'waiting' && t.scheduled) body.scheduled = ''
   return body
@@ -181,12 +186,16 @@ export function contextPayload(t, ctx) {
 }
 
 /**
- * What an inverse needs to know about a task before a move.
+ * What an inverse needs to know about a task before a move. `scheduledAt` is the server-local
+ * minute of `scheduled` (null for a bare day), so Rückgängig gives back the time too (brief
+ * 0054); `scheduledDay` alone is what the shared vectors describe.
  *
- * @returns {{tags: string[], project: string|null, scheduledDay: string|null}}
+ * @returns {{tags: string[], project: string|null, scheduledDay: string|null, scheduledAt: string|null}}
  */
 export function beforeOf(t) {
-  return { tags: [...(t.tags || [])], project: t.project || null, scheduledDay: dayOf(t.scheduled) }
+  return {
+    tags: [...(t.tags || [])], project: t.project || null, scheduledDay: dayOf(t.scheduled), scheduledAt: minuteOf(t.scheduled),
+  }
 }
 
 /**
@@ -195,9 +204,10 @@ export function beforeOf(t) {
  * Works on tag **parts** (F2): it removes what the move added (unless it was a part
  * before) and adds back, singly, every part the task had before and no longer has. A
  * comma tag the move removed is therefore restored as its parts — the API would refuse
- * the comma tag itself. Restores `project` and `scheduled` when the move changed them.
+ * the comma tag itself. Restores `project` and `scheduled` when the move changed them;
+ * `scheduled` to its minute when `before.scheduledAt` has one, else to its day.
  *
- * @param {{tags: string[], project: string|null, scheduledDay: string|null}} before `beforeOf(task)`
+ * @param {{tags: string[], project: string|null, scheduledDay: string|null, scheduledAt?: string|null}} before `beforeOf(task)`
  * @param {object} body the PUT body that was sent
  * @returns {object} the PUT body that undoes it
  */
@@ -214,7 +224,7 @@ export function inversePayload(before, body) {
     out.project = before.project || ''
   }
   if ('scheduled' in body && (body.scheduled || null) !== (before.scheduledDay || null)) {
-    out.scheduled = before.scheduledDay || ''
+    out.scheduled = before.scheduledAt || before.scheduledDay || ''
   }
   return out
 }

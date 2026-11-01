@@ -124,3 +124,9 @@ function statusWord(task, today) {
 
 /** The row's accessible name: `<Beschreibung>, <Status>, ID <8>` (Android's pinned row text). */
 export const rowLabel = (task, today) => `${task.description}, ${statusWord(task, today)}, ID ${task.uuid.slice(-8)}`
+
+/** The day a note was written, as the notes lists (detail, clarify panel) show it. */
+export const noteDay = (annotation) => {
+  const day = dayOf(annotation.entry)
+  return day ? formatDay(day) : ''
+}

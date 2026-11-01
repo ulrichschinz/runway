@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  contextText, dayMonth, dueInfo, entryInfo, followInfo, metaOf, plannedForToday, rowLabel,
+  contextText, dayMonth, dueInfo, entryInfo, followInfo, metaOf, noteDay, plannedForToday, rowLabel,
 } from '../src/shared/rowMeta.js'
 
 // Saturday; Taskwarrior stamps are UTC, the days Europe/Berlin (CET from 25 Oct).
@@ -93,5 +93,12 @@ describe('the row label (Android: <Beschreibung>, <Status>, ID <8>)', () => {
     expect(rowLabel({ uuid, description: 'C', tags: ['waiting'], scheduled: at('2026-10-30') }, TODAY)).toBe('C, Nachhaken fällig, ID 5678abcd')
     expect(rowLabel({ uuid, description: 'D', tags: [] }, TODAY)).toBe('D, Inbox, ID 5678abcd')
     expect(rowLabel({ uuid, description: 'E', tags: ['someday'], project: 'P' }, TODAY)).toBe('E, Irgendwann, ID 5678abcd')
+  })
+})
+
+describe('notes', () => {
+  it('dates a note by its server day', () => {
+    expect(noteDay({ entry: '20261031T233000Z' })).toMatch(/01\.11\.$/)
+    expect(noteDay({})).toBe('')
   })
 })

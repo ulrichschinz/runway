@@ -157,5 +157,6 @@ export default {
   'keys.undo': 'Rückgängig (die letzte Aktion)', 'keys.move': 'Nächste, vorige Zeile', 'keys.open': 'Öffnen', 'keys.check': 'Abhaken',
   'keys.plan': 'Für heute planen (Tageslinse)', 'keys.edit': 'Text ändern', 'keys.start': 'Starten, Pausieren', 'keys.delete': 'Löschen',
   'keys.ctx': 'Kontext auf Nächste, 6 ohne Kontext', 'keys.cl.next': 'Nächste Aktion, dann Kontext', 'keys.cl.wait': 'Warten auf, dann Nachhaken',
-  'keys.cl.proj': 'Zu einem Projekt, dann Kontext', 'keys.cl.mode': 'Liste oder Stapel', 'keys.cl.stack': 'Im Stapel: Fach',
+  'keys.cl.proj': 'Zu einem Projekt, dann Kontext', 'keys.cl.answer': 'Antwort wählen', 'keys.cl.back': 'Einen Schritt zurück',
+  'keys.moveTo': 'Verschieben nach Nächste, Warten auf, Irgendwann', 'keys.cl.mode': 'Liste oder Stapel', 'keys.cl.stack': 'Im Stapel: Fach',
 }

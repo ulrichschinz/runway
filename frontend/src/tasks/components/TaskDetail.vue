@@ -15,10 +15,11 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import PillButton from '../../layout/ui/PillButton.vue'
 import EyebrowLine from '../../layout/ui/EyebrowLine.vue'
-import { committingEnter, deferredUntil, detailFields, extraTagsOf, fieldEdit, formOf, noteDay, runningSince } from '../../shared/detailFields.js'
+import { moveLabel } from '../../shared/clarify.js'
+import { committingEnter, deferredUntil, detailFields, extraTagsOf, fieldEdit, formOf, runningSince } from '../../shared/detailFields.js'
 import { NeedsAnswer, contextTagsOf, projectNameError } from '../../shared/gtdRules.js'
 import { t } from '../../shared/i18n.js'
-import { dueInfo, entryInfo } from '../../shared/rowMeta.js'
+import { dueInfo, entryInfo, noteDay } from '../../shared/rowMeta.js'
 import { showNotice } from '../notice.js'
 import { useGtdStore } from '../stores/gtd.js'
 import DayInput from './DayInput.vue'
@@ -30,7 +31,10 @@ const props = defineProps({
   uuid: { type: String, required: true },
   /** what the host read for a `?task=` link the snapshot does not hold: `{missing}`, `{description}` or `{description, done}` */
   fallback: { type: Object, default: null },
-  /** how the person opened it: 'focus' moves the focus in, 'edit' also edits the text (`e`) */
+  /**
+   * how the person opened it: 'focus' moves the focus in, 'edit' also edits the text (`e`);
+   * 'context' and 'legacyTag' come from a list move that needs that answered first (`m n`)
+   */
   arrive: { type: String, default: null },
 })
 const emit = defineEmits(['close', 'check', 'delete', 'plan', 'arrived'])
@@ -97,6 +101,8 @@ watch(() => props.arrive && !!task.value, (go) => {
   if (!go) return
   if (props.arrive === 'edit') startEdit()
   else focus()
+  if (props.arrive === 'context') needCtx.value = true
+  if (props.arrive === 'legacyTag') problem.value = 'd.legacyTag'
   emit('arrived')
 }, { immediate: true })
 
@@ -119,17 +125,19 @@ function attempt(fn) {
   }
 }
 
-function moveTo(list) {
+/** `ctx`: the context chosen for a todo without one, sent in the move's own PUT so Rückgängig takes back both. */
+function moveTo(list, ctx = '') {
   if (!task.value || fields.value.list === list) return
-  const op = attempt(() => gtd.setList(props.uuid, list))
+  const label = moveLabel(task.value, list, ctx)
+  const op = attempt(() => gtd.setList(props.uuid, list, ctx))
   if (!op) return
   needCtx.value = false
-  showNotice(t('notice.moved', { list: t(`list.${list}`) }), () => gtd.undo(op))
+  showNotice(t('notice.moved', { list: label }), () => gtd.undo(op))
 }
 
 function toggleContext(ctx) {
-  if (!attempt(() => gtd.setContext(props.uuid, ctx))) return
-  if (needCtx.value && contexts.value.length) moveTo('next')
+  if (needCtx.value && !contexts.value.length) moveTo('next', ctx)
+  else attempt(() => gtd.setContext(props.uuid, ctx))
 }
 
 function toggleTag(tag) {

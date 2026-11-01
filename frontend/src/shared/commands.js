@@ -5,9 +5,15 @@
  * rows, so a key is named and bound in exactly one place.
  *
  * Scopes: `global` (every page of the new UI), `rows` (a page with a list), `next` (Nächste),
- * `all` (Alle). A key may appear once in `global`, and once per other scope. Keys are
+ * `all` (Alle), `inbox` (the Inbox while its clarify panel is shown), `step` (a question of
+ * the clarify panel is open: its answers) and `stepProject` (the project question: `n` for a new
+ * one). A key may appear once in `global`, and once per other scope. Keys are
  * `KeyboardEvent.key` values; a two-key sequence (`g i`) is a chord. No command owns a
  * modifier: a key pressed with Ctrl, Alt or Meta is never ours (`ownsKey`).
+ *
+ * A page lists its scopes most specific first; the first scope that binds a key wins, and
+ * `global` comes last. Only the clarify panel's open question (`step`, `stepProject`) rebinds a
+ * global key (`n`): while it asks, its answer keys answer and do nothing else (06).
  */
 
 export const CHORD_MS = 900
@@ -37,8 +43,23 @@ export const COMMANDS = [
   ...['0', '1', '2', '3', '4', '5', '6'].map((k) => ({
     id: `ctx.${k}`, keys: [[k]], scope: 'next', group: 'keys.g.rows', label: 'keys.ctx',
   })),
+  ...[['next', 'n'], ['waiting', 'w'], ['someday', 'v']].map(([list, k]) => ({
+    id: `move.${list}`, keys: [['m', k]], scope: 'rows', group: 'keys.g.rows', label: 'keys.moveTo',
+  })),
   { id: 'toggleDone', keys: [['d']], scope: 'all', group: 'keys.g.rows', label: 'all.showDone' },
+  { id: 'clarify.next', keys: [['a']], scope: 'inbox', group: 'keys.g.inbox', label: 'keys.cl.next' },
+  { id: 'clarify.waiting', keys: [['w']], scope: 'inbox', group: 'keys.g.inbox', label: 'keys.cl.wait' },
+  { id: 'clarify.someday', keys: [['v']], scope: 'inbox', group: 'keys.g.inbox', label: 'list.someday' },
+  { id: 'clarify.project', keys: [['p']], scope: 'inbox', group: 'keys.g.inbox', label: 'keys.cl.proj' },
+  ...['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) => ({
+    id: `step.${k}`, keys: [[k]], scope: 'step', group: 'keys.g.inbox', label: 'keys.cl.answer',
+  })),
+  { id: 'step.back', keys: [['Escape']], scope: 'step', group: 'keys.g.inbox', label: 'keys.cl.back' },
+  { id: 'step.new', keys: [['n']], scope: 'stepProject', group: 'keys.g.inbox', label: 'cl.newProject' },
 ]
+
+/** The scopes that may rebind a global key while they are active (see the header). */
+export const ASKING_SCOPES = ['step', 'stepProject']
 
 /** How a key is shown in the sheet. */
 const KEY_NAMES = { Enter: '⏎', Escape: 'Esc', Delete: 'Entf', Backspace: '⌫', ArrowDown: '↓', ArrowUp: '↑' }
@@ -66,12 +87,14 @@ export function ownsKey(event) {
  *
  * @param {string|null} pending the first key of a chord pressed before (within `CHORD_MS`)
  * @param {string} key `KeyboardEvent.key`
- * @param {string[]} scopes the scopes active on this page (`global` is always active)
+ * @param {string[]} scopes the scopes active on this page, most specific first (`global` is
+ *   always active, and last)
  * @param {object[]} [table]
  * @returns {{command: string|null, pending: string|null}} a command to run, or the start of a chord
  */
 export function resolveKey(pending, key, scopes, table = COMMANDS) {
-  const active = table.filter((c) => c.scope === 'global' || scopes.includes(c.scope))
+  const rank = (c) => (c.scope === 'global' ? scopes.length : scopes.indexOf(c.scope))
+  const active = table.filter((c) => rank(c) >= 0).sort((a, b) => rank(a) - rank(b))
   const seq = pending ? [pending, key] : [key]
   const hit = active.find((c) => c.keys.some((k) => k.length === seq.length && k.every((x, i) => x === seq[i])))
   if (hit) return { command: hit.id, pending: null }

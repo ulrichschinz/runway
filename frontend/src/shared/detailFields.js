@@ -149,12 +149,6 @@ export function runningSince(t, today) {
   return day === today ? timeOf(parseStamp(t.start)) : formatDay(day)
 }
 
-/** The day a note was written, as the notes list shows it. */
-export const noteDay = (annotation) => {
-  const day = dayOf(annotation.entry)
-  return day ? formatDay(day) : ''
-}
-
 /**
  * Whether an Enter in a text field means "save" or "add": not the Enter that confirms an IME
  * conversion (`isComposing`, or Safari's keyCode 229 right after it), which only ends the

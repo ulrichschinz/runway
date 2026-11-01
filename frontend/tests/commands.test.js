@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { COMMANDS, ownsKey, repeatsOnHold, resolveKey, shortcutSheet, visibleCursor } from '../src/shared/commands.js'
+import { ASKING_SCOPES, COMMANDS, ownsKey, repeatsOnHold, resolveKey, shortcutSheet, visibleCursor } from '../src/shared/commands.js'
 import messages from '../src/shared/messages.de.js'
 
 const seqs = (c) => c.keys.map((k) => k.join(' '))
@@ -11,12 +11,13 @@ describe('the command table', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('binds no key twice in a scope, and no global key in any other scope', () => {
+  it('binds no key twice in a scope, and no global key in any other scope but an open question', () => {
     const global = COMMANDS.filter((c) => c.scope === 'global').flatMap(seqs)
     expect(new Set(global).size).toBe(global.length)
     for (const scope of new Set(COMMANDS.map((c) => c.scope).filter((s) => s !== 'global'))) {
       const keys = COMMANDS.filter((c) => c.scope === scope).flatMap(seqs)
       expect(new Set(keys).size, scope).toBe(keys.length)
+      if (ASKING_SCOPES.includes(scope)) continue
       for (const k of keys) expect(global, `${scope}: ${k}`).not.toContain(k)
     }
   })
@@ -48,6 +49,27 @@ describe('resolving keys', () => {
     expect(resolveKey(null, 'z', []).command).toBe('undo')
   })
 
+  it('lets the first listed scope win, global last: an open question answers with its keys', () => {
+    expect(resolveKey(null, 'Escape', ['rows']).command).toBe('close')
+    expect(resolveKey(null, 'Escape', ['step', 'inbox', 'rows']).command).toBe('step.back')
+    expect(resolveKey(null, 'n', ['inbox', 'rows']).command).toBe('capture')
+    expect(resolveKey(null, 'n', ['step', 'inbox', 'rows']).command).toBe('capture')
+    expect(resolveKey(null, 'n', ['stepProject', 'step', 'inbox', 'rows']).command).toBe('step.new')
+    expect(resolveKey(null, '3', ['step', 'inbox', 'rows']).command).toBe('step.3')
+    expect(resolveKey(null, '3', ['inbox', 'rows']).command).toBe(null)
+    expect(resolveKey(null, 'w', ['inbox', 'rows']).command).toBe('clarify.waiting')
+    expect(resolveKey(null, 'w', ['rows']).command).toBe(null)
+    expect(resolveKey(null, 'a', ['inbox', 'rows']).command).toBe('clarify.next')
+  })
+
+  it('moves a row with m then n, w or v', () => {
+    expect(resolveKey(null, 'm', ['rows'])).toEqual({ command: null, pending: 'm' })
+    expect(resolveKey('m', 'n', ['rows']).command).toBe('move.next')
+    expect(resolveKey('m', 'w', ['rows']).command).toBe('move.waiting')
+    expect(resolveKey('m', 'v', ['rows']).command).toBe('move.someday')
+    expect(resolveKey(null, 'm', [])).toEqual({ command: null, pending: null })
+  })
+
   it('waits for the second key of a chord, then runs it', () => {
     expect(resolveKey(null, 'g', ['rows'])).toEqual({ command: null, pending: 'g' })
     expect(resolveKey('g', 'w', ['rows'])).toEqual({ command: 'go.waiting', pending: null })
@@ -75,12 +97,14 @@ describe('resolving keys', () => {
 describe('the ? sheet', () => {
   it('is generated from the table: every command once, commands sharing a label on one line', () => {
     const sheet = shortcutSheet()
-    expect(sheet.map((g) => g.group)).toEqual(['keys.g.all', 'keys.g.lists', 'keys.g.rows'])
+    expect(sheet.map((g) => g.group)).toEqual(['keys.g.all', 'keys.g.lists', 'keys.g.rows', 'keys.g.inbox'])
     const rows = sheet.flatMap((g) => g.rows)
     expect(rows.find((r) => r.label === 'keys.move').keys).toEqual(['j', '↓', 'k', '↑'])
     expect(rows.find((r) => r.label === 'keys.delete').keys).toEqual(['Entf', '⌫'])
     expect(rows.find((r) => r.label === 'list.waiting').keys).toEqual(['g w'])
     expect(rows.find((r) => r.label === 'keys.ctx').keys).toEqual(['0', '1', '2', '3', '4', '5', '6'])
+    expect(rows.find((r) => r.label === 'keys.moveTo').keys).toEqual(['m n', 'm w', 'm v'])
+    expect(rows.find((r) => r.label === 'keys.cl.back').keys).toEqual(['Esc'])
     const keyCount = COMMANDS.reduce((n, c) => n + c.keys.length, 0)
     expect(rows.reduce((n, r) => n + r.keys.length, 0)).toBe(keyCount)
   })

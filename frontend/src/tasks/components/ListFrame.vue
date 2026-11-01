@@ -5,9 +5,13 @@
  * keys), the capture line (`n` focuses it) and the open todo's detail (`?task=<uuid>`, plan M7:
  * a click on a row, `Enter`/`o`, `e` to edit its text; `Esc` closes it and the focus goes back to
  * the row). A page only says what its head shows and which sections it has. Slots: `aside`
- * (right of the heading: Nächste's caption), `head` (under it), `chips`, default (above the list).
+ * (right of the heading: Nächste's caption), `head` (under it), `chips`, default (above the list),
+ * and `panel` (the page's own panel while no detail is open: the Inbox's clarify panel).
+ *
+ * Exposes `cursor`, `select`, `leave` (`useListPage`), `open` and `detailOpen`, so a page's panel acts on the cursor row
+ * the way the rows do. Emits `closePanel` when the page's panel should close (`Esc`, the scrim).
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import AppFrame from '../../layout/AppFrame.vue'
 import NoticeBar from '../../layout/NoticeBar.vue'
 import EyebrowLine from '../../layout/ui/EyebrowLine.vue'
@@ -35,7 +39,14 @@ const props = defineProps({
   /** the page's own commands, by command id */
   keys: { type: Object, default: () => ({}) },
   plannable: { type: Boolean, default: true },
+  /** the cursor stays on a row while there are rows (`useListPage`) */
+  holdCursor: { type: Boolean, default: false },
+  /** a click on a row only moves the cursor and emits `select` (the Inbox), instead of opening the detail */
+  selectOnly: { type: Boolean, default: false },
+  /** the accessible name of the page's own panel as a sheet (the detail's is "Todo") */
+  panelLabel: { type: String, default: '' },
 })
+const emit = defineEmits(['select', 'closePanel'])
 
 const frame = useFrame()
 const gtd = useGtdStore()
@@ -45,40 +56,49 @@ const captureLine = ref(null)
 const openId = frame.taskId
 /**
  * How the person opened the detail, for TaskDetail to act on once it shows the todo: `focus`
- * (a click, `Enter`), `edit` (`e`). A link or the cursor (`j` `k`) moves nothing.
+ * (a click, `Enter`), `edit` (`e`), or the question a move needs answered there (`context`,
+ * `legacyTag`). A link or the cursor (`j` `k`) moves nothing.
  */
 const arrival = ref(null)
 
-function open(uuid, { edit = false } = {}) {
+function open(uuid, { edit = false, ask = null } = {}) {
   page.select(uuid)
-  arrival.value = { uuid, how: edit ? 'edit' : 'focus' }
+  arrival.value = { uuid, how: ask ?? (edit ? 'edit' : 'focus') }
   if (openId.value !== uuid) frame.openTask(uuid)
 }
 
+/** `Esc`, "schließen", the scrim: the detail closes (the focus back on its row), else the page's panel. */
 function close() {
   const uuid = openId.value
-  if (!uuid) return
+  if (!uuid) {
+    emit('closePanel')
+    return
+  }
   frame.closeTask()
   page.focusRow(uuid)
 }
 
 /** A row was clicked: an open todo opens its detail, a done one (Alle) only takes the cursor. */
 function onSelect(uuid) {
-  if (rows.value.some((x) => x.uuid === uuid)) open(uuid)
+  const pending = rows.value.some((x) => x.uuid === uuid)
+  if (pending && !props.selectOnly) open(uuid)
   else page.select(uuid)
+  if (pending && props.selectOnly) emit('select', uuid)
 }
 
 /** Abhaken or Löschen in the detail: the list page's own action and notice; the focus goes to the next row. */
 function finish(action, uuid) {
   action(uuid)
-  page.focusRow(page.cursor.value)
+  // after `leave` has moved the cursor on, once the row is gone
+  nextTick(() => page.focusRow(page.cursor.value))
 }
 
 const page = useListPage({
   rows,
-  scopes: () => ['rows', ...props.scopes],
+  scopes: () => [...props.scopes, 'rows'],
   keys: { capture: () => captureLine.value?.focus(), close, ...props.keys },
   plannable: props.plannable,
+  holdCursor: () => props.holdCursor,
   onOpen: open,
   // While a detail is open, the cursor takes it along (06 moveFocus).
   onMove: (uuid) => {
@@ -96,10 +116,12 @@ watch(() => !!openId.value && gtd.held.some((op) => op.uuid === openId.value), (
 watch([openId, () => rows.value.some((x) => x.uuid === openId.value)], ([uuid, shown]) => {
   if (uuid && shown) page.select(uuid)
 }, { immediate: true })
+
+defineExpose({ cursor: page.cursor, select: page.select, leave: page.leave, open, detailOpen: computed(() => !!openId.value) })
 </script>
 
 <template>
-  <AppFrame v-bind="frame.props.value" :panel-label="t('d.title')" v-on="frame.on" @close-panel="close">
+  <AppFrame v-bind="frame.props.value" :panel-label="openId ? t('d.title') : panelLabel" v-on="frame.on" @close-panel="close">
     <template #head>
       <div class="head" :class="{ aside: $slots.aside }">
         <div class="text">
@@ -126,6 +148,7 @@ watch([openId, () => rows.value.some((x) => x.uuid === openId.value)], ([uuid, s
         @check="finish(page.check, $event)" @delete="finish(page.remove, $event)"
       />
     </template>
+    <template v-else-if="$slots.panel" #panel><slot name="panel" /></template>
     <template #notice>
       <NoticeBar v-if="notice" :key="notice.id" :text="notice.text" :undo="!!notice.undo" :ms="notice.ms" @undo="undoNotice" />
     </template>

@@ -33,6 +33,17 @@ export function orderContexts(present, preset = CONTEXT_PRESET) {
   return [...first, ...rest]
 }
 
+/**
+ * The contexts the clarify panel offers for Nächste: the present ones in their order; a user
+ * without any context is offered the shared preset, so an Inbox item can always get one.
+ *
+ * @param {string[]} ordered `orderContexts(presentContexts(open))`
+ * @returns {string[]}
+ */
+export function clarifyContexts(ordered, preset = CONTEXT_PRESET) {
+  return ordered.length ? ordered : [...preset]
+}
+
 /** Every context the tasks carry, each once, comma-joined tags split. */
 export function presentContexts(tasks) {
   return [...new Set(tasks.flatMap(contextTagsOf))]
