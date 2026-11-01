@@ -16,9 +16,30 @@ Two cycles are declared, `CYCLE-001` and `CYCLE-002`, both because `AppShell` re
 tasks and auth stores directly instead of receiving what it displays. One change removes
 both. A *new* cycle always fails the gate.
 
+## Two UIs until the contract step
+
+A new UI is being built behind a per-browser switch (ADR 0042, plan
+`docs/plan/unified-ui-web.md`): `?ui=neu` / `?ui=alt`, stored in `localStorage['ui']`, default
+the old UI. Every route renders through `src/router/pick.js`, which takes both sides.
+
+- New files go into the unit's folder, never beside the old ones: `src/layout/` (`fe/layout`),
+  `src/tasks/` (`fe/tasks`), `src/projects/` (`fe/projects`), `src/identity/` (`fe/identity`),
+  `src/assets/` (`fe/app`), `src/shared/`, `src/composables/`, `src/api/`, `tokens/`
+  (`fe/shared`). Check each with `./run map`.
+- New code in `src/layout/` imports no feature: it receives what it shows through props and
+  slots. The gate still allows the old edges for `AppShell.vue`, so it will not catch this.
+- Every route's component is the one wrapper `UiPick`, so options-API route guards
+  (`beforeRouteEnter/Update/Leave`) on a page never run, silently. Use `onBeforeRouteLeave` /
+  `onBeforeRouteUpdate` in setup, or `beforeEnter` on the route record. `pick()` must keep
+  returning that one wrapper for every route (`frontend/tests/pick.test.js`): a wrapper per route
+  would remount `ProjectsView` between `/projects` and `/projects/:name`.
+- The old UI's views, components and stores stay as they are until the contract step deletes
+  them; `stores/auth.js` and `components/BrandMark.vue` are kept and reused.
+
 ## Tests cover logic, not components
 
-`frontend/tests/` covers `frontend/src/shared/` — the pure rules. No `jsdom`, no mounting.
+`frontend/tests/` covers `frontend/src/shared/` — the pure rules — and the route fields
+`src/router/pick.js` returns (imported, never rendered). No `jsdom`, no mounting.
 
 That is a deliberate scope choice (ADR 0007), taken because **every frontend defect this
 repository has shipped and fixed was in that pure logic**: comma-joined context tags

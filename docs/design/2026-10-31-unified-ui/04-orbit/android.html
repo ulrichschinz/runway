@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runway · Orbit Android</title>
+<meta name="description" content="runway, Vorschlag 04 Orbit: die Android-App mit Orbit-Kopf auf Nächste, Widget, Kachel und Teilen.">
+<link rel="stylesheet" href="../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../shared/brand/tokens.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+<link rel="stylesheet" href="tokens/orbit-tokens.css">
+<link rel="stylesheet" href="android.css">
+</head>
+<body>
+<div class="stagepage">
+  <!-- the phone: 412 x 915 dp, edge to edge, gesture navigation -->
+  <div class="device">
+    <div class="screen nav-top" id="screen">
+      <div class="statusbar"><span>9:12</span><span class="sb-ic"><i class="sig"></i><i class="wifi"></i><i class="bat"></i></span></div>
+      <header class="a-top" id="a-top"></header>
+      <div class="a-orbit" id="a-orbit"><div class="oc-labels" id="oc-labels"></div></div>
+      <div class="a-chips" id="a-chips" role="group" aria-label="Kontext"></div>
+      <main class="a-list" id="a-list"></main>
+      <div class="a-notice" id="a-notice" role="status" aria-live="polite"></div>
+      <div class="a-edit" id="a-edit" hidden>
+        <div class="ed-h"><b>Todo bearbeiten</b><button type="button" class="ed-btn" data-a="ed-cancel">Abbrechen</button><button type="button" class="pill dark" data-a="ed-save">Speichern</button></div>
+        <label class="ed-l" for="ed-in">Beschreibung</label>
+        <input id="ed-in" aria-label="Beschreibung" enterkeyhint="done">
+      </div>
+      <form class="a-capture" id="a-capture" autocomplete="off"><input id="a-cap" placeholder="Neues Todo" aria-label="Neues Todo" enterkeyhint="done"><button class="a-send" aria-label="Speichern" type="submit"></button></form>
+      <div class="a-kbd kbd" id="a-kbd" aria-hidden="true"><div>q w e r t z u i o p ü</div><div>a s d f g h j k l ö ä</div><div>⇧ y x c v b n m ⌫</div><div class="kb-l"><span>?123</span><span class="space">Leertaste</span><span class="enter">↵</span></div></div>
+      <button class="a-fab" id="a-fab" aria-label="+ Todo"><span class="plus"></span>Todo</button>
+      <nav class="a-nav" id="a-nav" aria-label="Listen"></nav>
+      <div class="gesture"><i></i></div>
+      <div class="a-sheet-scrim" id="a-scrim" hidden></div>
+      <section class="a-sheet" id="a-sheet" hidden></section>
+      <div class="a-overlay" id="a-overlay" hidden>
+        <form class="ov-card" id="ov-form" autocomplete="off">
+          <div class="ov-notice" id="ov-notice"></div>
+          <div class="ov-row"><input id="ov-in" placeholder="Neues Todo" aria-label="Neues Todo"><button type="button" class="ov-close" id="ov-close">Schließen</button></div>
+          <div class="kbd" aria-hidden="true"><div>q w e r t z u i o p ü</div><div>a s d f g h j k l ö ä</div><div>⇧ y x c v b n m ⌫</div><div class="kb-l"><span>?123</span><span class="space">Leertaste</span><span class="enter">↵</span></div></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Android-only surfaces -->
+  <section class="side">
+    <div class="eyebrow"><span class="slash">//</span> runway · Android · Vorschlag 04 Orbit</div>
+    <h1>Derselbe Orbit, <em>nativ</em> gezeichnet.</h1>
+    <p class="lead">Compose Canvas und AGSL statt Three.js: gleiche Begriffe, gleiche Farben, gleiche Signatur wie im Web. Die Inbox bleibt der Startbildschirm mit offenem Feld und Tastatur; der Orbit steht nur über Nächste und im Wochenrückblick.</p>
+
+    <div class="navopt" role="group" aria-label="Navigation">
+      <span class="surf-h"><span class="slash">//</span> Navigation</span>
+      <button class="seg-b on" data-nav="top">Tabs oben · Standard</button>
+      <button class="seg-b" data-nav="bottom">Leiste unten · Option</button>
+      <span class="navopt-n">Der Standard hält die vereinbarten Tabs „Inbox · Nächste · Warten auf“ plus „Mehr“. Die Leiste unten mit fünf Zielen ist ein Vorschlag, bis Uli und der Kritiker sie freigeben.</span>
+    </div>
+
+    <div class="surfaces">
+      <article class="surf">
+        <div class="surf-h"><span class="slash">//</span> Widget · 4×3 · nur Text</div>
+        <div class="home">
+          <div class="widget" id="widget"></div>
+        </div>
+        <p class="surf-n">Glance, ohne Bitmaps. Ringe statt Perlen: dieselbe Sprache in Text und Vektor.</p>
+      </article>
+      <article class="surf">
+        <div class="surf-h"><span class="slash">//</span> Kachel „+ Todo“</div>
+        <div class="qs">
+          <div class="qs-tiles">
+            <button class="tile on" id="tile"><span class="t-ic"></span><span><b>+ Todo</b><small>runway</small></span></button>
+            <div class="tile"><span class="t-ic off"></span><span><b>WLAN</b><small>Büro</small></span></div>
+            <div class="tile"><span class="t-ic off"></span><span><b>Nicht stören</b><small>Aus</small></span></div>
+            <div class="tile"><span class="t-ic off"></span><span><b>Taschenlampe</b><small>Aus</small></span></div>
+          </div>
+          <div class="qs-hint">Kachelfarben setzt das System. Tippen öffnet nur das Feld, auch auf dem Sperrbildschirm.</div>
+          <div class="qs-dialog" aria-hidden="true"><div class="qs-field">Rechnung Druckerei prüfen</div><div class="qs-note"><span>In Inbox ✓</span><b>Rückgängig</b></div></div>
+        </div>
+        <p class="surf-n">Overlay als einfache View: Feld, Hinweis, Rückgängig, Schließen. Kein Orbit, keine Zahlen.</p>
+      </article>
+      <article class="surf">
+        <div class="surf-h"><span class="slash">//</span> Teilen an runway</div>
+        <div class="share">
+          <div class="share-row"><span class="tgt on"><i class="mark"></i>runway</span><span class="tgt"><i></i>Notizen</span><span class="tgt"><i></i>Mail</span></div>
+          <div class="share-card" id="share-card">
+            <b>Agenten-Evaluation in der Praxis</b>
+            <p>https://example.org/agenten-evaluation · Lesenswert für das Angebot an den Pilotkunden, Abschnitt drei.</p>
+            <button class="pill coral" id="share-btn">In Inbox</button>
+          </div>
+        </div>
+        <p class="surf-n">Ein Tipp. Titel aus dem Betreff, der Rest wird Notiz. Geht auch offline.</p>
+      </article>
+    </div>
+
+    <div class="native">
+      <div class="surf-h"><span class="slash">//</span> Effekte nativ</div>
+      <dl>
+        <dt>Orbit-Scheibe</dt><dd>Compose <code>Canvas</code>: Sektoren als <code>drawPath</code> in fester 2,5D-Projektion; der gewählte Sektor hebt sich, nichts dreht sich</dd>
+        <dt>Perlen</dt><dd><code>Brush.radialGradient</code> mit versetztem Glanzpunkt, Schatten als <code>drawOval</code></dd>
+        <dt>Glühen</dt><dd>AGSL <code>RuntimeShader</code>, nur solange „läuft“ oder die Erledigt-Animation spielt</dd>
+        <dt>Zurück in die Mitte</dt><dd><code>Animatable</code> entlang eines <code>Path</code>, Haptik beim Ankommen</dd>
+        <dt>Beschriftung</dt><dd><code>Text</code> an derselben Projektion, keine Touch-Ziele; gefiltert wird über die Chips (48 dp)</dd>
+      </dl>
+    </div>
+  </section>
+</div>
+<script type="module" src="android.js"></script>
+</body>
+</html>

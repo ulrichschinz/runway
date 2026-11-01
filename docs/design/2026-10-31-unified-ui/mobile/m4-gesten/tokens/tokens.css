@@ -1,0 +1,168 @@
+/* GENERATED from tokens.json by gen-tokens.mjs. Do not edit by hand.
+   Semantic colour tokens of m4 Gesten. Load after shared/brand/tokens.css.
+   .alt-scheme marks the one frame that shows the other scheme (dark on a light page, light on a dark page). */
+
+:root {
+  color-scheme: light;
+  --g-bg: var(--ar-bg); /* #fbf6ee */
+  --g-surface: var(--ar-paper); /* #ffffff */
+  --g-sunk: var(--ar-bg-alt); /* #f4ece0 */
+  --g-text: var(--ar-ink); /* #1b1428 */
+  --g-mute: color-mix(in srgb, var(--ar-ink) 62%, transparent); /* #1b1428 @ 62% */
+  --g-soft: color-mix(in srgb, var(--ar-ink) 40%, transparent); /* #1b1428 @ 40% */
+  --g-rule: color-mix(in srgb, var(--ar-ink) 10%, transparent); /* #1b1428 @ 10% */
+  --g-rule-strong: color-mix(in srgb, var(--ar-ink) 22%, transparent); /* #1b1428 @ 22% */
+  --g-accent: var(--ar-plum); /* #3d2b5c */
+  --g-action: var(--ar-coral); /* #ff7a6b */
+  --g-on-action: var(--ar-ink); /* #1b1428 */
+  --g-marker: var(--ar-yellow); /* #f4c84a */
+  --g-overdue: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink)); /* #a45150 */
+  --g-overdue-mark: var(--ar-coral); /* #ff7a6b */
+  --g-inverse: var(--ar-ink); /* #1b1428 */
+  --g-on-inverse: var(--ar-bg); /* #fbf6ee */
+  --g-inverse-action: var(--ar-coral); /* #ff7a6b */
+  --g-swipe-done: color-mix(in srgb, var(--ar-coral) 24%, var(--ar-bg)); /* #fcd8cf */
+  --g-swipe-act: color-mix(in srgb, var(--ar-plum) 9%, var(--ar-bg)); /* #eae4e1 */
+  --g-select: color-mix(in srgb, var(--ar-plum) 11%, var(--ar-bg)); /* #e6e0de */
+  --g-scrim: color-mix(in srgb, var(--ar-ink) 45%, transparent); /* #1b1428 @ 45% */
+  --g-kbd: color-mix(in srgb, var(--ar-ink) 7%, var(--ar-bg-alt)); /* #e5ddd3 */
+  --g-key: var(--ar-paper); /* #ffffff */
+  --g-ease: cubic-bezier(.2,.8,.2,1);
+  --g-fast: 120ms;
+  --g-base: 180ms;
+}
+:root:not([data-theme="dark"]) .alt-scheme {
+  color-scheme: dark;
+  --g-bg: var(--ar-ink); /* #1b1428 */
+  --g-surface: color-mix(in srgb, var(--ar-bg) 7%, var(--ar-ink)); /* #2b2436 */
+  --g-sunk: color-mix(in srgb, var(--ar-bg) 4%, var(--ar-ink)); /* #241d30 */
+  --g-text: var(--ar-bg); /* #fbf6ee */
+  --g-mute: color-mix(in srgb, var(--ar-bg) 70%, transparent); /* #fbf6ee @ 70% */
+  --g-soft: color-mix(in srgb, var(--ar-bg) 50%, transparent); /* #fbf6ee @ 50% */
+  --g-rule: color-mix(in srgb, var(--ar-bg) 12%, transparent); /* #fbf6ee @ 12% */
+  --g-rule-strong: color-mix(in srgb, var(--ar-bg) 24%, transparent); /* #fbf6ee @ 24% */
+  --g-accent: color-mix(in srgb, var(--ar-plum) 40%, var(--ar-bg)); /* #afa5b4 */
+  --g-action: var(--ar-coral); /* #ff7a6b */
+  --g-on-action: var(--ar-ink); /* #1b1428 */
+  --g-marker: var(--ar-yellow); /* #f4c84a */
+  --g-overdue: var(--ar-coral); /* #ff7a6b */
+  --g-overdue-mark: var(--ar-coral); /* #ff7a6b */
+  --g-inverse: var(--ar-bg); /* #fbf6ee */
+  --g-on-inverse: var(--ar-ink); /* #1b1428 */
+  --g-inverse-action: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink)); /* #a45150 */
+  --g-swipe-done: color-mix(in srgb, var(--ar-coral) 30%, var(--ar-ink)); /* #5f333c */
+  --g-swipe-act: color-mix(in srgb, var(--ar-plum) 55%, var(--ar-ink)); /* #2e2145 */
+  --g-select: color-mix(in srgb, var(--ar-plum) 60%, var(--ar-ink)); /* #2f2247 */
+  --g-scrim: color-mix(in srgb, var(--ar-ink) 70%, transparent); /* #1b1428 @ 70% */
+  --g-kbd: color-mix(in srgb, var(--ar-bg) 6%, var(--ar-ink)); /* #282234 */
+  --g-key: color-mix(in srgb, var(--ar-bg) 14%, var(--ar-ink)); /* #3a3444 */
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --g-bg: var(--ar-ink); /* #1b1428 */
+    --g-surface: color-mix(in srgb, var(--ar-bg) 7%, var(--ar-ink)); /* #2b2436 */
+    --g-sunk: color-mix(in srgb, var(--ar-bg) 4%, var(--ar-ink)); /* #241d30 */
+    --g-text: var(--ar-bg); /* #fbf6ee */
+    --g-mute: color-mix(in srgb, var(--ar-bg) 70%, transparent); /* #fbf6ee @ 70% */
+    --g-soft: color-mix(in srgb, var(--ar-bg) 50%, transparent); /* #fbf6ee @ 50% */
+    --g-rule: color-mix(in srgb, var(--ar-bg) 12%, transparent); /* #fbf6ee @ 12% */
+    --g-rule-strong: color-mix(in srgb, var(--ar-bg) 24%, transparent); /* #fbf6ee @ 24% */
+    --g-accent: color-mix(in srgb, var(--ar-plum) 40%, var(--ar-bg)); /* #afa5b4 */
+    --g-action: var(--ar-coral); /* #ff7a6b */
+    --g-on-action: var(--ar-ink); /* #1b1428 */
+    --g-marker: var(--ar-yellow); /* #f4c84a */
+    --g-overdue: var(--ar-coral); /* #ff7a6b */
+    --g-overdue-mark: var(--ar-coral); /* #ff7a6b */
+    --g-inverse: var(--ar-bg); /* #fbf6ee */
+    --g-on-inverse: var(--ar-ink); /* #1b1428 */
+    --g-inverse-action: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink)); /* #a45150 */
+    --g-swipe-done: color-mix(in srgb, var(--ar-coral) 30%, var(--ar-ink)); /* #5f333c */
+    --g-swipe-act: color-mix(in srgb, var(--ar-plum) 55%, var(--ar-ink)); /* #2e2145 */
+    --g-select: color-mix(in srgb, var(--ar-plum) 60%, var(--ar-ink)); /* #2f2247 */
+    --g-scrim: color-mix(in srgb, var(--ar-ink) 70%, transparent); /* #1b1428 @ 70% */
+    --g-kbd: color-mix(in srgb, var(--ar-bg) 6%, var(--ar-ink)); /* #282234 */
+    --g-key: color-mix(in srgb, var(--ar-bg) 14%, var(--ar-ink)); /* #3a3444 */
+  }
+  :root:not([data-theme="light"]) .alt-scheme {
+    color-scheme: light;
+    --g-bg: var(--ar-bg); /* #fbf6ee */
+    --g-surface: var(--ar-paper); /* #ffffff */
+    --g-sunk: var(--ar-bg-alt); /* #f4ece0 */
+    --g-text: var(--ar-ink); /* #1b1428 */
+    --g-mute: color-mix(in srgb, var(--ar-ink) 62%, transparent); /* #1b1428 @ 62% */
+    --g-soft: color-mix(in srgb, var(--ar-ink) 40%, transparent); /* #1b1428 @ 40% */
+    --g-rule: color-mix(in srgb, var(--ar-ink) 10%, transparent); /* #1b1428 @ 10% */
+    --g-rule-strong: color-mix(in srgb, var(--ar-ink) 22%, transparent); /* #1b1428 @ 22% */
+    --g-accent: var(--ar-plum); /* #3d2b5c */
+    --g-action: var(--ar-coral); /* #ff7a6b */
+    --g-on-action: var(--ar-ink); /* #1b1428 */
+    --g-marker: var(--ar-yellow); /* #f4c84a */
+    --g-overdue: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink)); /* #a45150 */
+    --g-overdue-mark: var(--ar-coral); /* #ff7a6b */
+    --g-inverse: var(--ar-ink); /* #1b1428 */
+    --g-on-inverse: var(--ar-bg); /* #fbf6ee */
+    --g-inverse-action: var(--ar-coral); /* #ff7a6b */
+    --g-swipe-done: color-mix(in srgb, var(--ar-coral) 24%, var(--ar-bg)); /* #fcd8cf */
+    --g-swipe-act: color-mix(in srgb, var(--ar-plum) 9%, var(--ar-bg)); /* #eae4e1 */
+    --g-select: color-mix(in srgb, var(--ar-plum) 11%, var(--ar-bg)); /* #e6e0de */
+    --g-scrim: color-mix(in srgb, var(--ar-ink) 45%, transparent); /* #1b1428 @ 45% */
+    --g-kbd: color-mix(in srgb, var(--ar-ink) 7%, var(--ar-bg-alt)); /* #e5ddd3 */
+    --g-key: var(--ar-paper); /* #ffffff */
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --g-bg: var(--ar-ink); /* #1b1428 */
+  --g-surface: color-mix(in srgb, var(--ar-bg) 7%, var(--ar-ink)); /* #2b2436 */
+  --g-sunk: color-mix(in srgb, var(--ar-bg) 4%, var(--ar-ink)); /* #241d30 */
+  --g-text: var(--ar-bg); /* #fbf6ee */
+  --g-mute: color-mix(in srgb, var(--ar-bg) 70%, transparent); /* #fbf6ee @ 70% */
+  --g-soft: color-mix(in srgb, var(--ar-bg) 50%, transparent); /* #fbf6ee @ 50% */
+  --g-rule: color-mix(in srgb, var(--ar-bg) 12%, transparent); /* #fbf6ee @ 12% */
+  --g-rule-strong: color-mix(in srgb, var(--ar-bg) 24%, transparent); /* #fbf6ee @ 24% */
+  --g-accent: color-mix(in srgb, var(--ar-plum) 40%, var(--ar-bg)); /* #afa5b4 */
+  --g-action: var(--ar-coral); /* #ff7a6b */
+  --g-on-action: var(--ar-ink); /* #1b1428 */
+  --g-marker: var(--ar-yellow); /* #f4c84a */
+  --g-overdue: var(--ar-coral); /* #ff7a6b */
+  --g-overdue-mark: var(--ar-coral); /* #ff7a6b */
+  --g-inverse: var(--ar-bg); /* #fbf6ee */
+  --g-on-inverse: var(--ar-ink); /* #1b1428 */
+  --g-inverse-action: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink)); /* #a45150 */
+  --g-swipe-done: color-mix(in srgb, var(--ar-coral) 30%, var(--ar-ink)); /* #5f333c */
+  --g-swipe-act: color-mix(in srgb, var(--ar-plum) 55%, var(--ar-ink)); /* #2e2145 */
+  --g-select: color-mix(in srgb, var(--ar-plum) 60%, var(--ar-ink)); /* #2f2247 */
+  --g-scrim: color-mix(in srgb, var(--ar-ink) 70%, transparent); /* #1b1428 @ 70% */
+  --g-kbd: color-mix(in srgb, var(--ar-bg) 6%, var(--ar-ink)); /* #282234 */
+  --g-key: color-mix(in srgb, var(--ar-bg) 14%, var(--ar-ink)); /* #3a3444 */
+}
+:root[data-theme="dark"] .alt-scheme {
+  color-scheme: light;
+  --g-bg: var(--ar-bg); /* #fbf6ee */
+  --g-surface: var(--ar-paper); /* #ffffff */
+  --g-sunk: var(--ar-bg-alt); /* #f4ece0 */
+  --g-text: var(--ar-ink); /* #1b1428 */
+  --g-mute: color-mix(in srgb, var(--ar-ink) 62%, transparent); /* #1b1428 @ 62% */
+  --g-soft: color-mix(in srgb, var(--ar-ink) 40%, transparent); /* #1b1428 @ 40% */
+  --g-rule: color-mix(in srgb, var(--ar-ink) 10%, transparent); /* #1b1428 @ 10% */
+  --g-rule-strong: color-mix(in srgb, var(--ar-ink) 22%, transparent); /* #1b1428 @ 22% */
+  --g-accent: var(--ar-plum); /* #3d2b5c */
+  --g-action: var(--ar-coral); /* #ff7a6b */
+  --g-on-action: var(--ar-ink); /* #1b1428 */
+  --g-marker: var(--ar-yellow); /* #f4c84a */
+  --g-overdue: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink)); /* #a45150 */
+  --g-overdue-mark: var(--ar-coral); /* #ff7a6b */
+  --g-inverse: var(--ar-ink); /* #1b1428 */
+  --g-on-inverse: var(--ar-bg); /* #fbf6ee */
+  --g-inverse-action: var(--ar-coral); /* #ff7a6b */
+  --g-swipe-done: color-mix(in srgb, var(--ar-coral) 24%, var(--ar-bg)); /* #fcd8cf */
+  --g-swipe-act: color-mix(in srgb, var(--ar-plum) 9%, var(--ar-bg)); /* #eae4e1 */
+  --g-select: color-mix(in srgb, var(--ar-plum) 11%, var(--ar-bg)); /* #e6e0de */
+  --g-scrim: color-mix(in srgb, var(--ar-ink) 45%, transparent); /* #1b1428 @ 45% */
+  --g-kbd: color-mix(in srgb, var(--ar-ink) 7%, var(--ar-bg-alt)); /* #e5ddd3 */
+  --g-key: var(--ar-paper); /* #ffffff */
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --g-fast: 0ms; --g-base: 0ms; }
+}

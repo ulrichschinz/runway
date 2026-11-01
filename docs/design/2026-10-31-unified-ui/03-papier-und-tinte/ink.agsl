@@ -1,0 +1,96 @@
+// "Leere Seite" for Android: the ink field of ink.js ported to AGSL (RuntimeShader, API 33+,
+// runway's minSdk is 35). Sketch for the build plan, not compiled in this folder.
+//
+// Differences from the web version, on purpose:
+// - AGSL has no dFdx/dFdy, so the meniscus normal comes from central differences of the smooth
+//   body field (three cheap evaluations), and the fibre relief is applied to the colour only.
+// - No PBR material: one Lambert term for the raking key light and one Blinn-Phong lobe for the
+//   high window light reproduce what MeshPhysicalMaterial's clearcoat does on the web.
+// - Same uniforms, same timeline (uT 0 .. 3.4 s), same colours from RunwayTokens, same dark lift
+//   (uDark), and the same end: the ink sinks in completely, the page is clean at 3.3 s.
+//
+// Kotlin: val shader = RuntimeShader(source); shader.setFloatUniform("uRes", w, h); ...
+//         Modifier.drawBehind { drawRect(ShaderBrush(shader)) } with uT driven by an Animatable.
+//         The composable exists only while the Inbox goes from >= 1 to 0 and leaves the tree at
+//         3.4 s. A revisit of the empty Inbox and reduced motion (ANIMATOR_DURATION_SCALE == 0)
+//         never create it: "Inbox ist leer." is plain text.
+
+uniform float2 uRes;     // px
+uniform float2 uO;       // drop origin, px, top-left based
+uniform float  uT;       // seconds since the drop
+uniform float  uScale;   // composition scale, min(w, 1.5 h) / 860 clamped to 0.4 .. 1.2
+uniform float  uDensity; // px per dp, so noise scales match the web
+layout(color) uniform half4 uInkA; // coral
+layout(color) uniform half4 uInkB; // plum (light) or plum-light (dark)
+uniform float  uDark;    // 1 on the dark theme: the pigment is lifted so it reads on ink
+
+float ihash(float2 p) { p = fract(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float inoise(float2 p) {
+  float2 i = floor(p), f = fract(p); float2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(ihash(i), ihash(i + float2(1, 0)), u.x), mix(ihash(i + float2(0, 1)), ihash(i + float2(1, 1)), u.x), u.y);
+}
+float ifbm(float2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * inoise(p); p = p * 2.03 + 17.17; a *= 0.5; } return s; }
+float ifibres(float2 p) {
+  p += float2(inoise(p * 0.012 + 1.3), inoise(p * 0.012 + 8.1)) * 26.0;
+  float f = 0.0;
+  for (int k = 0; k < 5; k++) {
+    float an = float(k) * 2.39996 + 0.5;
+    float2 q = float2x2(cos(an), sin(an), -sin(an), cos(an)) * p * float2(0.02, 0.24);
+    float ridge = clamp(1.0 - abs(inoise(q + float2(float(k) * 17.3, float(k) * 5.1)) * 2.0 - 1.0), 0.0, 1.0);
+    f += pow(ridge, 6.0) * (0.55 + 0.45 * inoise(p * 0.03 + float(k) * 3.3)); // clamped before pow
+  }
+  return clamp(f * 0.62, 0.0, 1.0);
+}
+float ismin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float grow(float t0, float speed) { return 1.0 - exp(-max(uT - t0, 0.0) * speed); }
+
+// smooth body (no fine wobble): used for the meniscus only
+float body(float2 p) {
+  float S = uScale;
+  float2 c[4]; c[0] = uO; c[1] = uO + float2(150, 22) * S; c[2] = uO + float2(-58, 96) * S; c[3] = uO + float2(236, -62) * S;
+  float R[4]; R[0] = 190.0; R[1] = 128.0; R[2] = 96.0; R[3] = 72.0;
+  float t0[4]; t0[0] = 0.0; t0[1] = 0.22; t0[2] = 0.38; t0[3] = 0.55;
+  float sp[4]; sp[0] = 1.5; sp[1] = 1.9; sp[2] = 2.1; sp[3] = 2.4;
+  float D = 99.0;
+  for (int i = 0; i < 4; i++) {
+    float g = grow(t0[i], sp[i]);
+    float d = g > 0.0001 ? length(p - c[i]) / max(R[i] * S * (0.04 + 0.96 * sqrt(g)), 1.0) : 99.0;
+    d += (inoise(p * 0.0062 / S + c[i] * 0.002) - 0.5) * 0.45 * g;
+    D = i == 0 ? d : ismin(D, d, 0.32);
+  }
+  return D;
+}
+
+half4 main(float2 xy) {
+  float2 p = xy / uDensity;                       // work in dp like the web works in CSS px
+  float S = uScale;
+  float fib = ifibres(p / S);
+  float Ds = body(p);
+  float D = Ds + (ifbm(p * 0.021 / S + 7.3) - 0.5) * 0.12 - fib * 0.03;
+  float d0 = length(p - uO) / max(190.0 * S * (0.04 + 0.96 * sqrt(grow(0.0, 1.5))), 1.0);
+  float inside = 1.0 - smoothstep(0.955, 1.0, D);
+  float tide = exp(-pow(clamp(abs(0.972 - D) / 0.026, 0.0, 6.0), 2.0)) * (1.0 - smoothstep(0.985, 1.01, D));
+  float core = 1.0 - smoothstep(0.05, 0.86, d0);
+  float dens = inside * (0.34 + 0.26 * clamp(1.0 - D, 0.0, 1.0) + 0.22 * core) + tide * 0.62 * smoothstep(0.0, 0.5, uT);
+  float mottle = ifbm(p * 0.018 / S + 3.1);
+  float a = clamp(dens, 0.0, 1.0) * (0.88 + 0.14 * fib * inside) * (0.76 + 0.48 * mottle);
+  float wet = 1.0 - smoothstep(0.4, 2.4, uT);
+  a *= 1.0 - smoothstep(1.7, 3.3, uT);              // dries and sinks in completely
+  float2 e = min(p, uRes / uDensity - p);
+  a *= smoothstep(0.0, 48.0, e.x) * smoothstep(0.0, 48.0, e.y);
+
+  // meniscus normal from the smooth body (central differences, 1 dp apart)
+  float hC = 1.0 - smoothstep(0.45, 1.0, Ds);
+  float hX = 1.0 - smoothstep(0.45, 1.0, body(p + float2(1, 0)));
+  float hY = 1.0 - smoothstep(0.45, 1.0, body(p + float2(0, 1)));
+  float k = wet * 30.0 * S;
+  half3 n = half3(normalize(float3(-(hX - hC) * k, (hY - hC) * k, 1.0)));
+  half3 key = normalize(half3(-0.7, 0.56, 0.4));
+  half3 sky = normalize(half3(-0.32, 0.42, 0.85));
+  half3 h = normalize(sky + half3(0, 0, 1));
+  half3 col = mix(uInkB.rgb, uInkA.rgb, core);
+  col *= half(mix(1.0, 1.45, uDark));
+  col *= 0.82 + 0.3 * max(dot(n, key), 0.0);                                   // raking key light
+  col += half3(pow(clamp(dot(n, h), 0.0, 1.0), 90.0)) * 0.55 * wet;           // wet glint, clamped before pow
+  return half4(col * a, a);                                                    // premultiplied
+}

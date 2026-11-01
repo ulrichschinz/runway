@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runway Android · Papier &amp; Tinte</title>
+<meta name="description" content="runway auf Android, Vorschlag 03 Papier und Tinte: dieselbe Seite in der Hand, mit Widget, Kachel und Teilen.">
+<link rel="stylesheet" href="../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../shared/brand/tokens.css">
+<link rel="stylesheet" href="tokens/tokens.css">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="android.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <filter id="ink-edge" x="-4%" y="-60%" width="108%" height="220%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="3" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="1.5" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</svg>
+
+<div class="board">
+  <!-- ── The phone: 412 x 915 dp, edge to edge, gesture navigation ── -->
+  <div class="device" aria-label="Telefon">
+    <div class="screen" id="screen">
+      <div class="statusbar"><span>9:41</span><span class="cam"></span><span class="sys"><span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:11px"></i></span><span class="bat"></span></span></div>
+      <div id="abar"></div>
+      <div class="ascroll" id="abody"></div>
+      <div class="anotice float" id="afloat" role="status" aria-live="polite" style="display:none"></div>
+      <div class="abottom" id="abottom">
+        <div class="anotice" id="anotice" role="status" aria-live="polite"></div>
+        <div class="aedit" id="aedit">
+          <div class="top"><b>Todo bearbeiten</b><button class="pill quiet" data-act="editcancel">Abbrechen</button><button class="pill action" data-act="editsave">Speichern</button></div>
+          <div class="afield"><input id="aeditfield" aria-label="Beschreibung" placeholder="Beschreibung"></div>
+        </div>
+        <form id="acapture" autocomplete="off"><div class="afield" id="afieldwrap"><input id="afield" aria-label="Neues Todo" placeholder="Neues Todo" enterkeyhint="done"><button class="go" aria-label="In die Inbox">+</button></div></form>
+      </div>
+      <div id="akbdslot"></div>
+      <div class="gesture"><i></i></div>
+      <div class="ascrim" id="ascrim"></div>
+      <div class="amenu" id="amenu" role="menu"></div>
+      <div class="asheet" id="asheet" role="dialog" aria-modal="true"></div>
+      <div class="ctab" id="actab" role="dialog" aria-label="Details im Browser"></div>
+    </div>
+  </div>
+
+  <!-- ── Beside it: what only Android has ── -->
+  <section class="side">
+    <header class="side-head">
+      <div class="eyebrow"><span class="slash">//</span><span>Vorschlag 03</span><span class="sep">·</span><span>Papier &amp; Tinte</span><span class="sep">·</span><span>Android</span></div>
+      <h1 class="display">Dieselbe Seite, in der <em>Hand</em></h1>
+      <p class="lead">Gleiche Listen, Namen, Zeichen und Tokens wie im Web, gebaut in Compose. Wischen zieht den Tintenstrich, die Tinte (AGSL) läuft nur, wenn die Inbox leer wird.</p>
+    </header>
+    <div class="frames">
+      <figure class="frame" style="margin:0">
+        <div class="home">
+          <div class="wid" id="widget" aria-label="runway Übersicht"></div>
+          <div class="icons">
+            <div class="icon"><div class="shortcuts" aria-label="Kurzbefehle"><div>Neues Todo</div><div>Inbox</div></div>
+              <span class="ad"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#mk"/></svg></span>runway</div>
+            
+          </div>
+        </div>
+        <span class="frame-tag">Glance · ohne Bilder</span>
+        <figcaption class="frame-label" style="color:color-mix(in srgb, var(--ar-bg) 72%, transparent);bottom:auto;top:20px">Widget 4×3 · Kurzbefehle</figcaption>
+      </figure>
+
+      <figure class="frame" style="margin:0">
+        <div class="qs">
+                    <div class="tiles">
+            <div class="tile"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 9.5a13 13 0 0 1 18 0M6 13a8.5 8.5 0 0 1 12 0M9.2 16.4a4 4 0 0 1 5.6 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/></svg><span>Internet<small>verbunden</small></span></div>
+            <div class="tile"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></svg><span>Bluetooth<small>aus</small></span></div>
+            <button class="tile todo" id="tile" aria-label="+ Todo"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v8M8 12h8"/></svg><span>+ Todo<small>runway</small></span></button>
+            <div class="tile"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l-1 6h-4zM10 9h4v12h-4z"/></svg><span>Taschenlampe<small>aus</small></span></div>
+          </div>
+        </div>
+        <div class="overlay" id="overlay">
+          <div class="dock">
+            <div class="anotice" id="onotice" role="status" aria-live="polite"></div>
+            <form id="ocapture" autocomplete="off"><div class="afield"><input id="ofield" aria-label="Neues Todo" placeholder="Neues Todo" enterkeyhint="done"></div></form>
+            <button class="close" id="oclose" type="button">Schließen</button>
+          </div>
+          <div class="kbd" aria-hidden="true"><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+        </div>
+        <span class="frame-tag">auch gesperrt</span>
+        <figcaption class="frame-label" style="color:color-mix(in srgb, var(--ar-bg) 70%, transparent);bottom:auto;top:18px">Kachel + Todo · nur das Feld</figcaption>
+      </figure>
+
+      <figure class="frame wide" style="margin:0">
+        <div class="share">
+          <div class="src">
+            <div class="art"><div class="k">example.org · Artikel</div><h4>Agenten-Evaluation: ein Leitfaden</h4><p>Wie man misst, ob ein Agent im Alltag hilft: Aufgaben, Kriterien, Stichproben.</p></div>
+            <div class="sharesheet"><div class="k">Teilen</div><div class="targets">
+              <div class="target me"><span class="ad"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#mk"/></svg></span>runway</div>
+              <div class="target"><span class="ghost"></span>Notizen</div><div class="target"><span class="ghost"></span>Nachricht</div><div class="target"><span class="ghost"></span>Kopieren</div></div></div>
+          </div>
+          <div class="dst">
+            <div class="sharecard">
+              <div class="eyebrow"><span class="slash">//</span><span>Teilen</span><span class="sep">·</span><span>in die Inbox</span></div>
+              <h4>Agenten-Evaluation: ein Leitfaden</h4>
+              <div class="note">https://example.org/agenten-evaluation-leitfaden · Wie man misst, ob ein Agent im Alltag hilft: Aufgaben, Erfolgskriterien, Stichproben.</div>
+              <button class="pill action" id="sharego">In Inbox</button>
+            </div>
+          </div>
+        </div>
+        <span class="frame-tag">ein Tipp · offline</span>
+        <figcaption class="frame-label">Teilen · Ziel runway · Titel aus dem Betreff, Link als Notiz</figcaption>
+      </figure>
+    </div>
+  </section>
+</div>
+
+<!-- ── The states the acceptance contracts pin hardest, as still phones (same row and tab markup) ── -->
+<section class="states">
+  <header class="side-head">
+    <div class="eyebrow"><span class="slash">//</span><span>Zustände</span><span class="sep">·</span><span>Tastatur, Netz, Konto, 150 % Schrift</span></div>
+    <h2 class="display">Tippen, und die Liste bleibt <em>sichtbar</em></h2>
+    <p class="lead">Mit offener Tastatur wird die Überschrift zur Zeile und jede Inbox-Zeile ist eine Zeile hoch. Was noch nicht beim Server ist, sagt es in Worten. Bei 150 % Schrift bleibt jeder Tab einzeilig, die Kontexte brechen um.</p>
+  </header>
+  <div class="stills" id="still"></div>
+</section>
+
+<!-- the brand mark, verbatim from shared/brand/logos/mark-color.svg, for <use> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="mk" viewBox="0 0 64 64"><g stroke="#3D2B5C" stroke-width="1.4" fill="none" opacity="0.55"><line x1="32" y1="14" x2="47.588" y2="23"/><line x1="47.588" y1="23" x2="47.588" y2="41"/><line x1="47.588" y1="41" x2="32" y2="50"/><line x1="32" y1="50" x2="16.412" y2="41"/><line x1="16.412" y1="41" x2="16.412" y2="23"/><line x1="16.412" y1="23" x2="32" y2="14"/><line x1="32" y1="32" x2="32" y2="14"/><line x1="32" y1="32" x2="47.588" y2="23"/><line x1="32" y1="32" x2="47.588" y2="41"/><line x1="32" y1="32" x2="32" y2="50"/><line x1="32" y1="32" x2="16.412" y2="41"/><line x1="32" y1="32" x2="16.412" y2="23"/></g><circle cx="32" cy="32" r="3.6" fill="#3D2B5C"/><circle cx="47.588" cy="23" r="2.8" fill="#3D2B5C"/><circle cx="47.588" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="32" cy="50" r="2.8" fill="#3D2B5C"/><circle cx="16.412" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="16.412" cy="23" r="2.8" fill="#3D2B5C"/><circle cx="32" cy="14" r="4.4" fill="#FF7A6B"/><circle cx="51.588" cy="19.000" r="2" fill="#F4C84A"/></symbol></svg>
+<script type="module" src="android.js"></script>
+</body>
+</html>

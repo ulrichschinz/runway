@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>runway · Orbit</title>
+<meta name="description" content="runway, Vorschlag 04 Orbit: Fokus-Orbit neben der Liste, Tastatur zuerst.">
+<meta name="theme-color" content="#FBF6EE" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1E162D" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../shared/brand/tokens.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+<link rel="stylesheet" href="tokens/orbit-tokens.css">
+<link rel="stylesheet" href="app.css">
+<link rel="modulepreload" href="model.js">
+</head>
+<body>
+<div class="app" id="app" data-view="next" data-side="orbit">
+  <aside class="rail" id="rail" aria-label="Navigation"></aside>
+
+  <main class="main" id="main">
+    <header class="head" id="head"></header>
+    <div class="ctxbar" id="ctxbar" role="group" aria-label="Kontext"></div>
+    <form class="capture" id="capture" autocomplete="off">
+      <span class="cap-plus" aria-hidden="true"></span>
+      <label class="sr" for="capture-input">Neues Todo</label>
+      <input id="capture-input" name="t" placeholder="Neues Todo" aria-label="Neues Todo" enterkeyhint="done">
+      <span class="cap-hint" id="cap-hint"><kbd>N</kbd></span>
+    </form>
+    <div class="filterbar" id="filterbar"></div>
+    <section class="list" id="list" role="list" aria-live="polite"></section>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </main>
+
+  <section class="orbit-col" id="orbit" aria-label="Fokus-Orbit">
+    <header class="orbit-head">
+      <div class="eyebrow"><span class="slash">//</span> Fokus-Orbit</div>
+      <div class="orbit-tools" id="orbit-tools"></div>
+    </header>
+    <div class="stage" id="stage">
+      <div class="labels" id="labels"></div>
+      <div class="suggest" id="suggest"></div>
+      <p class="sr" id="orbit-desc"></p>
+    </div>
+    <div class="legend" id="legend"></div>
+    <footer class="orbit-foot" id="foot"></footer>
+  </section>
+
+  <aside class="detail-col" id="detail" aria-label="Aufgabe"></aside>
+
+  <nav class="tabbar" id="tabbar" aria-label="Listen"></nav>
+</div>
+
+<div class="scrim" id="palette" hidden>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Befehle">
+    <div class="pal-in"><span class="pal-ic"></span><input id="pal-input" placeholder="Befehl, Liste oder Aufgabe" aria-label="Befehl suchen" autocomplete="off"><kbd>Esc</kbd></div>
+    <div class="pal-list" id="pal-list" role="listbox"></div>
+  </div>
+</div>
+
+<div class="scrim" id="keys" hidden>
+  <div class="keys" role="dialog" aria-modal="true" aria-label="Tastenkürzel" id="keys-body"></div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

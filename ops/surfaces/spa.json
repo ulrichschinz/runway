@@ -5,6 +5,7 @@
     "role",
     "theme",
     "token",
+    "ui",
     "username"
   ],
   "routes": [

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>runway · Greifbar</title>
+<meta name="description" content="Proposal 05 Greifbar: runway as soft, tangible objects. Clarify the inbox by flicking the top card into GTD trays.">
+<meta name="theme-color" content="#FBF6EE" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1B1428" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../shared/brand/logos/mark-color.svg">
+<link rel="stylesheet" href="../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../shared/brand/tokens.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+<script>
+  // Warm the module cache for the optional 3D layer (pill and companion; skipped under reduced motion). The canvas itself is created lazily.
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) for (const href of ['https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js', 'gl.js']) {
+    const l = document.createElement('link'); l.rel = 'modulepreload'; l.href = href; l.crossOrigin = ''; document.head.appendChild(l)
+  }
+</script>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side" aria-label="Navigation"></aside>
+  <main class="main" id="main">
+    <header class="topbar" id="topbar"></header>
+    <div class="scroll" id="scroll"><div class="inner" id="view"></div></div>
+    <div class="dock" id="dock">
+      <div class="toast" id="toast" role="status"><span class="toast-msg"></span><span class="drain"></span></div>
+      <form class="dock-bar" id="dock-form" autocomplete="off">
+        <span class="dock-plus" aria-hidden="true"></span>
+        <label class="sr-only" for="dock-input">Neues Todo</label>
+        <input id="dock-input" type="text" placeholder="Neues Todo" aria-label="Neues Todo" enterkeyhint="done" maxlength="500">
+        <span class="dock-key"><kbd>N</kbd> erfassen</span>
+        <button class="btn btn-coral btn-sm dock-send" type="submit">In die Inbox <kbd>↵</kbd></button>
+      </form>
+    </div>
+  </main>
+  <aside class="panel" id="panel" aria-label="Details"><div class="panel-in" id="panel-in"></div></aside>
+</div>
+<nav class="bottomnav" id="bottomnav" aria-label="Listen"></nav>
+<div class="scrim" id="scrim"></div>
+<div class="gl-host" id="gl-host"></div>
+<div class="overlay" id="keys" role="dialog" aria-modal="true" aria-label="Tastenkürzel"></div>
+<div class="sr-only" aria-live="polite" id="live"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
