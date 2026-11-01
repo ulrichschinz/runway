@@ -38,6 +38,7 @@ const props = computed(() => ({
   flags: {
     stalled: gtd.projects.some((p) => p.status === 'active' && p.stalled),
     reviewDue: gtd.reviewDue,
+    inboxDot: gtd.inboxDot,
   },
   stand: gtd.stand,
   offline: gtd.offline,
@@ -56,6 +57,11 @@ const on = {
     window.location.assign('/login')
   },
 }
+
+// A capture made elsewhere marks the Inbox until it is on screen.
+watch([view, () => gtd.inboxDot], ([v, dot]) => {
+  if (v === 'inbox' && dot) gtd.seeInbox()
+}, { immediate: true })
 
 // ?task=<uuid>: read the todo once the link names one; a later link replaces it.
 const task = ref(null)

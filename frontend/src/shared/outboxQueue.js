@@ -34,6 +34,16 @@ const CLOCK_SKEW_MS = 5 * 60 * 1000
  */
 export const IN_FLIGHT_MS = 30_000
 
+/**
+ * The same window for an op sent with keepalive as its page went away (`flush`): that page
+ * never sees the answer, so another tab, or the reloaded page, takes it over — verified
+ * first — once a keepalive request has had time to arrive.
+ */
+export const KEEPALIVE_MS = 3_000
+
+/** When another tab may take over an op in flight. */
+export const inFlightUntil = (op) => (op.sentAt ?? 0) + (op.keepalive ? KEEPALIVE_MS : IN_FLIGHT_MS)
+
 /** The longest `q` that `GET /tasks` takes (backend `max_length=200`). */
 const QUERY_MAX = 200
 
@@ -109,8 +119,10 @@ export function hold(ops, op, now, ms = HOLD_MS) {
 export const isSendable = (op) => !!op && (op.state === 'queued' || op.state === 'held')
 
 /** Mark an op as in flight. Anything but a queued or held op is left alone. */
-export function begin(ops, id, { now = null, tab = null } = {}) {
-  return isSendable(find(ops, id)) ? patch(ops, id, { state: 'sending', sentAt: now, tab }) : ops
+export function begin(ops, id, { now = null, tab = null, keepalive = false } = {}) {
+  return isSendable(find(ops, id))
+    ? patch(ops, id, { state: 'sending', sentAt: now, tab, keepalive: keepalive || undefined })
+    : ops
 }
 
 /** The op that takes back an op the server has already applied, or null when none can. */
@@ -228,14 +240,15 @@ export function undo(ops, action, { newId, now }) {
  *
  * - `sending`: the outcome is unknown, so it is sent again — verified first unless it is
  *   idempotent. An op this tab (`tab`) has in flight, or another tab sent less than
- *   `IN_FLIGHT_MS` ago, is left alone: that tab is still waiting for the answer.
+ *   `IN_FLIGHT_MS` ago (`KEEPALIVE_MS` for a keepalive send), is left alone: that tab is
+ *   still waiting for the answer.
  * - `held` whose window has passed: sent (the user did not undo it).
  * - `auth`: resumed when the user is logged in (`authed`), else left paused.
  */
 export function recover(ops, now, { authed, tab = null }) {
   const out = ops.map((op) => {
     const owned = op.state === 'sending' && (
-      (tab && op.tab === tab) || (op.sentAt && op.tab !== tab && now - op.sentAt < IN_FLIGHT_MS))
+      (tab && op.tab === tab) || (op.sentAt && op.tab !== tab && now < inFlightUntil(op)))
     if (owned) return op
     if (op.state === 'sending') return { ...op, state: 'queued', verify: !!op.verify || !IDEMPOTENT.has(op.kind) }
     if (op.state === 'held' && op.until <= now) return { ...op, state: 'queued' }
@@ -282,26 +295,6 @@ export function restore(text) {
   }
   if (!data || data.v !== VERSION || !Array.isArray(data.ops)) return []
   return data.ops.filter(isOp)
-}
-
-/** The longest capture text, in code points (plan M6, Android's Capping.kt). */
-export const CAPTURE_MAX = 500
-
-/**
- * A capture's text and note as sent: whitespace folded, the text cut at `CAPTURE_MAX`
- * code points (never inside an emoji) and what was cut moved to the front of the note,
- * so nothing typed is lost. Interim until M6's `capping.js`.
- *
- * @returns {{description: string, note: string}}
- */
-export function captureText(text, note = '') {
-  const chars = Array.from(String(text).replace(/\s+/g, ' ').trim())
-  const rest = chars.slice(CAPTURE_MAX).join('').trim()
-  const kept = String(note).trim()
-  return {
-    description: chars.slice(0, CAPTURE_MAX).join('').trim(),
-    note: [rest, kept].filter(Boolean).join('\n\n'),
-  }
 }
 
 /**

@@ -17,9 +17,12 @@ import { ref } from 'vue'
 import client from '../api/client.js'
 import { sendKeepalive } from '../api/keepalive.js'
 import {
-  IN_FLIGHT_MS, alreadyApplied, begin, commit, createOp, enqueue, fail, failureOf, hold, isSendable, opsOf,
+  alreadyApplied, begin, commit, createOp, enqueue, fail, failureOf, hold, inFlightUntil, isSendable, opsOf,
   pauseAuth, recover, restore, resume, retry, serialize, undo, verifyRequest, withOpsOf,
 } from '../shared/outboxQueue.js'
+
+/** How much later than its own tab another tab fires a held op (`schedule`). */
+const FOREIGN_GRACE_MS = 2000
 
 let seq = 0
 const newId = () => `${Date.now().toString(36)}-${(++seq).toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -103,16 +106,23 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
     schedule()
   }
 
-  /** Send what is queued; arm a timer per hold; disarm timers whose hold is gone. */
-  function schedule() {
+  /**
+   * Send what is queued; arm a timer per hold; disarm timers whose hold is gone.
+   *
+   * `foreign`: the change came from another tab. That tab sends what it queued itself, so
+   * nothing queued is sent from here: the other tab's later write (`sending`) can reach this
+   * tab's storage after its event, and a capture would be posted twice. Its holds are armed
+   * `FOREIGN_GRACE_MS` late, as a backup should that tab be gone by then.
+   */
+  function schedule({ foreign = false } = {}) {
     const now = Date.now()
     for (const op of ops.value) {
-      if (op.state === 'queued') queueMicrotask(() => send(op.id))
+      if (op.state === 'queued' && !foreign) queueMicrotask(() => send(op.id))
       else if (op.state === 'held' && !timers.has(op.id)) {
         timers.set(op.id, setTimeout(() => {
           timers.delete(op.id)
           send(op.id)
-        }, Math.max(0, op.until - now)))
+        }, Math.max(0, op.until - now) + (foreign ? FOREIGN_GRACE_MS : 0)))
       }
     }
     for (const [id, timer] of timers) {
@@ -167,16 +177,20 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
     }
   }
 
-  /** The page goes away or out of sight: send every held op so it survives the page. */
+  /**
+   * The page goes away or out of sight: send every held op, and every queued one that needs
+   * no duplicate check (a capture made as the page goes away), with keepalive, so it
+   * survives the page. An op that must be verified first waits for the next start.
+   */
   function flush() {
     let flushing = []
     mutate((list) => {
-      flushing = list.filter((op) => op.state === 'held')
-      return flushing.reduce((acc, op) => begin(acc, op.id, { now: Date.now(), tab }), list)
+      flushing = list.filter((op) => op.state === 'held' || (op.state === 'queued' && !op.verify))
+      return flushing.reduce((acc, op) => begin(acc, op.id, { now: Date.now(), tab, keepalive: true }), list)
     })
     for (const op of flushing) {
       sendKeepalive(op)
-        .then((res) => (res.ok ? settle(op, null) : failed(op, res.status, '')))
+        .then(async (res) => (res.ok ? settle(op, await res.json().catch(() => null)) : failed(op, res.status, '')))
         .catch(() => failed(op, undefined, ''))
     }
   }
@@ -220,22 +234,38 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
 
   load()
   const recoverNow = () => mutate((list) => recover(list, Date.now(), { authed: hasToken(), tab }))
+  // Ops another tab has in flight are left to it; once their window has passed, they are
+  // taken over (that tab was closed or its request was lost). Armed at boot and whenever
+  // another tab's write shows one, so a closed tab's op is not left until the next reload.
+  let recoverTimer = null
+  let recoverAt = Infinity
+  function armRecover() {
+    const due = Math.min(...ops.value
+      .filter((op) => op.state === 'sending' && op.tab !== tab && op.sentAt)
+      .map((op) => inFlightUntil(op) + 1000))
+    if (due >= recoverAt) return
+    clearTimeout(recoverTimer)
+    recoverAt = due
+    recoverTimer = setTimeout(() => {
+      recoverAt = Infinity
+      recoverNow()
+      armRecover()
+    }, Math.max(0, due - Date.now()))
+  }
   recoverNow()
-  // Ops another tab had in flight at boot are left to it; once their window has passed,
-  // they are taken over (that tab was closed or its request was lost).
-  setTimeout(recoverNow, IN_FLIGHT_MS + 1000)
+  armRecover()
   window.addEventListener('pagehide', flush)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flush()
   })
-  // Another tab changed the queue: show it, and arm its holds here too (whichever tab's
-  // timer fires first sends; `begin` lets only one move an op to `sending`).
+  // Another tab changed the queue: show it, and arm its holds here too, late (`schedule`).
   window.addEventListener('storage', (event) => {
     if (event.key !== 'outbox') return
     load()
     ops.value = opsOf(all, currentUser())
-    schedule()
+    schedule({ foreign: true })
+    armRecover()
   })
 
-  return { ops, add, hold: addHeld, undo: undoAction, retry: retryFailed, resumeAuth }
+  return { ops, add, hold: addHeld, undo: undoAction, retry: retryFailed, resumeAuth, flush }
 }
