@@ -99,3 +99,26 @@ export function nextSections({ tasks, today }, ctx = null) {
     ...rings,
   }
 }
+
+/** The follow-up day of a waiting todo: `scheduled`, else the `wait` that hides it. */
+export const followUpOf = (t) => dayOf(t.scheduled || t.wait)
+
+/**
+ * Warten auf in sections (06 `waitingSplit`): `due` — the follow-up day has come
+ * (Nachhaken); `soon` — within the next seven days; `later` — later or without a day.
+ * The input order is kept inside each section.
+ *
+ * @param {object[]} tasks the waiting todos
+ * @param {string} today YYYY-MM-DD
+ * @returns {{due: object[], soon: object[], later: object[]}}
+ */
+export function waitingSections(tasks, today) {
+  const out = { due: [], soon: [], later: [] }
+  for (const t of tasks) {
+    const day = followUpOf(t)
+    if (day && day <= today) out.due.push(t)
+    else if (day && day <= plusDays(today, 7)) out.soon.push(t)
+    else out.later.push(t)
+  }
+  return out
+}

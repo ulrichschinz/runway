@@ -46,3 +46,11 @@ allowlist = [
 # host reads the user and signs out, and its login page logs in, while the old AppShell,
 # LoginView and SettingsView still import it. Falls back to 2 when M17 deletes those three.
 "frontend/src/stores/auth.js" = 5
+# Raised from 4 on 2026-11-01 (brief 0051, approved by the owner, RISK-GOV-001): the rows' meta
+# (`shared/rowMeta.js`) formats server days like the store, the sections, the day progress and
+# t() already do. The calendar is a shared kernel of the new UI; a sixth importer is a new
+# place that reads days and is worth a look.
+"frontend/src/shared/dates.js" = 5
+# Recorded on 2026-11-01 (brief 0051, approved by the owner, RISK-GOV-001): the frame of the
+# five list pages (Inbox, Nächste, Warten auf, Irgendwann, Alle). A sixth is a new list page.
+"frontend/src/tasks/components/ListFrame.vue" = 5

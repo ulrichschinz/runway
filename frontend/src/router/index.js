@@ -12,20 +12,25 @@ import AllTasksView from '../views/AllTasksView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import LoginPage from '../identity/LoginPage.vue'
 import ComingPage from '../layout/ComingPage.vue'
+import AllPage from '../tasks/views/AllPage.vue'
+import InboxPage from '../tasks/views/InboxPage.vue'
+import NextPage from '../tasks/views/NextPage.vue'
+import SomedayPage from '../tasks/views/SomedayPage.vue'
+import WaitingPage from '../tasks/views/WaitingPage.vue'
 
 // Every route has an old and a new side (ADR 0042). The new side is the placeholder page until
-// the milestone that builds the view lands (brief 0050). `meta.view` names the view for the new
+// the milestone that builds the view lands (brief 0050); the five lists landed with brief 0051. `meta.view` names the view for the new
 // shell's rail and dock.
 const routes = [
   { path: '/login', ...pick(LoginView, LoginPage), meta: { public: true } },
   { path: '/', redirect: '/inbox' },
-  { path: '/inbox', ...pick(InboxView, ComingPage), meta: { view: 'inbox' } },
-  { path: '/next', ...pick(NextView, ComingPage), meta: { view: 'next' } },
-  { path: '/waiting', ...pick(WaitingView, ComingPage), meta: { view: 'waiting' } },
-  { path: '/someday', ...pick(SomedayView, ComingPage), meta: { view: 'someday' } },
+  { path: '/inbox', ...pick(InboxView, InboxPage), meta: { view: 'inbox' } },
+  { path: '/next', ...pick(NextView, NextPage), meta: { view: 'next' } },
+  { path: '/waiting', ...pick(WaitingView, WaitingPage), meta: { view: 'waiting' } },
+  { path: '/someday', ...pick(SomedayView, SomedayPage), meta: { view: 'someday' } },
   { path: '/projects', ...pick(ProjectsView, ComingPage), meta: { view: 'projects' } },
   { path: '/projects/:name', ...pick(ProjectsView, ComingPage), meta: { view: 'project' } },
-  { path: '/all', ...pick(AllTasksView, ComingPage), meta: { view: 'all' } },
+  { path: '/all', ...pick(AllTasksView, AllPage), meta: { view: 'all' } },
   { path: '/settings', ...pick(SettingsView, ComingPage), meta: { view: 'settings' } },
   // New UI only: the old UI has no Rückblick, and the guard sends it to the Inbox.
   { path: '/review', ...pick(InboxView, ComingPage), meta: { view: 'review', newOnly: true } },
