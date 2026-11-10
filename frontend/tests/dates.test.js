@@ -5,6 +5,7 @@ import {
   followUpDay,
   followUpOptions,
   formatDay,
+  minuteOf,
   parseStamp,
   plusDays,
   weekdayOf,
@@ -84,5 +85,22 @@ describe('follow-up answers', () => {
 
   it('refuses an answer it does not know', () => {
     expect(() => followUpDay('someday', '2026-10-31')).toThrow(/unknown follow-up answer/)
+  })
+})
+
+describe('minuteOf', () => {
+  it('gives the server-local minute the API accepts back, DST-safe', () => {
+    expect(minuteOf('20261031T070000Z')).toBe('2026-10-31T08:00')
+    expect(minuteOf('20260701T063000Z')).toBe('2026-07-01T08:30')
+    expect(minuteOf('2026-10-31T08:15')).toBe('2026-10-31T08:15')
+    expect(dayOf('2026-10-31T08:15')).toBe('2026-10-31')
+  })
+
+  it('has no minute for a bare day, local midnight, or nothing', () => {
+    expect(minuteOf('2026-10-31')).toBe(null)
+    expect(minuteOf('20261030T230000Z')).toBe(null)
+    expect(minuteOf('2026-10-31T00:00')).toBe(null)
+    expect(minuteOf(null)).toBe(null)
+    expect(minuteOf('morgen')).toBe(null)
   })
 })

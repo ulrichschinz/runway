@@ -26,7 +26,7 @@ import { computed, ref } from 'vue'
 import client from '../../api/client.js'
 import { useFreshness } from '../../composables/useFreshness.js'
 import { useOutbox } from '../../composables/useOutbox.js'
-import { contextCounts, orderContexts, presentContexts } from '../../shared/contexts.js'
+import { clarifyContexts, contextCounts, orderContexts, presentContexts } from '../../shared/contexts.js'
 import { dayOf, plusDays, timeOf } from '../../shared/dates.js'
 import { countsAsPlanned, dayProgress, lensCaption } from '../../shared/dayProgress.js'
 import {
@@ -217,6 +217,8 @@ export const useGtdStore = defineStore('gtd', () => {
   })
   const projects = computed(() => view.value.projects)
   const contexts = computed(() => orderContexts(presentContexts(open.value)))
+  /** The contexts the clarify panel offers for Nächste (D1, or the preset for a user without any). */
+  const contextChoices = computed(() => clarifyContexts(contexts.value))
   const contextCount = computed(() => contextCounts(open.value))
   const progress = computed(() => (today.value ? dayProgress(open.value, doneToday.value, today.value) : null))
   const caption = computed(() => (progress.value ? lensCaption(progress.value) : ''))
@@ -308,10 +310,10 @@ export const useGtdStore = defineStore('gtd', () => {
     return t ? move(t, clarifyPayload(to, opts)) : null
   }
 
-  /** Move between Nächste, Warten auf and Irgendwann. @throws {NeedsAnswer} */
-  function setList(uuid, list) {
+  /** Move between Nächste, Warten auf and Irgendwann (`ctx`: Nächste's answer, same PUT). @throws {NeedsAnswer} */
+  function setList(uuid, list, ctx = '') {
     const t = find(uuid)
-    return t && listOf(t) !== list ? move(t, listPayload(t, list)) : null
+    return t && listOf(t) !== list ? move(t, listPayload(t, list, ctx)) : null
   }
 
   /** Toggle one context. @throws {NeedsAnswer} */
@@ -376,7 +378,7 @@ export const useGtdStore = defineStore('gtd', () => {
     summary, today, loaded, stand, offline, lastAction, inboxDot, recurred,
     // lists
     open, taskOf, keepAside, inbox, next, waiting, someday, unlisted, doneToday, doneWeek, projects,
-    contexts, contextCount, progress, caption, reviewDue, sectionsFor,
+    contexts, contextChoices, contextCount, progress, caption, reviewDue, sectionsFor,
     // the outbox
     ops: outbox.ops, failed, paused, held,
     // actions

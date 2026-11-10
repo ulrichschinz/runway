@@ -4,6 +4,7 @@ import {
   CONTEXT_PRESET,
   NO_CONTEXT,
   chipCount,
+  clarifyContexts,
   contextCounts,
   eyebrowCount,
   orderContexts,
@@ -57,5 +58,13 @@ describe('the numbers', () => {
     const shown = [...sections.jetzt, ...sections.bald, ...sections.spaeter].length
     expect(eyebrowCount('@anrufe', counts)).toEqual(['@anrufe', '3', '+1 ohne Kontext'])
     expect(shown).toBe(chipCount('@anrufe', counts) + counts.none)
+  })
+})
+
+describe('clarifyContexts', () => {
+  it('offers the present contexts in their order, the preset only when there is none', () => {
+    expect(clarifyContexts(['@computer', '@anrufe'])).toEqual(['@computer', '@anrufe'])
+    expect(clarifyContexts([])).toEqual(CONTEXT_PRESET)
+    expect(clarifyContexts([])).not.toBe(CONTEXT_PRESET)
   })
 })

@@ -21,7 +21,7 @@ const props = defineProps({
   sections: { type: Array, required: true },
   today: { type: String, required: true },
   cursor: { type: String, default: null },
-  /** uuid → 'done' | 'delete': how a row that leaves now goes (`useListPage`) */
+  /** uuid → 'done' | 'delete' | 'filed': how a row that leaves now goes (`useListPage`) */
   leaving: { type: Map, required: true },
 })
 defineEmits(['check', 'select', 'retry'])
@@ -36,7 +36,9 @@ const items = computed(() =>
 
 const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-/** A ticked-off or deleted row: out of the accessibility tree at once, struck, then collapsed. */
+const LEAVE_CLASS = { done: 'is-struck', delete: 'is-deleted', filed: 'is-filed' }
+
+/** A row that leaves by an action: out of the accessibility tree at once, struck (or faded), then collapsed. */
 function onLeave(el, done) {
   const uuid = el.dataset?.row
   const how = uuid && props.leaving.get(uuid)
@@ -48,7 +50,7 @@ function onLeave(el, done) {
   el.setAttribute('aria-hidden', 'true')
   el.inert = true
   el.style.transform = ''
-  el.classList.add(how === 'delete' ? 'is-deleted' : 'is-struck')
+  el.classList.add(LEAVE_CLASS[how])
   setTimeout(() => {
     el.style.height = `${el.offsetHeight}px`
     void el.offsetHeight

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  committingEnter, deferredUntil, detailFields, extraTagsOf, fieldEdit, formOf, isDeferred, noteDay, readDay, readTag, runningSince,
+  committingEnter, deferredUntil, detailFields, extraTagsOf, fieldEdit, formOf, isDeferred, readDay, readTag, runningSince,
 } from '../src/shared/detailFields.js'
 
 const TODAY = '2026-11-01'
@@ -164,16 +164,11 @@ describe('isDeferred', () => {
   })
 })
 
-describe('the live bar and the notes', () => {
+describe('the live bar', () => {
   it('says since when a todo runs: the time today, the day before', () => {
     expect(runningSince(todo({ start: '20261101T073000Z' }), TODAY)).toBe('08:30')
     expect(runningSince(todo({ start: '20261030T073000Z' }), TODAY)).toMatch(/30\.10\.$/)
     expect(runningSince(todo(), TODAY)).toBe('')
-  })
-
-  it('dates a note by its server day', () => {
-    expect(noteDay({ entry: '20261031T233000Z' })).toMatch(/01\.11\.$/)
-    expect(noteDay({})).toBe('')
   })
 })
 

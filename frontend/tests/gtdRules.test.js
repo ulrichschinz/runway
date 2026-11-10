@@ -17,6 +17,7 @@ import {
   tagPayload,
 } from '../src/shared/gtdRules.js'
 import { allTagParts } from '../src/shared/contextTags.js'
+import { dayOf } from '../src/shared/dates.js'
 
 const todo = (extra = {}) => ({
   uuid: 'u-1',
@@ -155,6 +156,39 @@ describe('Rückgängig', () => {
     const moved = applyPayload(t, body)
     const inverse = inversePayload(beforeOf(t), body)
     expect(inversePayload(beforeOf(moved), inverse)).toEqual(body)
+  })
+})
+
+describe('Rückgängig keeps the time of day', () => {
+  it('restores a follow-up at 08:00 as 08:00, not as midnight', () => {
+    const t = todo({ tags: ['waiting', '@anrufe'], scheduled: '20261031T070000Z' })
+    const body = listPayload(t, 'next')
+    expect(body.scheduled).toBe('')
+    expect(inversePayload(beforeOf(t), body)).toEqual({ tags_remove: ['next'], tags_add: ['waiting'], scheduled: '2026-10-31T08:00' })
+    expect(dayOf(applyPayload(applyPayload(t, body), inversePayload(beforeOf(t), body)).scheduled)).toBe('2026-10-31')
+  })
+
+  it('restores the day alone when the vectors\' before has no minute', () => {
+    const before = { tags: ['waiting'], project: null, scheduledDay: '2026-10-31' }
+    expect(inversePayload(before, { tags_add: ['next'], tags_remove: ['waiting'], scheduled: '' }).scheduled).toBe('2026-10-31')
+  })
+})
+
+describe('Nächste with the context chosen in the detail (m n, no context yet)', () => {
+  it('sends the context in the move\'s own PUT, so one Rückgängig takes back both', () => {
+    const t = todo({ tags: ['waiting'], project: 'Buero-Umzug', scheduled: '20261031T070000Z' })
+    expect(() => listPayload(t, 'next')).toThrow(NeedsAnswer)
+    const body = listPayload(t, 'next', '@computer')
+    expect(body).toEqual({ tags_add: ['next', '@computer'], tags_remove: ['waiting'], scheduled: '' })
+    const inverse = inversePayload(beforeOf(t), body)
+    expect(inverse).toEqual({ tags_remove: ['next', '@computer'], tags_add: ['waiting'], scheduled: '2026-10-31T08:00' })
+    const undone = applyPayload(applyPayload(t, body), inverse)
+    expect(undone.tags).toEqual(['waiting'])
+    expect(undone.project).toBe('Buero-Umzug')
+  })
+
+  it('ignores ctx when the todo has a context already', () => {
+    expect(listPayload(todo({ tags: ['someday', '@anrufe'] }), 'next', '@computer')).toEqual({ tags_add: ['next'], tags_remove: ['someday'] })
   })
 })
 

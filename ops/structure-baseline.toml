@@ -53,11 +53,16 @@ allowlist = [
 # Raised from 5 on 2026-11-01 (brief 0053, approved by the owner, RISK-GOV-001): the task
 # detail's form holds server days (`shared/detailFields.js`). A seventh importer is a new
 # place that reads days and is worth a look.
-"frontend/src/shared/dates.js" = 6
+# Raised from 6 on 2026-11-01 (brief 0054, approved by the owner, RISK-GOV-001): the clarify rules
+# (`shared/clarify.js`) name the follow-up days "morgen", "Freitag", "nächste Woche" and the day
+# in the notice. An eighth importer is a new place that reads days and is worth a look.
+"frontend/src/shared/dates.js" = 7
 # Recorded on 2026-11-01 (brief 0051, approved by the owner, RISK-GOV-001): the frame of the
 # five list pages (Inbox, Nächste, Warten auf, Irgendwann, Alle). A sixth is a new list page.
 "frontend/src/tasks/components/ListFrame.vue" = 5
 # Recorded on 2026-11-01 (brief 0053, approved by the owner, RISK-GOV-001): the `//` eyebrow is a
 # kit primitive; the task detail is its fifth user (with the list frame, the section rule, the
 # placeholder page and the login page). A sixth is expected with M12's margin panels.
-"frontend/src/layout/ui/EyebrowLine.vue" = 5
+# Raised from 5 on 2026-11-01 (brief 0054, approved by the owner, RISK-GOV-001): the clarify panel's
+# `// Klären · noch n` is the sixth user. M12's margin panels are expected to be the seventh.
+"frontend/src/layout/ui/EyebrowLine.vue" = 6

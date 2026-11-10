@@ -14,6 +14,8 @@
 export const SERVER_TZ = 'Europe/Berlin'
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+/** A server-local minute, the API's `YYYY-MM-DDTHH:MM` (no zone: the server's). */
+const MINUTE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
 const TW_RE = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/
 
 const dayParts = new Intl.DateTimeFormat('en-CA', {
@@ -21,6 +23,15 @@ const dayParts = new Intl.DateTimeFormat('en-CA', {
   year: 'numeric',
   month: '2-digit',
   day: '2-digit',
+})
+const minuteParts = new Intl.DateTimeFormat('en-CA', {
+  timeZone: SERVER_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
 })
 const weekdayShort = new Intl.DateTimeFormat('de-DE', { timeZone: 'UTC', weekday: 'short' })
 const clock = new Intl.DateTimeFormat('de-DE', {
@@ -49,7 +60,8 @@ export function parseStamp(stamp) {
  * The server's calendar day of a stamp, DST-safe (the zone database does the offset).
  *
  * A bare `YYYY-MM-DD` is returned as is: that is what an optimistic patch holds after
- * a PUT sent a day (`applyPayload`), and it is the day Taskwarrior will store.
+ * a PUT sent a day (`applyPayload`), and it is the day Taskwarrior will store. A
+ * server-local `YYYY-MM-DDTHH:MM` (an undo restoring a time, `minuteOf`) is that day.
  *
  * @param {string|null|undefined} stamp
  * @returns {string|null}
@@ -57,10 +69,31 @@ export function parseStamp(stamp) {
 export function dayOf(stamp) {
   if (!stamp) return null
   if (DAY_RE.test(stamp)) return stamp
+  if (MINUTE_RE.test(stamp)) return stamp.slice(0, 10)
   const date = parseStamp(stamp)
   if (!date) return null
   const parts = Object.fromEntries(dayParts.formatToParts(date).map((p) => [p.type, p.value]))
   return `${parts.year}-${parts.month}-${parts.day}`
+}
+
+/**
+ * A stamp as the server-local minute the API accepts back (`YYYY-MM-DDTHH:MM`), so an undo
+ * restores the time of day and not only the day. Seconds are dropped (the API takes none).
+ *
+ * @param {string|null|undefined} stamp
+ * @returns {string|null} null for an empty or unreadable value, a bare day, and local midnight
+ *   (the bare day says exactly that)
+ */
+export function minuteOf(stamp) {
+  if (!stamp || DAY_RE.test(stamp)) return null
+  let minute = stamp
+  if (!MINUTE_RE.test(stamp)) {
+    const date = parseStamp(stamp)
+    if (!date) return null
+    const p = Object.fromEntries(minuteParts.formatToParts(date).map((x) => [x.type, x.value]))
+    minute = `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`
+  }
+  return minute.endsWith('T00:00') ? null : minute
 }
 
 /** The day as a Date at noon UTC: calendar arithmetic on it never crosses a DST edge. */

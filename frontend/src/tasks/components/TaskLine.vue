@@ -126,6 +126,8 @@ button.tick:hover::before { box-shadow: inset 0 0 0 1.5px var(--rw-text); }
 .is-struck .tick::before, .done .tick::before { background: var(--rw-action); box-shadow: inset 0 0 0 1.5px var(--rw-action); transform: scale(0.82); }
 .is-deleted :deep(.strike path) { opacity: 1; stroke: var(--rw-soft); stroke-dashoffset: 0; transition: stroke-dashoffset 160ms var(--rw-ease); }
 .is-deleted .txt { color: var(--rw-soft); }
+/* filed or moved to another list: no strike, the text fades (06 .row.is-filed) */
+.is-filed .txt { color: var(--rw-soft); }
 .line.is-gone {
   overflow: hidden; height: 0 !important; min-height: 0; opacity: 0; border-bottom-color: transparent;
   transition: height 120ms var(--rw-ease), min-height 120ms var(--rw-ease), opacity 120ms;
@@ -136,7 +138,7 @@ button.tick:hover::before { box-shadow: inset 0 0 0 1.5px var(--rw-text); }
    keeps its room, only the last meta column (the day) stays */
 @media (min-width: 761px) {
   @container page (max-width: 600px) {
-    .line, .line.k-inbox, .line.k-waiting, .line.k-someday { grid-template-columns: 44px minmax(0, 1fr) 128px; }
+    .line, .line.k-inbox, .line.k-waiting, .line.k-someday { grid-template-columns: 44px minmax(0, 1fr) 156px; }
     .m:not(:last-child) { display: none; }
   }
 }
