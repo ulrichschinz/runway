@@ -55,6 +55,8 @@ const props = defineProps({
   selectOnly: { type: Boolean, default: false },
   /** the accessible name of the page's own panel as a sheet (the detail's is "Todo") */
   panelLabel: { type: String, default: '' },
+  /** the phone Inbox focuses the capture field on open (M6); the card stack keeps the keyboard down */
+  captureFocus: { type: Boolean, default: true },
 })
 const emit = defineEmits(['select', 'closePanel'])
 
@@ -194,7 +196,7 @@ defineExpose({
       @check="page.check" @select="onSelect" @retry="page.retry"
     />
     <template #capture>
-      <CaptureLine ref="captureLine" :focus-on-open="frame.props.value.view === 'inbox'" />
+      <CaptureLine ref="captureLine" :focus-on-open="captureFocus && frame.props.value.view === 'inbox'" />
     </template>
     <template v-if="openId" #panel>
       <TaskDetail

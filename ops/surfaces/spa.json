@@ -3,6 +3,7 @@
     "captureDraft",
     "email",
     "fullName",
+    "inboxMode",
     "outbox",
     "role",
     "theme",

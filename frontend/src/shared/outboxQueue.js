@@ -71,7 +71,7 @@ const REQUESTS = {
 const IDEMPOTENT = new Set(['put', 'start', 'stop', 'projectStatus', 'review'])
 
 /** The uuid a capture's row carries until the server names the task. */
-const localUuid = (id) => `local:${id}`
+export const localUuid = (id) => `local:${id}`
 
 /** A Taskwarrior stamp (`20261101T131021Z`) of an instant; such stamps sort in time order. */
 const stampOf = (ms) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')

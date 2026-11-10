@@ -33,8 +33,12 @@ export function useClarify({ target, leave }) {
     state.value = NO_STEP
     nameError.value = ''
   }
-  // Another item under the cursor: its own first question.
-  watch(() => target.value?.uuid, reset)
+  // Another item under the cursor: its own first question. A capture the server has just named is
+  // the same item under its new uuid, and keeps its open question.
+  watch(() => target.value?.uuid, (now, before) => {
+    if (now && before && gtd.uuidNow(before) === now) return
+    reset()
+  })
 
   /** `'next'` (a), `'waiting'` (w), `'project'` (p) open their question; `'someday'` files at once. */
   function ask(kind) {
@@ -76,6 +80,8 @@ export function useClarify({ target, leave }) {
   return {
     state,
     step: computed(() => state.value.step),
+    /** what the steps offer: the contexts, the active projects, the server's today (`stepChoices`) */
+    sources,
     choices,
     nameError,
     ask,

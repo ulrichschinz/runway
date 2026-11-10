@@ -5,9 +5,12 @@
  * and the palette (`paletteCommands`) offers it, so a key is named and bound in exactly one place.
  *
  * Scopes: `global` (every page of the new UI), `rows` (a page with a list), `next` (Nächste),
- * `all` (Alle), `inbox` (the Inbox while its clarify panel is shown), `step` (a question of
- * the clarify panel is open: its answers) and `stepProject` (the project question: `n` for a new
- * one). A key may appear once in `global`, and once per other scope. Keys are
+ * `all` (Alle), `inboxPage` (the Inbox with items, either mode: `s` switches it), `inbox` (the
+ * Inbox while its clarify panel is shown), `stack` (the Inbox as the card stack, no question
+ * open: the trays and the card's tools, plan M10), `step` (a question of the clarify panel or the
+ * stack is open: its answers), `stackStep` (a question of the stack is open: `0` and `⌫` go back
+ * too) and `stepProject` (the project question: `n` for a new one). A key may appear once in
+ * `global`, and once per other scope. Keys are
  * `KeyboardEvent.key` values; a two-key sequence (`g i`) is a chord. No command owns a
  * modifier: a key pressed with Ctrl, Alt or Meta is never ours (`ownsKey`) — the palette's
  * ⌘K / Ctrl+K is the palette's own (`isPaletteKey`), shown in the sheet through `sheetKeys`.
@@ -30,6 +33,9 @@ const go = (id, second, label) => ({
 })
 const theme = (id, label) => ({ id: `theme.${id}`, keys: [], scope: 'global', group: 'keys.g.all', label, pal: { group: 'look', label: 'pal.theme' } })
 const onRow = (label) => ({ group: 'act', label, offered: true })
+const tray = (to, keys, label) => ({
+  id: `tray.${to}`, keys, scope: 'stack', group: 'keys.g.stack', label, pal: onRow('pal.cl'),
+})
 
 export const COMMANDS = [
   { id: 'palette', keys: [], sheetKeys: [['Mod', 'K']], scope: 'global', group: 'keys.g.all', label: 'keys.palette' },
@@ -75,13 +81,23 @@ export const COMMANDS = [
   })),
   { id: 'step.back', keys: [['Escape']], scope: 'step', group: 'keys.g.inbox', label: 'keys.cl.back' },
   { id: 'step.new', keys: [['n']], scope: 'stepProject', group: 'keys.g.inbox', label: 'cl.newProject' },
+  { id: 'inbox.mode', keys: [['s']], scope: 'inboxPage', group: 'keys.g.inbox', label: 'keys.cl.mode', pal: { group: 'look', offered: true } },
+  tray('next', [['1']], 'keys.cl.next'),
+  tray('waiting', [['2']], 'keys.cl.wait'),
+  tray('someday', [['3']], 'list.someday'),
+  tray('done', [['4'], ['x']], 'cl.done'),
+  tray('delete', [['5'], ['Delete']], 'cl.delete'),
+  { id: 'stack.project', keys: [['p']], scope: 'stack', group: 'keys.g.stack', label: 'keys.cl.proj', pal: onRow('pal.cl') },
+  { id: 'stack.edit', keys: [['e']], scope: 'stack', group: 'keys.g.stack', label: 'keys.edit', pal: onRow('pal.edit') },
+  { id: 'stack.skip', keys: [['ArrowRight'], ['l']], scope: 'stack', group: 'keys.g.stack', label: 'keys.stack.skip', pal: onRow('pal.skip') },
+  { id: 'stack.back', keys: [['0'], ['Backspace']], scope: 'stackStep', group: 'keys.g.stack', label: 'keys.cl.back' },
 ]
 
 /** The scopes that may rebind a global key while they are active (see the header). */
 export const ASKING_SCOPES = ['step', 'stepProject']
 
 /** How a key is shown in the sheet and the palette; `Mod` is ⌘ or Ctrl (`modKey`). */
-const KEY_NAMES = { Enter: '⏎', Escape: 'Esc', Delete: 'Entf', Backspace: '⌫', ArrowDown: '↓', ArrowUp: '↑' }
+const KEY_NAMES = { Enter: '⏎', Escape: 'Esc', Delete: 'Entf', Backspace: '⌫', ArrowDown: '↓', ArrowUp: '↑', ArrowRight: '→' }
 
 const keyName = (seq, mod) => seq.map((x) => (x === 'Mod' ? mod : KEY_NAMES[x] ?? x)).join(' ')
 

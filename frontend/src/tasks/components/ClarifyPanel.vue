@@ -121,6 +121,7 @@ function onNameKey(event) {
     <p class="keyhints">
       <span><kbd class="key">j</kbd> <kbd class="key">k</kbd> {{ t('cl.k.move') }}</span>
       <span><kbd class="key">e</kbd> {{ t('cl.k.edit') }}</span>
+      <span><kbd class="key">s</kbd> {{ t('inbox.stack') }}</span>
       <span><kbd class="key">z</kbd> {{ t('cl.k.undo') }}</span>
     </p>
   </div>
