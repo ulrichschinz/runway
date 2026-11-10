@@ -13,6 +13,7 @@ import {
   listOf,
   listPayload,
   planPayload,
+  reviewDue,
 } from '../src/shared/gtdRules.js'
 import { allTagParts } from '../src/shared/contextTags.js'
 
@@ -204,5 +205,33 @@ describe('a legacy part the API refuses (F2 limit)', () => {
 
   it('still moves a legacy tag whose parts are all addable', () => {
     expect(listPayload({ tags: ['next,foo', '@a'] }, 'waiting')).toEqual({ tags_add: ['waiting', 'foo'], tags_remove: ['next,foo'] })
+  })
+})
+
+describe('reviewDue', () => {
+  it('is due when no weekly review was ever recorded', () => {
+    expect(reviewDue(null, '2026-11-01')).toBe(true)
+    expect(reviewDue(undefined, '2026-11-01')).toBe(true)
+    expect(reviewDue('', '2026-11-01')).toBe(true)
+  })
+  it('is not due 6 days after the last one, due from 7 days on', () => {
+    expect(reviewDue('20261026T100000Z', '2026-11-01')).toBe(false)
+    expect(reviewDue('20261025T100000Z', '2026-11-01')).toBe(true)
+    expect(reviewDue('20261001T100000Z', '2026-11-01')).toBe(true)
+  })
+  it('is not due on the same day', () => {
+    expect(reviewDue('20261101T080000Z', '2026-11-01')).toBe(false)
+  })
+  it('counts a stamp by its server-time day across the DST night (25 Oct 2026)', () => {
+    // 23:30 UTC on 24 Oct is 01:30 CEST on 25 Oct in Berlin: seven days before 1 Nov.
+    expect(reviewDue('20261024T233000Z', '2026-11-01')).toBe(true)
+    // 22:30 UTC on 24 Oct is 00:30 CEST on 25 Oct as well.
+    expect(reviewDue('20261024T223000Z', '2026-11-01')).toBe(true)
+    // 21:30 UTC on 25 Oct is 22:30 CET on 25 Oct; 26 Oct 00:30 CET is 23:30 UTC on 25 Oct.
+    expect(reviewDue('20261025T233000Z', '2026-11-01')).toBe(false)
+  })
+  it('is never due before today is known', () => {
+    expect(reviewDue(null, null)).toBe(false)
+    expect(reviewDue('20261001T100000Z', null)).toBe(false)
   })
 })

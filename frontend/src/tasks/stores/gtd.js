@@ -27,6 +27,7 @@ import { dayOf, plusDays, timeOf } from '../../shared/dates.js'
 import { countsAsPlanned, dayProgress, lensCaption } from '../../shared/dayProgress.js'
 import {
   beforeOf, clarifyPayload, contextPayload, inversePayload, listOf, listPayload, planPayload, projectNameError,
+  reviewDue as reviewDueRule,
 } from '../../shared/gtdRules.js'
 import { applyOutbox, captureRow, captureText, withSettled } from '../../shared/outboxQueue.js'
 import { byWeight, nextSections } from '../../shared/sections.js'
@@ -178,6 +179,8 @@ export const useGtdStore = defineStore('gtd', () => {
   const contextCount = computed(() => contextCounts(open.value))
   const progress = computed(() => (today.value ? dayProgress(open.value, doneToday.value, today.value) : null))
   const caption = computed(() => (progress.value ? lensCaption(progress.value) : ''))
+  /** The weekly review is due: never done, or last done seven or more days ago (06 rail). */
+  const reviewDue = computed(() => reviewDueRule(summary.value?.last_review?.weekly, today.value))
   /** Nächste in sections under a context filter (`null`, `'@x'` or `NO_CONTEXT`). */
   const sectionsFor = (ctx = null) => nextSections({ tasks: open.value, today: today.value }, ctx)
 
@@ -305,7 +308,7 @@ export const useGtdStore = defineStore('gtd', () => {
     summary, today, loaded, stand, offline, lastAction,
     // lists
     open, inbox, next, waiting, someday, unlisted, doneToday, doneWeek, projects,
-    contexts, contextCount, progress, caption, sectionsFor,
+    contexts, contextCount, progress, caption, reviewDue, sectionsFor,
     // the outbox
     ops: outbox.ops, failed, paused, held,
     // actions

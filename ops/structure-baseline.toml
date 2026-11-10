@@ -42,3 +42,7 @@ allowlist = [
 "backend/app/dependencies.py" = 6
 "frontend/src/stores/tasks.js" = 5
 "frontend/src/views/_useTaskView.js" = 5
+# Raised from 4 on 2026-11-01 (brief 0050, approved by the owner, RISK-GOV-001): the new UI's
+# host reads the user and signs out, and its login page logs in, while the old AppShell,
+# LoginView and SettingsView still import it. Falls back to 2 when M17 deletes those three.
+"frontend/src/stores/auth.js" = 5

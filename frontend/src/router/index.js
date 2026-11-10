@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { rememberUi } from '../shared/uiFlag.js'
+import { UI_NEW, currentUi, rememberUi } from '../shared/uiFlag.js'
+import { loginRedirect } from '../shared/returnPath.js'
 import { pick } from './pick.js'
 import LoginView from '../views/LoginView.vue'
 import InboxView from '../views/InboxView.vue'
@@ -9,20 +10,25 @@ import SomedayView from '../views/SomedayView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
 import AllTasksView from '../views/AllTasksView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import LoginPage from '../identity/LoginPage.vue'
+import ComingPage from '../layout/ComingPage.vue'
 
-// Every route has an old and a new side (ADR 0042). Until a new page lands, both sides are
-// the old view, so ?ui=neu renders exactly what the old UI renders.
+// Every route has an old and a new side (ADR 0042). The new side is the placeholder page until
+// the milestone that builds the view lands (brief 0050). `meta.view` names the view for the new
+// shell's rail and dock.
 const routes = [
-  { path: '/login', ...pick(LoginView, LoginView), meta: { public: true } },
+  { path: '/login', ...pick(LoginView, LoginPage), meta: { public: true } },
   { path: '/', redirect: '/inbox' },
-  { path: '/inbox', ...pick(InboxView, InboxView) },
-  { path: '/next', ...pick(NextView, NextView) },
-  { path: '/waiting', ...pick(WaitingView, WaitingView) },
-  { path: '/someday', ...pick(SomedayView, SomedayView) },
-  { path: '/projects', ...pick(ProjectsView, ProjectsView) },
-  { path: '/projects/:name', ...pick(ProjectsView, ProjectsView) },
-  { path: '/all', ...pick(AllTasksView, AllTasksView) },
-  { path: '/settings', ...pick(SettingsView, SettingsView) },
+  { path: '/inbox', ...pick(InboxView, ComingPage), meta: { view: 'inbox' } },
+  { path: '/next', ...pick(NextView, ComingPage), meta: { view: 'next' } },
+  { path: '/waiting', ...pick(WaitingView, ComingPage), meta: { view: 'waiting' } },
+  { path: '/someday', ...pick(SomedayView, ComingPage), meta: { view: 'someday' } },
+  { path: '/projects', ...pick(ProjectsView, ComingPage), meta: { view: 'projects' } },
+  { path: '/projects/:name', ...pick(ProjectsView, ComingPage), meta: { view: 'project' } },
+  { path: '/all', ...pick(AllTasksView, ComingPage), meta: { view: 'all' } },
+  { path: '/settings', ...pick(SettingsView, ComingPage), meta: { view: 'settings' } },
+  // New UI only: the old UI has no Rückblick, and the guard sends it to the Inbox.
+  { path: '/review', ...pick(InboxView, ComingPage), meta: { view: 'review', newOnly: true } },
 ]
 
 const router = createRouter({
@@ -34,7 +40,10 @@ router.beforeEach((to) => {
   // Before the auth check, so a choice made on a URL that redirects to /login is kept.
   rememberUi(to.query.ui)
   const token = localStorage.getItem('token')
-  if (!to.meta.public && !token) return '/login'
+  // The visited path rides along (`?next=`), so the new login page can return there (F19).
+  if (!to.meta.public && !token) return loginRedirect(to.fullPath)
+  // Here rather than on the record: a record's beforeEnter skips query-only navigations.
+  if (to.meta.newOnly && currentUi(to.query.ui) !== UI_NEW) return '/inbox'
 })
 
 export default router
