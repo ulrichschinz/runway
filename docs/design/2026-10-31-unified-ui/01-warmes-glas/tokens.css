@@ -1,0 +1,113 @@
+/* runway semantic tokens, proposal 01 "Warmes Glas".
+   In the product this file is generated from tokens.json. Here it is written by hand with the
+   same names. Every colour is a brand colour or a color-mix() of brand colours. */
+
+:root {
+  color-scheme: light;
+  --rw-ground: var(--ar-bg);
+  --rw-ground-sunk: var(--ar-bg-alt);
+  --rw-surface: var(--ar-paper);
+  --rw-surface-tint: var(--ar-bg-cool);
+  --rw-text: var(--ar-ink);
+  --rw-text-mute: var(--ar-mute);
+  --rw-text-soft: var(--ar-mute-soft);
+  --rw-line: var(--ar-hairline);
+  --rw-line-strong: color-mix(in srgb, var(--ar-ink) 16%, transparent);
+  --rw-ring: color-mix(in srgb, var(--ar-ink) 50%, transparent);
+
+  --rw-action: var(--ar-coral);
+  --rw-on-action: var(--ar-ink);
+  --rw-action-ink: color-mix(in srgb, var(--ar-coral) 62%, var(--ar-ink));
+  --rw-action-tint: color-mix(in srgb, var(--ar-coral) 12%, transparent);
+  --rw-structure: var(--ar-plum);
+  --rw-structure-tint: color-mix(in srgb, var(--ar-plum) 7%, transparent);
+  --rw-structure-select: color-mix(in srgb, var(--ar-plum) 11%, transparent);
+  --rw-attention: var(--ar-yellow);
+  --rw-focus: var(--ar-plum);
+  --rw-inverse: var(--ar-ink);
+  --rw-on-inverse: var(--ar-bg);
+  --rw-on-inverse-mute: var(--ar-on-dark-mute);
+  --rw-scrim: color-mix(in srgb, var(--ar-ink) 42%, transparent);
+
+  --rw-shadow-card: var(--ar-shadow-sm);
+  --rw-shadow-float: var(--ar-shadow-md);
+  --rw-shadow-panel: var(--ar-shadow-lg);
+  --rw-shadow-sheet: var(--ar-shadow-xl);
+
+  --rw-font: var(--ar-font-sans);
+  --rw-font-accent: var(--ar-font-serif);
+  --rw-font-mono: var(--ar-font-mono);
+
+  --rw-radius-sm: var(--ar-radius-sm);
+  --rw-radius-md: var(--ar-radius-md);
+  --rw-radius-card: var(--ar-radius-lg);
+  --rw-radius-panel: var(--ar-radius-xl);
+  --rw-radius-pill: var(--ar-radius-pill);
+
+  --rw-touch: 48px;
+  --rw-row: 56px;
+  --rw-ring-size: 20px;
+  --rw-lens: 136px;
+  --rw-lens-compact: 44px;
+
+  --rw-dur-fast: var(--ar-dur-fast);
+  --rw-dur-base: var(--ar-dur-base);
+  --rw-dur-slow: var(--ar-dur-slow);
+  --rw-dur-flight: 620ms;
+  --rw-dur-settle: 600ms;
+  --rw-ease: var(--ar-ease);
+  --rw-ease-pull: cubic-bezier(.55, 0, .25, 1);
+  --rw-ease-exit: cubic-bezier(.4, 0, 1, 1);
+}
+
+/* Dark: Ink ground, warm text, plum and coral accents. Never pure black or white. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --rw-ground: var(--ar-ink);
+    --rw-ground-sunk: color-mix(in srgb, var(--ar-ink) 90%, var(--ar-plum));
+    --rw-surface: color-mix(in srgb, var(--ar-ink) 74%, var(--ar-plum));
+    --rw-surface-tint: color-mix(in srgb, var(--ar-ink) 58%, var(--ar-plum));
+    --rw-text: var(--ar-bg);
+    --rw-text-mute: var(--ar-on-dark-mute);
+    --rw-text-soft: var(--ar-on-dark-soft);
+    --rw-line: var(--ar-on-dark-hairline);
+    --rw-line-strong: color-mix(in srgb, var(--ar-bg) 20%, transparent);
+    --rw-ring: color-mix(in srgb, var(--ar-bg) 55%, transparent);
+    --rw-action-ink: color-mix(in srgb, var(--ar-coral) 80%, var(--ar-bg));
+    --rw-action-tint: color-mix(in srgb, var(--ar-coral) 16%, transparent);
+    --rw-structure: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg));
+    --rw-structure-tint: color-mix(in srgb, var(--ar-bg) 7%, transparent);
+    --rw-structure-select: color-mix(in srgb, var(--ar-bg) 11%, transparent);
+    --rw-focus: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg));
+    --rw-inverse: var(--ar-bg);
+    --rw-on-inverse: var(--ar-ink);
+    --rw-on-inverse-mute: var(--ar-mute);
+    --rw-scrim: color-mix(in srgb, var(--ar-ink) 60%, transparent);
+    --rw-shadow-card: none; /* shadows do not read on ink; the hairline border carries the card */
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --rw-ground: var(--ar-ink);
+  --rw-ground-sunk: color-mix(in srgb, var(--ar-ink) 90%, var(--ar-plum));
+  --rw-surface: color-mix(in srgb, var(--ar-ink) 74%, var(--ar-plum));
+  --rw-surface-tint: color-mix(in srgb, var(--ar-ink) 58%, var(--ar-plum));
+  --rw-text: var(--ar-bg);
+  --rw-text-mute: var(--ar-on-dark-mute);
+  --rw-text-soft: var(--ar-on-dark-soft);
+  --rw-line: var(--ar-on-dark-hairline);
+  --rw-line-strong: color-mix(in srgb, var(--ar-bg) 20%, transparent);
+  --rw-ring: color-mix(in srgb, var(--ar-bg) 55%, transparent);
+  --rw-action-ink: color-mix(in srgb, var(--ar-coral) 80%, var(--ar-bg));
+  --rw-action-tint: color-mix(in srgb, var(--ar-coral) 16%, transparent);
+  --rw-structure: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg));
+  --rw-structure-tint: color-mix(in srgb, var(--ar-bg) 7%, transparent);
+  --rw-structure-select: color-mix(in srgb, var(--ar-bg) 11%, transparent);
+  --rw-focus: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg));
+  --rw-inverse: var(--ar-bg);
+  --rw-on-inverse: var(--ar-ink);
+  --rw-on-inverse-mute: var(--ar-mute);
+  --rw-scrim: color-mix(in srgb, var(--ar-ink) 60%, transparent);
+  --rw-shadow-card: none; /* shadows do not read on ink; the hairline border carries the card */
+}

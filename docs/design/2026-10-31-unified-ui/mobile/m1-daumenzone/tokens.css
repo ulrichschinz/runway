@@ -1,0 +1,145 @@
+/* Semantic tokens for mobile proposal M1 "Daumenzone".
+   Derived (copied, values unchanged) from 03-papier-und-tinte/tokens/tokens.css, the token source
+   of the chosen web design. Only change: the dark block also applies to any element with
+   data-theme="dark", so one phone frame can be dark on a light board. Load after shared/brand/tokens.css. */
+
+:root {
+  color-scheme: light;
+  --rw-bg: var(--ar-bg); /* #fbf6ee */
+  --rw-surface: var(--ar-paper); /* #ffffff */
+  --rw-sunk: var(--ar-bg-alt); /* #f4ece0 */
+  --rw-cool: var(--ar-bg-cool); /* #f1eef4 */
+  --rw-text: var(--ar-ink); /* #1b1428 */
+  --rw-mute: color-mix(in srgb, var(--ar-ink) 62%, transparent); /* #1b1428 @ 62% */
+  --rw-soft: color-mix(in srgb, var(--ar-ink) 40%, transparent); /* #1b1428 @ 40% */
+  --rw-rule: color-mix(in srgb, var(--ar-ink) 10%, transparent); /* #1b1428 @ 10% */
+  --rw-rule-strong: color-mix(in srgb, var(--ar-ink) 20%, transparent); /* #1b1428 @ 20% */
+  --rw-hover: color-mix(in srgb, var(--ar-ink) 4%, transparent); /* #1b1428 @ 4% */
+  --rw-focus: color-mix(in srgb, var(--ar-plum) 12%, transparent); /* #3d2b5c @ 12% */
+  --rw-select: color-mix(in srgb, var(--ar-plum) 18%, transparent); /* #3d2b5c @ 18% */
+  --rw-accent: var(--ar-plum); /* #3d2b5c */
+  --rw-action: var(--ar-coral); /* #ff7a6b */
+  --rw-on-action: var(--ar-ink); /* #1b1428 */
+  --rw-marker: var(--ar-yellow); /* #f4c84a */
+  --rw-overdue: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink)); /* #a45150 */
+  --rw-overdue-mark: var(--ar-coral); /* #ff7a6b */
+  --rw-inverse: var(--ar-ink); /* #1b1428 */
+  --rw-on-inverse: var(--ar-bg); /* #fbf6ee */
+  --rw-inverse-action: var(--ar-coral); /* #ff7a6b */
+  --rw-ink-a: var(--ar-coral); /* #ff7a6b */
+  --rw-ink-b: var(--ar-plum); /* #3d2b5c */
+  --rw-scrim: color-mix(in srgb, var(--ar-ink) 40%, transparent); /* #1b1428 @ 40% */
+
+  /* type */
+  --rw-font-sans: var(--ar-font-sans);
+  --rw-font-serif: var(--ar-font-serif);
+  --rw-font-mono: var(--ar-font-mono);
+  --rw-type-display-size: clamp(34px, 3.6vw, 54px);
+  --rw-type-display-line: 1.04;
+  --rw-type-display-weight: 500;
+  --rw-type-display-tracking: -0.03em;
+  --rw-type-title-size: 24px;
+  --rw-type-title-line: 1.2;
+  --rw-type-title-weight: 500;
+  --rw-type-title-tracking: -0.015em;
+  --rw-type-row-size: 15px;
+  --rw-type-row-line: 1.4;
+  --rw-type-row-weight: 400;
+  --rw-type-row-tracking: -0.005em;
+  --rw-type-body-size: 14px;
+  --rw-type-body-line: 1.55;
+  --rw-type-body-weight: 400;
+  --rw-type-body-tracking: 0em;
+  --rw-type-meta-size: 11.5px;
+  --rw-type-meta-line: 1.35;
+  --rw-type-meta-weight: 400;
+  --rw-type-meta-tracking: 0.02em;
+  --rw-type-eyebrow-size: 11px;
+  --rw-type-eyebrow-line: 1.3;
+  --rw-type-eyebrow-weight: 400;
+  --rw-type-eyebrow-tracking: 0.06em;
+
+  /* shape */
+  --rw-radius-sm: 8px;
+  --rw-radius-md: 12px;
+  --rw-radius-lg: 18px;
+  --rw-radius-xl: 22px;
+  --rw-radius-pill: 999px;
+
+  /* size */
+  --rw-size-row-web: 40px;
+  --rw-size-row-android: 56px;
+  --rw-size-touch: 48px;
+  --rw-size-ring-web: 18px;
+  --rw-size-ring-android: 22px;
+  --rw-size-rail: 232px;
+  --rw-size-margin: 392px;
+
+  /* motion */
+  --rw-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --rw-dur-fast: 120ms;
+  --rw-dur-base: 180ms;
+  --rw-dur-slow: 260ms;
+  --rw-dur-strike: 260ms;
+  --rw-dur-strike-hold: 380ms;
+  --rw-dur-collapse: 180ms;
+  --rw-dur-undo: 6000ms;
+    }
+
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+  color-scheme: dark;
+  --rw-bg: var(--ar-ink); /* #1b1428 */
+  --rw-surface: color-mix(in srgb, var(--ar-bg) 7%, var(--ar-ink)); /* #2b2436 */
+  --rw-sunk: color-mix(in srgb, var(--ar-bg) 4%, var(--ar-ink)); /* #241d30 */
+  --rw-cool: color-mix(in srgb, var(--ar-plum) 35%, var(--ar-ink)); /* #271c3a */
+  --rw-text: var(--ar-bg); /* #fbf6ee */
+  --rw-mute: color-mix(in srgb, var(--ar-bg) 70%, transparent); /* #fbf6ee @ 70% */
+  --rw-soft: color-mix(in srgb, var(--ar-bg) 50%, transparent); /* #fbf6ee @ 50% */
+  --rw-rule: color-mix(in srgb, var(--ar-bg) 12%, transparent); /* #fbf6ee @ 12% */
+  --rw-rule-strong: color-mix(in srgb, var(--ar-bg) 22%, transparent); /* #fbf6ee @ 22% */
+  --rw-hover: color-mix(in srgb, var(--ar-bg) 5%, transparent); /* #fbf6ee @ 5% */
+  --rw-focus: color-mix(in srgb, color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg)) 16%, transparent); /* #a69bac @ 16% */
+  --rw-select: color-mix(in srgb, color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg)) 34%, transparent); /* #a69bac @ 34% */
+  --rw-accent: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg)); /* #a69bac */
+  --rw-action: var(--ar-coral); /* #ff7a6b */
+  --rw-on-action: var(--ar-ink); /* #1b1428 */
+  --rw-marker: var(--ar-yellow); /* #f4c84a */
+  --rw-overdue: var(--ar-coral); /* #ff7a6b */
+  --rw-overdue-mark: var(--ar-coral); /* #ff7a6b */
+  --rw-inverse: var(--ar-bg); /* #fbf6ee */
+  --rw-on-inverse: var(--ar-ink); /* #1b1428 */
+  --rw-inverse-action: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink)); /* #a45150 */
+  --rw-ink-a: var(--ar-coral); /* #ff7a6b */
+  --rw-ink-b: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg)); /* #a69bac */
+  --rw-scrim: color-mix(in srgb, var(--ar-ink) 70%, transparent); /* #1b1428 @ 70% */
+}
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --rw-bg: var(--ar-ink); /* #1b1428 */
+  --rw-surface: color-mix(in srgb, var(--ar-bg) 7%, var(--ar-ink)); /* #2b2436 */
+  --rw-sunk: color-mix(in srgb, var(--ar-bg) 4%, var(--ar-ink)); /* #241d30 */
+  --rw-cool: color-mix(in srgb, var(--ar-plum) 35%, var(--ar-ink)); /* #271c3a */
+  --rw-text: var(--ar-bg); /* #fbf6ee */
+  --rw-mute: color-mix(in srgb, var(--ar-bg) 70%, transparent); /* #fbf6ee @ 70% */
+  --rw-soft: color-mix(in srgb, var(--ar-bg) 50%, transparent); /* #fbf6ee @ 50% */
+  --rw-rule: color-mix(in srgb, var(--ar-bg) 12%, transparent); /* #fbf6ee @ 12% */
+  --rw-rule-strong: color-mix(in srgb, var(--ar-bg) 22%, transparent); /* #fbf6ee @ 22% */
+  --rw-hover: color-mix(in srgb, var(--ar-bg) 5%, transparent); /* #fbf6ee @ 5% */
+  --rw-focus: color-mix(in srgb, color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg)) 16%, transparent); /* #a69bac @ 16% */
+  --rw-select: color-mix(in srgb, color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg)) 34%, transparent); /* #a69bac @ 34% */
+  --rw-accent: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg)); /* #a69bac */
+  --rw-action: var(--ar-coral); /* #ff7a6b */
+  --rw-on-action: var(--ar-ink); /* #1b1428 */
+  --rw-marker: var(--ar-yellow); /* #f4c84a */
+  --rw-overdue: var(--ar-coral); /* #ff7a6b */
+  --rw-overdue-mark: var(--ar-coral); /* #ff7a6b */
+  --rw-inverse: var(--ar-bg); /* #fbf6ee */
+  --rw-on-inverse: var(--ar-ink); /* #1b1428 */
+  --rw-inverse-action: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink)); /* #a45150 */
+  --rw-ink-a: var(--ar-coral); /* #ff7a6b */
+  --rw-ink-b: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg)); /* #a69bac */
+  --rw-scrim: color-mix(in srgb, var(--ar-ink) 70%, transparent); /* #1b1428 @ 70% */
+}

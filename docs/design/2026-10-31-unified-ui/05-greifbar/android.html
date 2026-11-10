@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runway Android · Greifbar</title>
+<meta name="description" content="Proposal 05 Greifbar on Android: the same language in Jetpack Compose, plus widget, Quick Settings tile, capture overlay and share target.">
+<link rel="icon" href="../shared/brand/logos/mark-color.svg">
+<link rel="stylesheet" href="../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../shared/brand/tokens.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+<script>
+  // Warm the module cache for the optional 3D layer (pill and companion; skipped under reduced motion). The canvas itself is created lazily.
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) for (const href of ['https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js', 'gl.js']) {
+    const l = document.createElement('link'); l.rel = 'modulepreload'; l.href = href; l.crossOrigin = ''; document.head.appendChild(l)
+  }
+</script>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="android.css">
+</head>
+<body class="android-page">
+<div class="ap">
+  <section class="ap-phone" aria-label="runway auf dem Telefon">
+    <div class="device">
+      <div class="screen phone" id="screen">
+        <div class="sbar" aria-hidden="true"><span>9:12</span><span class="cam"></span><span class="sys" id="sys"></span></div>
+        <div class="a-app" id="a-app">
+          <header class="a-top" id="a-top"></header>
+          <div class="a-scroll" id="a-scroll"><div id="a-view"></div></div>
+          <div class="a-bottom" id="a-bottom">
+            <div class="a-notice" id="a-notice" role="status"><span></span><span class="drain"></span></div>
+            <button class="a-fab" id="a-fab" aria-label="Neues Todo"></button>
+            <form class="a-field" id="a-field" autocomplete="off"><input id="a-input" placeholder="Neues Todo" aria-label="Neues Todo" enterkeyhint="done" maxlength="500"><button class="a-send" type="submit" aria-label="In Inbox"></button></form>
+            <div class="a-kbd" id="a-kbd" aria-hidden="true"></div>
+            <nav class="a-nav" id="a-nav" aria-label="Listen"></nav>
+          </div>
+        </div>
+        <div class="a-klaeren" id="a-klaeren">
+          <div class="a-k-top"><button class="a-icon" data-a="k-back" aria-label="Zurück zur Inbox"></button><span class="stack-progress" id="a-kprog"></span><span class="grow"></span><div class="buddy-slot" data-buddy id="a-kbuddy"></div></div>
+        </div>
+        <div class="a-scrim" id="a-scrim"></div>
+        <div class="a-sheet" id="a-sheet" role="dialog" aria-label="Details"></div>
+        <div class="gl-host-phone" id="a-gl"></div>
+        <div class="gbar"></div>
+      </div>
+    </div>
+    <p class="ap-cap">// Pixel 9 · 412 × 915 dp · Android 17 · Gestennavigation</p>
+  </section>
+
+  <section class="ap-side">
+    <header class="ap-head">
+      <p class="eyebrow"><span class="slash">//</span> runway für Android · Jetpack Compose</p>
+      <h1>Gleiche Sprache, <em>nativ</em> gebaut.</h1>
+      <p>Dieselben fünf Listen, Namen und Tokens wie im Web. Die Karte im Stapel ist eine Compose-Fläche mit <span class="mono">graphicsLayer</span>-Drehung und Federn, die Pille wird nur beim Abhaken zu AGSL-Ton. Widget, Kachel und Teilen bleiben schnell und ohne 3D.</p>
+    </header>
+    <div class="ap-grid">
+      <article class="panel-s" aria-label="Home-Screen-Widget">
+        <h3>Widget „runway Übersicht“ <span class="mono">// Glance · 4 × 3</span></h3>
+        <div class="home"><div class="wgt" id="wgt"></div></div>
+        <p class="note">Nur Text und Vektoren, keine Bitmaps. Pille hakt ab, Chip wechselt den Kontext, Plus öffnet die Eingabe.</p>
+      </article>
+      <article class="panel-s" aria-label="Schnelleinstellungen">
+        <h3>Kachel „+ Todo“ <span class="mono">// TileService · View-Overlay</span></h3>
+        <div class="qs-wrap">
+          <div class="shade" aria-label="Schnelleinstellungen">
+            <div class="qs" id="qs-wifi"></div>
+            <div class="qs" id="qs-bt"></div>
+            <button class="qs ours" id="qs-todo"></button>
+            <div class="qs" id="qs-torch"></div>
+          </div>
+          <div class="overlay-demo" id="ov">
+            <div class="ghost"><i style="width:60%"></i><i style="width:80%"></i><i style="width:45%"></i></div>
+            <div class="ov-notice" id="ov-notice" role="status"><span>In Inbox ✓</span><button data-a="ov-undo">Rückgängig</button></div>
+            <form class="ov-field" id="ov-form"><input id="ov-input" placeholder="Neues Todo" aria-label="Neues Todo"><button class="ov-x" type="button" data-a="ov-close">Schließen</button></form>
+          </div>
+        </div>
+      </article>
+      <article class="panel-s" aria-label="Teilen">
+        <h3>Teilen an „runway“ <span class="mono">// ShareActivity</span></h3>
+        <div class="share-demo">
+          <div class="ghost"><i style="width:70%"></i><i style="width:90%"></i><i style="width:55%"></i><i style="width:80%"></i></div>
+          <div class="share-card" id="share">
+            <p class="eyebrow"><span class="slash">//</span> runway</p>
+            <p class="t" style="margin:0">Agenten richtig evaluieren: was im Alltag zählt</p>
+            <p class="n" style="margin:0">https://example.com/agenten-evaluation · Gespeichert als Notiz am Todo, die Beschreibung kommt aus dem Betreff.</p>
+            <button class="btn btn-coral" id="share-btn">In Inbox</button>
+          </div>
+        </div>
+      </article>
+      <article class="panel-s" aria-label="App-Symbol und Kurzbefehle">
+        <h3>App-Symbol und Kurzbefehle <span class="mono">// adaptiv · themed</span></h3>
+        <div class="launch">
+          <div class="app-icons"><div class="app-icon" id="ic-color"></div><span class="app-icon-l">runway</span><div class="app-icon mono" id="ic-mono"></div><span class="app-icon-l">Themed</span></div>
+          <div><div class="sc-menu" id="sc-menu"></div>
+            <div class="real" aria-label="Echte Größe, 48 dp"><div class="app-icon s48" id="ic-48a"></div><div class="app-icon s48" id="ic-48b"></div><span class="app-icon-l">48 dp, Marke 1:1<br>Linien verschwinden</span><span class="app-icon-l">48 dp, Icon-Variante<br>Abweichung 8</span></div></div>
+        </div>
+        <p class="note">Bildmarke statt des blauen Plus. Gedrückt halten zeigt „Neues Todo“ und „Inbox“. In echter Größe trägt die Marke nur mit kräftigeren Linien (Abweichung 8, braucht Ulis Freigabe).</p>
+      </article>
+    </div>
+  </section>
+</div>
+<div class="sr-only" aria-live="polite" id="live"></div>
+<script type="module" src="android.js"></script>
+</body>
+</html>

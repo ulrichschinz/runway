@@ -19,6 +19,12 @@ Multi-user, mobile-friendly, dark mode. Built by [Agentic Reach](https://agentic
 - **Agent-ready** — REST API + MCP server for LLM and automation integration
 - Swipe gestures, search/filter, dark mode, per-user data isolation
 
+**A new interface is being built** behind a switch ([ADR 0042](docs/adr/0042-the-new-ui-coexists-behind-a-switch.md)).
+Open any page with `?ui=neu` (for example `/next?ui=neu`) to use it, and with `?ui=alt` to go
+back. The choice is remembered per browser, in the `localStorage` key `ui`. Pages the new
+interface does not have yet show the old one, which stays the default for everyone who has not
+opted in.
+
 ## Stack
 
 | Layer | Technology |

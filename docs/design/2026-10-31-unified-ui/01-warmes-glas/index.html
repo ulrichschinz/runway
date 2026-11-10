@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>runway · Warmes Glas</title>
+<meta name="description" content="Vorschlag 01 Warmes Glas: runway im Web, ruhig auf warmem Papier, mit einer Tageslinse aus Glas.">
+<meta name="theme-color" content="#FBF6EE" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1B1428" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../shared/brand/tokens.css">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="app.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+</head>
+<body>
+<a class="skip" href="#list">Zur Liste springen</a>
+<div class="app" id="app">
+  <aside class="side" id="side" aria-label="Navigation"></aside>
+
+  <main class="main" id="main">
+    <div class="col">
+      <header class="head" id="head">
+        <div class="slot" id="slot" aria-hidden="true"></div>
+        <div class="head-text">
+          <p class="eyebrow" id="eyebrow"></p>
+          <h1 class="title" id="title"></h1>
+          <p class="lede" id="lede"></p>
+        </div>
+        <div class="readout" id="readout" aria-live="polite"></div>
+      </header>
+      <div class="chips" id="chips" role="toolbar" aria-label="Kontext"></div>
+      <div class="list" id="list" tabindex="-1"></div>
+    </div>
+    <div class="dock" id="dock">
+      <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
+      <form class="capture" id="capture" autocomplete="off">
+        <span class="capture-plus" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg></span>
+        <label class="sr" for="capture-input">Neues Todo</label>
+        <input id="capture-input" name="t" placeholder="Neues Todo" enterkeyhint="done" aria-describedby="capture-hint">
+        <span class="capture-hint" id="capture-hint"><kbd>N</kbd></span>
+        <button class="capture-go" type="submit" aria-label="In die Inbox" hidden><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 4.5v5.2a2 2 0 0 1-2 2H5"/><path d="m8 8.5-3 3.2 3 3.2"/></svg></button>
+      </form>
+    </div>
+  </main>
+
+  <aside class="panel" id="panel" hidden aria-label="Details"></aside>
+  <nav class="tabbar" id="tabbar" aria-label="Listen"></nav>
+</div>
+
+<svg class="flight" id="flight" aria-hidden="true"><path id="thread" d=""/></svg>
+<div class="bead" id="bead" aria-hidden="true"></div>
+<div class="palette-wrap" id="palette" hidden></div>
+<div class="sheet-scrim" id="scrim" hidden></div>
+<div class="sr" id="live" aria-live="polite"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

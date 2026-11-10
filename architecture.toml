@@ -19,6 +19,11 @@
 # Frontend units are DECLARED, not foldered. MODE C forbids restructuring, and a path map
 # gives the index and the boundary checker everything a folder move would, at no
 # migration risk. Re-open trigger: a third feature unit, or components/ exceeding 15 files.
+#
+# The new UI (ADR 0042) adds files, never moves them: each frontend unit below carries one
+# glob for the folder its new files go into, declared once so the milestones that fill those
+# folders do not edit this contract. The explicit file lists are the old UI's, and they leave
+# with it in the contract step.
 
 version = 1
 
@@ -215,9 +220,13 @@ paths = [
   "frontend/src/main.js",
   "frontend/src/router/**",
   "frontend/src/style.css",
+  "frontend/src/assets/**",
 ]
 note = """
-Composition root: the router imports every view. Nothing imports it back.
+Composition root: the router imports every view. Nothing imports it back. While two UIs
+coexist (ADR 0042) every route has an old and a new side, both imported statically, and
+router/pick.js renders the one the switch names. assets/ holds what the root loads once:
+fonts and the generated token stylesheet.
 """
 
 [[units]]
@@ -228,11 +237,18 @@ paths = [
   "frontend/src/components/AppShell.vue",
   "frontend/src/components/NavItem.vue",
   "frontend/src/components/BrandMark.vue",
+  "frontend/src/layout/**",
 ]
 note = """
 Chrome that feature views wrap themselves in. Split out of the old fe/shell: the router
 imports views and views import the layout, so keeping both in one unit manufactured a
 cycle for every feature rather than exposing the one real cycle (CYCLE-001).
+
+layout/ is the new UI's chrome (ADR 0042), and it imports no feature: the frame receives
+what it shows through props and slots, and the palette and keymap get their entries from a
+registry in fe/shared that features fill at runtime. The edges to fe/tasks and fe/identity
+below exist only for AppShell.vue, so until it is deleted the gate cannot hold layout/ to
+this; review and `./run impact` do.
 """
 
 [[units]]
@@ -252,25 +268,45 @@ paths = [
   "frontend/src/views/SomedayView.vue",
   "frontend/src/views/AllTasksView.vue",
   "frontend/src/views/_useTaskView.js",
+  "frontend/src/tasks/**",
 ]
 
 [[units]]
 id = "fe/projects"
 scope = "frontend"
 owner = "maintainer"
-paths = ["frontend/src/views/ProjectsView.vue", "frontend/src/components/ProjectPlanModal.vue"]
+paths = [
+  "frontend/src/views/ProjectsView.vue",
+  "frontend/src/components/ProjectPlanModal.vue",
+  "frontend/src/projects/**",
+]
 
 [[units]]
 id = "fe/identity"
 scope = "frontend"
 owner = "maintainer"
-paths = ["frontend/src/views/LoginView.vue", "frontend/src/views/SettingsView.vue", "frontend/src/stores/auth.js"]
+paths = [
+  "frontend/src/views/LoginView.vue",
+  "frontend/src/views/SettingsView.vue",
+  "frontend/src/stores/auth.js",
+  "frontend/src/identity/**",
+]
 
 [[units]]
 id = "fe/shared"
 scope = "frontend"
 owner = "maintainer"
-paths = ["frontend/src/api/**", "frontend/src/composables/**", "frontend/src/shared/**"]
+paths = [
+  "frontend/src/api/**",
+  "frontend/src/composables/**",
+  "frontend/src/shared/**",
+  "frontend/tokens/**",
+]
+note = """
+Pure rules, composables and the HTTP client, available to every frontend unit. tokens/ holds
+the design tokens both clients share: the source, the Tailwind theme generated from it, and
+the Kotlin file the Android app copies.
+"""
 
 # --- allowed dependency edges ------------------------------------------------
 # Anything not listed is forbidden. Step 8 turns this into an enforced check; today the
@@ -349,7 +385,10 @@ to = ["fe/shared", "fe/layout"]
 [[allowed_edges]]
 from = "fe/projects"
 to = ["fe/shared", "fe/layout", "fe/tasks"]
-note = "ProjectsView reuses the task list components; recorded rather than forbidden."
+note = """
+ProjectsView reuses the task list components, and the new UI's projects pages read the tasks
+snapshot store (ADR 0042); recorded rather than forbidden.
+"""
 
 [[allowed_edges]]
 from = "fe/identity"
@@ -369,8 +408,8 @@ to = []
 
 [[allowed_edges]]
 from = "tests"
-to = ["be/app", "be/di", "be/routers", "be/services", "be/adapters/db", "be/adapters/task", "be/leaves", "fe/shared", "fe/tasks", "be/feature/skill"]
-note = "Tests may reach anything they protect; that is what makes them tests."
+to = ["be/app", "be/di", "be/routers", "be/services", "be/adapters/db", "be/adapters/task", "be/leaves", "fe/app", "fe/shared", "fe/tasks", "be/feature/skill"]
+note = "Tests may reach anything they protect; that is what makes them tests. fe/app: frontend/tests/pick.test.js holds router/pick.js to one wrapper for every route (ADR 0042)."
 
 # >>> generated feature edges
 [[allowed_edges]]

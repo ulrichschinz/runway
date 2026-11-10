@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>runway · Startbahn</title>
+<meta name="description" content="Vorschlag 02 Startbahn: einheitliche Oberfläche für runway (Web).">
+<link rel="stylesheet" href="../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../shared/brand/tokens.css">
+<link rel="stylesheet" href="tokens/tokens.css">
+<link rel="stylesheet" href="startbahn.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="side" id="side" aria-label="Navigation" data-i18n-attr="aria-label:nav.navigation">
+    <a class="brand" href="#" data-go="next" aria-label="runway">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <g stroke="#3D2B5C" stroke-width="1.4" fill="none" opacity="0.55"><line x1="32" y1="14" x2="47.588" y2="23"/><line x1="47.588" y1="23" x2="47.588" y2="41"/><line x1="47.588" y1="41" x2="32" y2="50"/><line x1="32" y1="50" x2="16.412" y2="41"/><line x1="16.412" y1="41" x2="16.412" y2="23"/><line x1="16.412" y1="23" x2="32" y2="14"/><line x1="32" y1="32" x2="32" y2="14"/><line x1="32" y1="32" x2="47.588" y2="23"/><line x1="32" y1="32" x2="47.588" y2="41"/><line x1="32" y1="32" x2="32" y2="50"/><line x1="32" y1="32" x2="16.412" y2="41"/><line x1="32" y1="32" x2="16.412" y2="23"/></g>
+        <circle cx="32" cy="32" r="3.6" fill="#3D2B5C"/><circle cx="47.588" cy="23" r="2.8" fill="#3D2B5C"/><circle cx="47.588" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="32" cy="50" r="2.8" fill="#3D2B5C"/><circle cx="16.412" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="16.412" cy="23" r="2.8" fill="#3D2B5C"/><circle cx="32" cy="14" r="4.4" fill="#FF7A6B"/><circle cx="51.588" cy="19.000" r="2" fill="#F4C84A"/>
+      </svg>
+      <span class="brand-name">runway</span>
+    </a>
+
+    <form class="capture" id="capture" autocomplete="off">
+      <label class="capture-plus" for="capture-input" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11"/></svg></label>
+      <input id="capture-input" name="t" placeholder="Neues Todo" aria-label="Neues Todo" enterkeyhint="done" data-i18n-attr="placeholder:capture.placeholder,aria-label:capture.placeholder">
+      <kbd class="capture-key">N</kbd>
+    </form>
+
+    <button class="search-btn" id="search-btn" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.6" cy="8.6" r="4.9"/><path d="M12.3 12.3l3.6 3.6"/></svg><span data-i18n="nav.search">Suchen</span><kbd>/</kbd></button>
+
+    <nav class="nav" id="nav" aria-label="Listen" data-i18n-attr="aria-label:nav.lists"></nav>
+    <div class="side-group" id="ctx-nav"></div>
+    <div class="side-group" id="more-nav"></div>
+    <div class="side-foot" id="side-foot"></div>
+  </aside>
+
+  <main class="main" id="main">
+    <nav class="ptabs" id="ptabs" aria-label="Listen" data-i18n-attr="aria-label:nav.lists"></nav>
+    <div class="netbar" id="netbar" role="status" hidden></div>
+    <header class="head" id="head"></header>
+    <section class="stage" id="stage" aria-label="Startbahn" data-i18n-attr="aria-label:nav.stage">
+      <div class="field" id="field"></div>
+      <p class="stage-cap" id="stage-cap"></p>
+      <p class="stage-tag" id="stage-tag"></p>
+      <p class="sr-only" id="stage-sr" aria-live="polite"></p>
+    </section>
+    <div class="cleared" id="cleared"></div>
+    <div class="content" id="content"></div>
+    <form class="pcapture" id="pcapture" autocomplete="off">
+      <span class="capture-plus" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11"/></svg></span>
+      <input id="pcapture-input" placeholder="Neues Todo" aria-label="Neues Todo" enterkeyhint="done" data-i18n-attr="placeholder:capture.placeholder,aria-label:capture.placeholder">
+    </form>
+  </main>
+
+  <aside class="detail" id="detail" aria-label="Details" aria-hidden="true" data-i18n-attr="aria-label:nav.details"></aside>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="palette" id="palette" hidden></div>
+<div class="keys" id="keys" hidden></div>
+<div class="flyer" id="flyer" aria-hidden="true"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

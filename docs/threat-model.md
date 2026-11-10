@@ -52,7 +52,7 @@ than the role model does: it means a compromised admin account reads *settings a
 everybody's data.
 
 **Three actors reach the system, not two.** The browser SPA, which authenticates with a JWT held in
-`localStorage` (`token`, `role`, `username` and three more, snapshotted in
+`localStorage` (`token`, `role`, `username` and four more, snapshotted in
 [`ops/surfaces/spa.json`](../ops/surfaces/spa.json)); agents and MCP clients, which authenticate with
 a permanent API key — over MCP they reach only the task, GTD, project and inbox operations plus
 `health` and `me`, never an authentication, API-key, user or admin operation (ADR 0037); and the
@@ -384,8 +384,9 @@ only through `TASKDATA` at
 [`backend/app/services/task_runner.py:79-87`](../backend/app/services/task_runner.py). **This is the
 tenancy boundary**, which is why §2 is as long as it is.
 
-**The browser** — `localStorage` holds `token`, `role`, `username`, `email`, `fullName` and `theme`
-([`ops/surfaces/spa.json`](../ops/surfaces/spa.json)). A JWT in `localStorage` is readable by any
+**The browser** — `localStorage` holds `token`, `role`, `username`, `email`, `fullName`, `theme`
+and `ui` ([`ops/surfaces/spa.json`](../ops/surfaces/spa.json)); `ui` is the non-secret choice
+between the old and the new UI, removed again with the switch (ADR 0042). A JWT in `localStorage` is readable by any
 script running on the origin; the compensating position is that the app serves no third-party script
 and CORS is closed.
 

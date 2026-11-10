@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runway mobil · Gesten</title>
+<meta name="description" content="runway auf Android, Mobil-Vorschlag m4 Gesten: wischen und lange drücken, und für jede Geste ein sichtbarer Knopf.">
+<link rel="stylesheet" href="../../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../../shared/brand/tokens.css">
+<link rel="stylesheet" href="tokens/tokens.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <nav class="topnav">
+    <span class="brand"><picture><source srcset="../../shared/brand/logos/mark-mono-light.svg" media="(prefers-color-scheme: dark)"><img src="../../shared/brand/logos/mark-color.svg" alt="" width="32" height="32"></picture><span>Agentic Reach</span></span>
+    <span class="eyebrow"><span class="slash">//</span><span>runway</span><span class="sep">·</span><span>Mobil</span><span class="sep">·</span><span>Vorschlag m4</span></span>
+  </nav>
+
+  <header class="intro">
+    <div class="intro-l">
+      <div class="eyebrow"><span class="slash">//</span><span>m4</span><span class="sep">·</span><span>Gesten</span><span class="sep">·</span><span>Android, ohne 3D</span></div>
+      <h1 class="display">Wischen ist schneller, <em>Tippen</em> geht immer.</h1>
+      <p class="lead">Die häufigsten Handgriffe liegen auf der ganzen Zeile statt auf einem kleinen Ziel: nach rechts hakt ab, nach links öffnet die Aktionen, lange drücken wählt mehrere. Herunterziehen aktualisiert wie heute. Jede Geste hat einen sichtbaren Knopf und eine Bedienhilfe-Aktion, wird im Moment gelehrt und nie verlangt. Alles, was man antippt, liegt im unteren Drittel unter dem Daumen.</p>
+    </div>
+    <div class="intro-r">
+      <table class="tt">
+        <caption><span class="eyebrow"><span class="slash">//</span><span>Aufgaben</span><span class="sep">·</span><span>Tipps und Sekunden, geschätzt</span></span></caption>
+        <thead><tr><th></th><th>Weg</th><th>Tipps</th><th>Sek.</th></tr></thead>
+        <tbody>
+          <tr><th>T1</th><td>Gedanken festhalten: Widget +, Kachel, Teilen oder App; in der App bleibst du, wo du bist</td><td>1–2</td><td>2,4–3,5</td></tr>
+          <tr><th>T2</th><td>Abhaken: Zeile nach rechts wischen oder Kreis; Rückgängig im Hinweis</td><td>1 + 1</td><td>1,8</td></tr>
+          <tr><th>T3</th><td>Was jetzt, in einem Kontext: Kurzbefehl Nächste, Chip bleibt gewählt</td><td>1</td><td>3,0–3,7</td></tr>
+          <tr><th>T4</th><td>Worauf ich warte: Tab Warten auf, Nachhaken oben</td><td>1</td><td>2,2</td></tr>
+          <tr><th>T5</th><td>Inbox: wischen hakt ab, links löscht; fünf auf einmal per lange drücken</td><td>1–2 · 6 für 5</td><td>1,8 · 4,6 für 5</td></tr>
+        </tbody>
+      </table>
+      <p class="tnote">Ohne Tippen des Texts, mit 1,2 s Überlegen je Aufgabe. Herleitung im README.</p>
+    </div>
+  </header>
+
+  <section class="legend" aria-label="Gesten und ihre sichtbaren Wege">
+    <div class="g"><b class="gi">→</b><div><h3>Nach rechts wischen</h3><p>hakt ab, 6 s Rückgängig</p><p class="eq"><span>sichtbar</span>Kreis antippen</p><p class="eq"><span>Bedienhilfe</span>Abhaken</p></div></div>
+    <div class="g"><b class="gi">←</b><div><h3>Nach links wischen</h3><p>Bearbeiten, Löschen, Details</p><p class="eq"><span>sichtbar</span>Zeile antippen</p><p class="eq"><span>Bedienhilfe</span>Aktionen</p></div></div>
+    <div class="g"><b class="gi">•</b><div><h3>Lange drücken</h3><p>mehrere auswählen</p><p class="eq"><span>sichtbar</span>Mehr · Auswählen</p><p class="eq"><span>Bedienhilfe</span>Auswählen</p></div></div>
+    <div class="g"><b class="gi">↓</b><div><h3>Oben herunterziehen</h3><p>aktualisiert, wie heute</p><p class="eq"><span>sichtbar</span>Stand hh:mm</p><p class="eq"><span>Bedienhilfe</span>Aktualisieren</p></div></div>
+  </section>
+
+  <section class="grid grid-main" aria-label="Bildschirme">
+    <figure class="frame live-frame">
+      <div class="device"><div class="screen" id="live"></div></div>
+      <figcaption><span class="num">01</span><b>Inbox, Tastatur offen</b><span class="tag"><i class="pulse"></i>interaktiv</span><span class="cap">Tabs und Feld sitzen unter dem Daumen, darüber sieben Zeilen. Wischen, tippen, lange drücken, Mehr.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still" data-preset="next-filter"></div></div>
+      <figcaption><span class="num">02</span><b>Nächste mit @computer</b><span class="cap">Kontext-Chips unten, einmal tippen. Fällig steht oben und wird nie gefiltert.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still" data-preset="waiting"></div></div>
+      <figcaption><span class="num">03</span><b>Warten auf</b><span class="cap">Nachhaken zuerst, mit gelbem Ring. Danach Wiedervorlage und der Rest.</span></figcaption>
+    </figure>
+
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still" data-preset="tick"></div></div>
+      <figcaption><span class="num">04</span><b>Abhaken mit Rückgängig</b><span class="cap">Ab 35 % Breite wird die Spur coral und es klickt einmal. Der vorige Todo steht im Hinweis, 6 s.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still" data-preset="actions"></div></div>
+      <figcaption><span class="num">05</span><b>Nach links: Aktionen</b><span class="cap">Dieselben Punkte wie das Menü beim Antippen, zwischen Text und Kreis. Der Text kürzt sich, Status und Kreis bleiben sichtbar.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still" data-preset="select"></div></div>
+      <figcaption><span class="num">06</span><b>Lange drücken: mehrere</b><span class="cap">Eigenes Zeichen: getönte Zeile, Quadrat vorn. Der Kreis ruht, Antippen der Zeile wählt. Die Leiste ersetzt Tabs und Feld.</span></figcaption>
+    </figure>
+
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still big" data-preset="big-inbox"></div></div>
+      <figcaption><span class="num">07</span><b>Inbox, 150 % Schrift, Tastatur offen</b><span class="cap">Mit Hinweis über dem Feld. Ab 130 % weichen die Tabs beim Tippen, so bleiben mindestens fünf Zeilen sichtbar.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still" data-preset="offline"></div></div>
+      <figcaption><span class="num">08</span><b>Offline</b><span class="cap">Stand bleibt sichtbar, jede Zeile sagt in Worten, was noch nicht beim Server ist. Eine nicht gesendete Zeile öffnet das feste Menü, hier als Blatt unten.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device alt-device"><div class="screen scr-still alt-scheme" data-preset="dark"></div></div>
+      <figcaption><span class="num">09</span><b>Das andere Farbschema</b><span class="cap">Folgt dem System. Ink statt Schwarz, Papierweiß statt Weiß, coral bleibt die Aktion.</span></figcaption>
+    </figure>
+
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still" data-preset="hint"></div></div>
+      <figcaption><span class="num">10</span><b>Einmal gezeigt</b><span class="cap">Gelehrt wird im Moment: nach einem Tipp auf den Kreis steht im Hinweis „Tipp: nach rechts wischen geht auch“, höchstens dreimal. Die Karte gibt es über Mehr · Gesten zeigen.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still big" data-preset="big"></div></div>
+      <figcaption><span class="num">11</span><b>150 % Schrift</b><span class="cap">Chips brechen um statt zu scrollen, Zeilen wachsen, Tabs bleiben einzeilig.</span></figcaption>
+    </figure>
+    <aside class="note-card">
+      <div class="eyebrow"><span class="slash">//</span><span>Bedienhilfen</span></div>
+      <h2 class="title">Keine Geste ist <em>Pflicht</em></h2>
+      <ul class="mono-list">
+        <li>Jede Zeile trägt die Aktionen Abhaken, Aktionen und Auswählen (TalkBack, Schaltersteuerung, Tastatur). Beim Auswählen sagt sie „ausgewählt“, nie „Abhaken“.</li>
+        <li>Zeilentext bleibt exakt <code>Beschreibung, Status, ID xxxxxxxx</code>; der Kreis heißt <code>Abhaken: Beschreibung</code>.</li>
+        <li>Jedes Ziel 48 dp, der Kreis rechts im Daumenbogen. Mehr · Daumen links spiegelt die Zeile.</li>
+        <li>Bewegung nur, wenn sich ein Zustand ändert, höchstens 180 ms. Mit reduzierter Bewegung springt alles.</li>
+        <li>Haptik einmal an der Schwelle, nicht dauernd.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <header class="sec-head">
+    <div class="eyebrow"><span class="slash">//</span><span>Außerhalb der App</span><span class="sep">·</span><span>Widget, Kachel, Teilen</span></div>
+    <h2 class="display s">Festhalten, ohne die App zu <em>öffnen</em></h2>
+  </header>
+  <section class="grid">
+    <figure class="frame">
+      <div class="device"><div class="screen home">
+        <div class="sb light" aria-hidden="true"><span>9:41</span><span class="cam"></span><span class="sys"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="bat"></span></span></div>
+        <div class="clock"><b>9:41</b><span>Samstag, 31. Oktober</span></div>
+        <div class="wid" id="widget" aria-label="runway Übersicht"></div>
+        <div class="apps">
+          <div class="app"><span class="ai ghost"></span>Kalender</div>
+          <div class="app"><span class="ai ghost"></span>Kamera</div>
+          <div class="app me">
+            <div class="shortcuts" aria-label="Kurzbefehle"><div>Neues Todo</div><div>Inbox</div><div class="new">Nächste<small>neu</small></div><div class="new">Warten auf<small>neu</small></div></div>
+            <span class="ai"><img src="../../shared/brand/logos/mark-color.svg" alt=""></span>runway</div>
+          <div class="app"><span class="ai ghost"></span>Notizen</div>
+        </div>
+        <div class="gest light" aria-hidden="true"><i></i></div>
+      </div></div>
+      <figcaption><span class="num">12</span><b>Widget runway Übersicht</b><span class="tag">Glance · nur Text</span><span class="cap">Kreis hakt ab, Chip wechselt den Kontext, + öffnet das Feld. Kein Wischen: RemoteViews kennen keine Gesten. Kurzbefehle Nächste und Warten auf lassen sich als eigenes Symbol ablegen.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen qs">
+        <div class="sb light" aria-hidden="true"><span>9:41</span><span class="cam"></span><span class="sys"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="bat"></span></span></div>
+        <div class="shade">
+          <div class="bright"><i></i></div>
+          <div class="tiles">
+            <div class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 9.5a13 13 0 0 1 18 0M6 13a8.5 8.5 0 0 1 12 0M9.2 16.4a4 4 0 0 1 5.6 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/></svg><span>Internet<small>verbunden</small></span></div>
+            <div class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></svg><span>Bluetooth<small>aus</small></span></div>
+            <div class="tile on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v8M8 12h8"/></svg><span>+ Todo<small>runway</small></span></div>
+            <div class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l-1 6h-4zM10 9h4v12h-4z"/></svg><span>Taschenlampe<small>aus</small></span></div>
+          </div>
+        </div>
+        <div class="oscrim"></div>
+        <div class="odock">
+          <div class="notice on" id="onotice" role="status" aria-live="polite"><div class="nl"><span class="nt">In Inbox ✓</span><span class="nx">Rückruf Druckerei wegen Proof</span><button class="undo" type="button" id="oundo">Rückgängig</button></div><i class="line"></i></div>
+          <form id="ocapture" autocomplete="off"><div class="fwrap"><input id="ofield" aria-label="Neues Todo" placeholder="Neues Todo" enterkeyhint="done" value="Steuerordner ins Auto legen"><button class="go" type="submit" aria-label="In die Inbox">+</button></div></form>
+          <button class="close" type="button">Schließen</button>
+        </div>
+        <div class="kbd on" aria-hidden="true"><div class="sugg"><span>und</span><span>die</span><span>ich</span></div><div class="kr"><i>q</i><i>w</i><i>e</i><i>r</i><i>t</i><i>z</i><i>u</i><i>i</i><i>o</i><i>p</i><i>ü</i></div><div class="kr"><i>a</i><i>s</i><i>d</i><i>f</i><i>g</i><i>h</i><i>j</i><i>k</i><i>l</i><i>ö</i><i>ä</i></div><div class="kr"><i class="w">⇧</i><i>y</i><i>x</i><i>c</i><i>v</i><i>b</i><i>n</i><i>m</i><i class="w">⌫</i></div><div class="kr"><i class="w">?123</i><i>,</i><i class="sp">Leerzeichen</i><i>.</i><i class="w ent">↵</i></div></div>
+        <div class="gest" aria-hidden="true"><i></i></div>
+      </div></div>
+      <figcaption><span class="num">13</span><b>Kachel + Todo</b><span class="tag">auch gesperrt</span><span class="cap">Nur das Feld, als einfache View: Tastatur in 700 ms warm, 1200 ms kalt. Probier es: tippen, Enter.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen share">
+        <div class="sb" aria-hidden="true"><span>9:41</span><span class="cam"></span><span class="sys"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="bat"></span></span></div>
+        <div class="src">
+          <div class="url">example.org/agenten-evaluation-leitfaden</div>
+          <div class="art"><div class="k">Artikel · 8 min</div><h4>Agenten-Evaluation: ein Leitfaden</h4><p>Wie man misst, ob ein Agent im Alltag hilft: Aufgaben, Kriterien, Stichproben.</p><i></i><i></i><i class="s"></i><i></i><i class="s"></i></div>
+        </div>
+        <div class="oscrim"></div>
+        <div class="sharecard">
+          <div class="eyebrow"><span class="slash">//</span><span>Teilen</span><span class="sep">·</span><span>in die Inbox</span></div>
+          <h4>Agenten-Evaluation: ein Leitfaden</h4>
+          <div class="note">https://example.org/agenten-evaluation-leitfaden · Wie man misst, ob ein Agent im Alltag hilft: Aufgaben, Erfolgskriterien, Stichproben.</div>
+          <button class="pill action wide" id="sharego">In Inbox</button>
+        </div>
+        <div class="gest" aria-hidden="true"><i></i></div>
+      </div></div>
+      <figcaption><span class="num">14</span><b>Teilen an runway</b><span class="tag">ein Tipp · offline</span><span class="cap">Titel aus dem Betreff, Link als Notiz. Der Knopf sitzt unten im Daumenbogen, nie unter einer Tastatur.</span></figcaption>
+    </figure>
+  </section>
+
+  <header class="sec-head">
+    <div class="eyebrow"><span class="slash">//</span><span>Feste Zustände</span><span class="sep">·</span><span>Einrichten, Banner, Widget</span></div>
+    <h2 class="display s">Was selten kommt, bleibt <em>wörtlich</em></h2>
+    <p class="lead">Alle festgelegten Texte aus den Abnahmeverträgen bleiben, nur neu gekleidet: Papiergrund, Pillen, Mono-Eyebrows.</p>
+  </header>
+  <section class="grid">
+    <figure class="frame">
+      <div class="device"><div class="screen setup">
+        <div class="sb" aria-hidden="true"><span>9:41</span><span class="cam"></span><span class="sys"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="bat"></span></span></div>
+        <div class="su">
+          <img src="../../shared/brand/logos/mark-color.svg" alt="" width="40" height="40" class="sumark">
+          <div class="eb"><span class="slash">//</span> runway <span class="sep">·</span> einrichten</div>
+          <h1 class="disp">Melde dich <em>an</em></h1>
+          <label class="sf"><span>Benutzername</span><input value="uli" aria-label="Benutzername"></label>
+          <label class="sf"><span>Passwort</span><input type="password" value="geheimgeheim" aria-label="Passwort"></label>
+          <p class="err"><i class="bang"></i>Benutzername oder Passwort falsch</p>
+          <button class="pill action wide">Anmelden</button>
+          <button class="pill quiet adv" aria-expanded="true">Erweitert</button>
+          <div class="advbox">
+            <label class="sf"><span>Server-URL</span><input value="https://runway.agentic-reach.com" aria-label="Server-URL"></label>
+            <div class="or"><span>oder</span></div>
+            <div class="keyrow"><b>Key einfügen</b><span>aus runway im Web, Konto</span></div>
+            <label class="sf inl"><span>API-Key</span><input placeholder="API-Key" aria-label="API-Key"><button class="pill">Einfügen</button></label>
+            <button class="pill wide">Verbinden</button>
+          </div>
+        </div>
+        <div class="gest" aria-hidden="true"><i></i></div>
+      </div></div>
+      <figcaption><span class="num">15</span><b>Einrichten</b><span class="cap">Die Felder und Knöpfe aus P03 wörtlich: Benutzername, Passwort, Anmelden, Erweitert mit Server-URL, Key einfügen, API-Key, Einfügen, Verbinden. Erweitert ist hier aufgeklappt.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still" data-preset="connected"></div></div>
+      <figcaption><span class="num">16</span><b>Verbunden, Hinweis zur Kachel</b><span class="cap">Einmal nach dem Einrichten: „Verbunden als uli“, der Satz zur Kachel + Todo und OK.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still" data-preset="banners"></div></div>
+      <figcaption><span class="num">17</span><b>Banner und „wartet auf Setup“</b><span class="cap">Beide Banner hier gestapelt, sonst einzeln. Sie sitzen über dem Hinweis, damit Einrichten und Verwerfen unter dem Daumen liegen.</span></figcaption>
+    </figure>
+    <figure class="frame">
+      <div class="device"><div class="screen home">
+        <div class="sb light" aria-hidden="true"><span>9:41</span><span class="cam"></span><span class="sys"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="bat"></span></span></div>
+        <div class="clock"><b>9:41</b><span>Samstag, 31. Oktober</span></div>
+        <div class="wid" id="widget-badge" inert aria-label="runway Übersicht, nicht gesendet"></div>
+        <div class="wid" id="widget-fallback" inert aria-label="runway Übersicht, Fehler"></div>
+        <div class="gest light" aria-hidden="true" style="margin-top:auto"><i></i></div>
+      </div></div>
+      <figcaption><span class="num">18</span><b>Widget: nicht gesendet, neu laden</b><span class="cap">Oben das Abzeichen „2 nicht gesendet“ (bei einem „Nicht gesendet“), unten der Rückfall „Widget neu laden“. Nur Text, keine Bitmaps.</span></figcaption>
+    </figure>
+  </section>
+
+  <section class="option" aria-label="Option, braucht Ulis Entscheidung">
+    <figure class="frame">
+      <div class="device"><div class="screen scr-still" data-preset="clarify"></div></div>
+      <figcaption><span class="num">19</span><b>Kurz klären</b><span class="tag opt">Option · braucht Ulis Entscheidung</span></figcaption>
+    </figure>
+    <div class="option-text">
+      <div class="eyebrow"><span class="slash">//</span><span>Option</span><span class="sep">·</span><span>nicht Teil des Vorschlags</span></div>
+      <h2 class="display s">Klären mit einem <em>Wisch</em>, falls du es willst</h2>
+      <p class="lead">Die Entscheidung vom 24.10.2026 gilt: auf dem Telefon wird festgehalten und nachgesehen, nicht geklärt. Diese Option zeigt nur, wie es aussähe, wenn du das änderst.</p>
+      <ul class="mono-list">
+        <li>Inbox-Zeile weit nach links ziehen (über die Aktionen hinaus) öffnet unter der Zeile drei Ziele: Nächste, Warten auf, Irgendwann.</li>
+        <li>Nächste fragt immer nach dem Kontext, ohne Kontext keine Nächste. Nichts wird geraten.</li>
+        <li>Gesendet als <code>tags_add</code>, Rückgängig schickt das genaue Gegenstück.</li>
+        <li>Kein Projekt, kein Datum, keine Priorität: das bleibt im Web.</li>
+        <li>Aufwand zusätzlich etwa 3 Personentage, plus eine Änderung an PLAN.md durch dich.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span class="eyebrow"><span class="slash">//</span><span>m4 Gesten</span><span class="sep">·</span><span>Prototyp, Daten erfunden, heute ist Samstag, 31.10.2026</span></span>
+    <span class="claim">Ein Daumen, <em>kein</em> Umweg.</span>
+  </footer>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

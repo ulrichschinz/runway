@@ -1,0 +1,101 @@
+// Tageslinse, Android: AGSL RuntimeShader (API 33+, runway's minSdk is 35).
+// One shader, two modes: 0 = the lens (today's progress), 1 = the Inbox pebbles.
+// Faked refraction and lighting in 2D: no 3D engine, no bitmap, about 60 lines of GPU code.
+// Drawn with ShaderBrush in Modifier.drawBehind; Compose redraws only when a uniform changes.
+// android.html runs a mechanical GLSL port of this file (android-fx.js) as the preview.
+//
+// Colour uniforms are declared layout(color): Android converts the brand's sRGB values into the
+// shader's working colour space, so coral stays coral on a wide-gamut (Display P3) panel.
+// Kotlin sets them with setColorUniform("coral", Color.valueOf(0xFFFF7A6B.toInt())).
+
+uniform float2 size;        // px
+uniform float  mode;        // 0 lens, 1 pebbles
+uniform float  surface;     // liquid height in lens units, -0.86..0.86 (Kotlin: levelToHeight(level))
+uniform float  tilt;        // wobble after a bead lands, radians (spring, decays); the only impact effect
+uniform float  dark;        // 0 light, 1 dark theme
+layout(color) uniform half4 coral;   // #FF7A6B
+layout(color) uniform half4 plum;    // #3D2B5C
+layout(color) uniform half4 light;   // #FBF6EE (brand bg): highlights, frost, plum-light on ink
+layout(color) uniform half4 ground;  // the top bar colour behind the lens (bg or ink)
+uniform float4 pebbles[9];  // x, y, radius, alpha (in lens units)
+uniform float  count;
+
+const float R = 0.84;
+
+half3 lit(half3 base, float3 n, float gloss) {
+    float3 L = normalize(float3(-0.55, 0.7, 0.6));
+    float3 V = float3(0.0, 0.0, 1.0);
+    float3 H = normalize(L + V);
+    float diff = clamp(dot(n, L), 0.0, 1.0);
+    float spec = pow(clamp(dot(n, H), 0.0, 1.0), gloss);          // clamp before pow()
+    return base * (0.88 + 0.18 * diff) + half3(spec * 0.7);
+}
+
+half4 lens(float2 uv) {
+    half3 bg = ground.rgb;
+    half3 plumLight = mix(plum.rgb, light.rgb, 0.55);              // #A69BAC, structure on ink
+    float r = length(uv);
+    // soft contact shadow under the sphere (light theme only)
+    float sh = (1.0 - dark) * 0.10 * smoothstep(0.55, 0.0, length((uv - float2(0.0, -0.93)) * float2(1.0, 6.0)));
+    if (r > R) return half4(mix(bg, plum.rgb, sh), 1.0);
+    float z = sqrt(max(R * R - r * r, 0.0)) / R;
+    float3 n = float3(uv / R, z);
+    // faked refraction: the inside is magnified towards the centre, like a ball lens
+    float2 q = uv * (0.80 + 0.20 * z);
+    float s = surface + tilt * q.x;
+    float inner = 0.86 * R;
+    // empty glass: light ground seen through it, faintly coral; on ink a plum-light frost, so
+    // the empty part reads as glass and not as a murky hole
+    half3 col = mix(mix(bg, coral.rgb, 0.07), mix(bg, plumLight, 0.22 + 0.10 * (1.0 - z)), dark);
+    col = mix(col, plum.rgb, 0.08 * (1.0 - z) * (1.0 - dark));
+    float3 L = normalize(float3(-0.55, 0.7, 0.6));
+    float spec = pow(clamp(dot(n, normalize(L + float3(0.0, 0.0, 1.0))), 0.0, 1.0), 260.0);
+    // the liquid surface, seen slightly from above, is an ellipse across the chord
+    float chord = sqrt(max(inner * inner - s * s, 0.0001));
+    float e = 0.16 * chord;
+    float2 eq = float2(q.x / chord, (q.y - s) / e);
+    if (length(q) < inner && dot(eq, eq) < 1.0) {
+        col = lit(mix(coral.rgb, light.rgb, 0.32), n, 48.0);         // surface, lighter
+        col = mix(col, coral.rgb, smoothstep(0.7, 1.0, dot(eq, eq)) * 0.5); // its rim
+    } else if (length(q) < inner && q.y < s) {
+        float depth = clamp((s - q.y) / (2.0 * inner), 0.0, 1.0);
+        half3 liquid = mix(coral.rgb, mix(coral.rgb, plum.rgb, 0.2), depth); // deeper = a touch darker
+        col = lit(liquid, n, 48.0);
+    }
+    col += half3(spec * 0.9);
+    // fresnel rim: what makes it read as glass (action-ink on light, plum-light on ink)
+    float rim = pow(clamp(1.0 - z, 0.0, 1.0), 3.0 - 0.6 * dark);
+    half3 rimCol = mix(mix(coral.rgb, half3(0.106, 0.078, 0.157), 0.38), plumLight, dark); // coral 62 % + ink #1B1428
+    col = mix(col, rimCol, rim * (0.55 + 0.4 * dark));
+    float edge = smoothstep(R, R - 0.012, r);                         // anti-aliased edge
+    return half4(mix(mix(bg, plum.rgb, sh), col, edge), 1.0);
+}
+
+half4 stones(float2 uv) {
+    half3 col = ground.rgb;
+    for (int i = 0; i < 9; i++) {
+        if (float(i) >= count) break;
+        float4 p = pebbles[i];
+        float2 d = (uv - p.xy) / float2(p.z, p.z * 0.62);
+        // shadow first, then the pebble
+        float2 ds = (uv - p.xy - float2(0.04, -0.07)) / float2(p.z * 1.05, p.z * 0.5);
+        col = mix(col, plum.rgb, (1.0 - dark) * 0.10 * p.w * smoothstep(1.0, 0.2, length(ds)));
+        float r = length(d);
+        if (r < 1.0) {
+            float z = sqrt(1.0 - r * r);
+            float3 n = normalize(float3(d * 0.9, z));
+            // light frost on both themes: on ink the pebbles are bg mixed with plum, never black
+            half3 frost = mix(mix(mix(ground.rgb, light.rgb, 0.6), plum.rgb, 0.10), mix(light.rgb, plum.rgb, 0.28), dark);
+            half3 c = lit(frost, n, 90.0);
+            c = mix(c, mix(plum.rgb, light.rgb, 0.2 + 0.6 * dark), pow(clamp(1.0 - z, 0.0, 1.0), 2.2) * 0.55);
+            col = mix(col, c, p.w * smoothstep(1.0, 0.94, r));
+        }
+    }
+    return half4(col, 1.0);
+}
+
+half4 main(float2 fragCoord) {
+    float2 uv = (fragCoord - size * 0.5) / (size.y * 0.5);
+    uv.y = -uv.y;
+    return mode < 0.5 ? lens(uv) : stones(uv);
+}

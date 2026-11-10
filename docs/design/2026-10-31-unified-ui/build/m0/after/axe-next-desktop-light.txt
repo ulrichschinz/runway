@@ -1,0 +1,9 @@
+shot: build/m0/after/axe-next-desktop-light.png (1440x900, chrome, webgl canvases: 0)
+no errors
+axe 4.10.2: 1 serious/critical violation(s) (+2 moderate/minor not listed)
+  [serious] color-contrast: Elements must meet minimum color contrast ratio thresholds (5 nodes)
+      .hover\:text-gray-600
+      .uppercase
+      .border-t > .hover\:text-gray-700.dark\:hover\:text-gray-200.text-gray-400
+      .mb-2 > div > .dark\:text-gray-500.text-gray-400
+      .bg-green-100 > .min-w-0.flex-1 > .text-gray-500.mt-1

@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runway Daumenzone</title>
+<meta name="description" content="runway auf Android, Mobil-Vorschlag M1 Daumenzone: alles, was der Daumen braucht, liegt im unteren Drittel.">
+<link rel="stylesheet" href="../../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../../shared/brand/tokens.css">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="daumen.css">
+</head>
+<body>
+<main class="board">
+  <header class="intro">
+    <div>
+      <div class="eyebrow"><span class="slash">//</span><span>runway Android</span><span>·</span><span>Mobil-Vorschlag M1</span><span>·</span><span>Daumenzone</span></div>
+      <h1>Alles, was du tippst, liegt am <em>Daumen</em></h1>
+      <p>Eine Hand, kurze Momente. Das Dock unten trägt Feld, Tabs und Kontexte, oben steht nur, was du liest. Listen sind nach Reichweite sortiert: Das Dringendste liegt direkt über dem Dock, das Neueste direkt über dem Feld. Haken und Rückgängig sitzen rechts, Menüs steigen von unten auf. Kein 3D, keine Effekte: Papier, Tinte, Koralle für die eine Hauptaktion, Gelb als Punkt.</p>
+      <p>Das erste Telefon ist bedienbar: tippen, Enter, abhaken (Kreis oder nach rechts wischen), Rückgängig, Tabs, Kontexte, Zeile antippen, Mehr.</p>
+    </div>
+    <table class="tally">
+      <caption class="eyebrow"><span class="slash">//</span> <span>Taps ohne Tippen des Texts · geschätzte Sekunden</span></caption>
+      <tr><th>Aufgabe</th><th>Weg</th><th>Taps</th><th>s</th></tr>
+      <tr><td>T1 Gedanke festhalten</td><td>Widget + oder App-Symbol, dann Enter</td><td class="n"><b>2</b></td><td class="n">1,4-2,5</td></tr>
+      <tr><td></td><td>Kachel + Todo (Wisch, Tap, Enter)</td><td class="n"><b>2</b> + Wisch</td><td class="n">1,6-2,4</td></tr>
+      <tr><td>T2 Abhaken · Rückgängig</td><td>Kreis rechts oder Wisch · Rückgängig im Dock</td><td class="n"><b>1 · 1</b></td><td class="n">0,6-1,2 · 0,5</td></tr>
+      <tr><td>T3 Jetzt in einem Kontext</td><td>Nächste, Kontext (Widget: 0)</td><td class="n"><b>2</b></td><td class="n">1,5</td></tr>
+      <tr><td>T4 Worauf ich warte</td><td>Warten auf</td><td class="n"><b>1</b></td><td class="n">0,8</td></tr>
+      <tr><td>T5 Inbox abarbeiten</td><td>Haken 1 · Löschen 2 · Bearbeiten 2 + Enter</td><td class="n"><b>1-3</b></td><td class="n">0,6-2,2</td></tr>
+    </table>
+  </header>
+
+  <div class="rowhead"><span class="eyebrow"><span class="slash">//</span><span>01</span></span><h2>Die drei Listen</h2></div>
+  <div class="grid first">
+    <figure class="slot main">
+      <figcaption class="cap"><span class="slash">//</span>Inbox · Tastatur offen · bedienbar</figcaption>
+      <div class="device"><div data-phone='{"tab":"inbox","kbd":true,"main":true}'></div></div>
+      <p class="note">Die App öffnet hier, Feld fokussiert. Von unten: Tastatur, <b>Neues Todo</b>, Tabs, dann die Inbox mit dem <b>neuesten Eintrag ganz unten</b>, direkt über dem Feld. Alle fünf Zeilen bleiben sichtbar (Vertrag: fünf). Enter speichert, das Feld bleibt offen.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Nächste · @computer</figcaption>
+      <div class="device"><div data-phone='{"tab":"next","filter":"@computer"}'></div></div>
+      <p class="note">Kontexte stehen direkt über den Tabs, rechtsbündig zum Daumen, umbrechend statt scrollend. <b>Fällig</b> ist der Abschnitt direkt über den Kontexten, ungefiltert, das Überfällige zuunterst. Überschrift und Zusammenfassung sitzen direkt über der Liste, der leere Raum liegt darüber.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Warten auf</figcaption>
+      <div class="device"><div data-phone='{"tab":"waiting"}'></div></div>
+      <p class="note">Kurze Listen fallen mitsamt Überschrift nach unten, zum Daumen. Was Nachhaken braucht, liegt zuunterst, mit Plum-Kante. Antippen öffnet die Web-Details als halbhohen Custom Tab.</p>
+    </figure>
+  </div>
+
+  <div class="rowhead"><span class="eyebrow"><span class="slash">//</span><span>02</span></span><h2>Zustände</h2></div>
+  <div class="grid">
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Abhaken und Rückgängig</figcaption>
+      <div class="device"><div data-phone='{"tab":"next","state":"tick"}'></div></div>
+      <p class="note">Wischen nach rechts schiebt die Zeile in den Kreis, ab 35 % ist sie scharf. Der Hinweis nimmt eine eigene Zeile oben im Dock ein und schiebt die Liste hoch, statt eine Zeile zu verdecken. <b>Rückgängig</b> rechts, die gelbe Linie zeigt die 6 s.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Offline</figcaption>
+      <div class="device"><div data-phone='{"tab":"inbox","offline":true,"stand":"08:12","state":"offline"}'></div></div>
+      <p class="note">Kein Fehlertext fürs Offline-Sein: <b>Stand 08:12</b> oben, Zeilenstatus, und eine Ausgangszeile direkt über dem Dock. Ein Tap darauf öffnet <b>Erneut senden</b>.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Dunkel</figcaption>
+      <div class="device"><div data-phone='{"tab":"next","theme":"dark"}'></div></div>
+      <p class="note">Ink statt Schwarz, Papier statt Weiß. Überfällig bekommt im Dunkeln ein tieferes Rot, damit es nicht wie der Koralle-Knopf aussieht. Koralle bleibt die Hauptaktion, Gelb nur als Punkt.</p>
+    </figure>
+  </div>
+
+  <div class="rowhead"><span class="eyebrow"><span class="slash">//</span><span>03</span></span><h2>Außerhalb der App</h2></div>
+  <div class="grid">
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Widget 4×5, aufgezogen · Kurzbefehle</figcaption>
+      <div class="device"><div class="screen"><div class="home">
+        <div class="statusbar"><span>9:41</span><span class="cam"></span><span class="sys"><span class="bat"></span></span></div>
+        <div class="clock" style="padding-top:26px;font-size:52px">9:41</div><div class="date">SA 31. OKTOBER</div>
+        <div class="wtall" data-surface="widget" data-rows="7"><div class="wid" aria-label="runway Übersicht"></div><i class="rz t"></i><i class="rz b"></i></div>
+        <div class="apps" style="padding-top:112px">
+          <div class="shortcuts" aria-label="Kurzbefehle"><div>Neues Todo</div><div>Inbox</div></div>
+          <div class="app rw"><i><img src="../../shared/brand/logos/mark-color.svg" alt=""></i><span>runway</span></div>
+          <div class="app"><i></i><span>Kalender</span></div><div class="app"><i></i><span>Mail</span></div><div class="app"><i></i><span>Kamera</span></div>
+        </div>
+        <div class="gesture"><i></i></div>
+      </div></div></div>
+      <p class="note">Nur Text und ein Vektor. Senkrecht aufgezogen (gelber Rahmen: System-Griffe) zeigt es so viele Zeilen wie passen, höchstens acht, hier sieben, darunter <b>+K weitere</b>. Der Kopf bleibt <b>Inbox 5 · fällig 1</b>; neu ist, dass <b>+</b> unten rechts sitzt, wo der Daumen das Widget trifft.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Kachel + Todo · Erfassen</figcaption>
+      <div class="device"><div class="screen kbd" data-surface="tile">
+        <div class="statusbar" style="background:var(--ar-ink);color:var(--ar-bg)"><span>9:41</span><span class="cam"></span><span class="sys"><span class="bat"></span></span></div>
+        <div class="qs"><div class="qsh">SCHNELLEINSTELLUNGEN</div><div class="tiles">
+          <div class="tile">Internet<small>verbunden</small></div><div class="tile on">+ Todo<small>runway</small></div>
+          <div class="tile">Bluetooth<small>aus</small></div><div class="tile">Taschenlampe<small>aus</small></div></div></div>
+        <div class="story"><span class="slash">//</span> 1 · Kachel antippen  ·  2 · tippen, Enter</div>
+        <div class="dimmed"><div class="ghost"><div style="width:60%"></div><div style="width:80%"></div><div style="width:45%"></div></div></div>
+        <div class="ovl">
+          <div class="ovtop"><div class="onote" role="status" aria-live="polite"><span>In Inbox ✓</span><button class="undo" type="button">Rückgängig</button></div><button class="pill quiet" type="button">Schließen</button></div>
+          <form class="fieldrow" autocomplete="off"><label class="field nogo"><input aria-label="Neues Todo" placeholder="Neues Todo" value="Proof bis Montag freigeben" enterkeyhint="done"></label></form>
+          <div class="kb" data-kb aria-hidden="true"></div>
+        </div>
+        <div class="gesture"><i></i></div>
+      </div></div>
+      <p class="note">Die Kachel selbst sitzt systembedingt oben, das ist der eine Griff nach oben. Danach ist alles unten: Feld, Hinweis, <b>Schließen</b>. Kein eigener Senden-Knopf: die Fertig-Taste der Tastatur sendet (Vertrag). Plain Views, kein Compose.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Teilen · In Inbox</figcaption>
+      <div class="device"><div class="screen" data-surface="share">
+        <div class="statusbar"><span>9:41</span><span class="cam"></span><span class="sys"><span class="bat"></span></span></div>
+        <div class="src"><div class="eyebrow"><span>example.org · Artikel</span></div><h3>Agenten-Evaluation: ein Leitfaden</h3>
+          <p>Wie man misst, ob ein Agent im Alltag hilft: Aufgaben, Kriterien, Stichproben. Ein Vorschlag für kleine Teams.</p><p>Erstens: Aufgaben aus dem echten Alltag sammeln, nicht aus Benchmarks.</p></div>
+        <div class="share"><div class="eyebrow"><span class="slash">//</span><span>Teilen · in die Inbox</span></div>
+          <h3>Agenten-Evaluation: ein Leitfaden</h3>
+          <div class="np">https://example.org/agenten-evaluation-leitfaden · Wie man misst, ob ein Agent im Alltag hilft: Aufgaben, Kriterien, Stichproben.</div>
+          <button class="big" data-reach="In Inbox">In Inbox</button></div>
+        <div class="gesture"><i></i></div>
+      </div></div>
+      <p class="note">Eine Karte, ein Knopf, ganz unten in voller Breite. Keine Tastatur, kein Feld, offline gleich. Zurück oder daneben tippen bricht ab.</p>
+    </figure>
+  </div>
+
+  <div class="rowhead"><span class="eyebrow"><span class="slash">//</span><span>04</span></span><h2>Gemessen und geprüft</h2></div>
+  <div class="grid">
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Reichweite · rechter Daumen</figcaption>
+      <div class="device"><div data-phone='{"tab":"next","reach":true}'></div></div>
+      <p class="note">Daumenansatz bei 430 / 830 dp. Leicht ist ein Band von 120 bis 400 dp; näher am Ansatz muss der Daumen sich krümmen (gestrichelter Innenkreis, zählt als Strecken), bis 500 dp Strecken (6,1-Zoll-Gerät, Annahmen im README). Überfällig und Fällig liegen jetzt im leichten Band.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Zeile antippen · Menü von unten</figcaption>
+      <div class="device"><div data-phone='{"tab":"inbox","offline":true,"stand":"08:12","state":"failed"}'></div></div>
+      <p class="note">Statt eines Dropdowns am Zeilenrand: ein Blatt von unten mit <b>Erneut senden</b>, <b>Bearbeiten und erneut senden</b>, <b>Löschen</b>. Ein Tap, gleiche Wörter.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Schrift 150 %</figcaption>
+      <div class="device"><div data-phone='{"tab":"next","fs":1.5}'></div></div>
+      <p class="note">Kontexte umbrechen in zwei Reihen, alle fünf sichtbar. Tabs verlieren ihre Zahlen, nicht ihre Wörter. Die Kopfzeile bleibt bei 115 %, das Dock wächst, die Ziele bleiben 48 dp.</p>
+    </figure>
+  </div>
+
+  <div class="rowhead"><span class="eyebrow"><span class="slash">//</span><span>05</span></span><h2>Varianten</h2></div>
+  <div class="grid">
+    <figure class="slot option">
+      <figcaption class="cap"><span class="tag"><span class="dot"></span>Option · braucht Ulis Entscheidung</span></figcaption>
+      <div class="device"><div data-phone='{"tab":"inbox","state":"option"}'></div></div>
+      <p class="note">Nicht im Grundumfang. Dasselbe Zeilenmenü bekäme einen gestrichelten Bereich: nach Nächste mit Kontext, Warten auf, Irgendwann. Zwei Taps je Eintrag, alles unten.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Linke Hand · Mehr</figcaption>
+      <div class="device"><div data-phone='{"tab":"waiting","hand":"left","state":"more"}'></div></div>
+      <p class="note">Unter <b>Mehr</b> lässt sich der Daumen auf links stellen: Haken, Senden, Rückgängig und Kontexte spiegeln sich, Text bleibt linksbündig.</p>
+    </figure>
+    <div class="textcol">
+      <h3>Die Regeln der Daumenzone</h3>
+      <ul>
+        <li><b>Unten wird getippt, oben gelesen.</b> Kein Bedienelement im oberen Drittel außer der Systemkachel.</li>
+        <li><b>Das Dock wandert als Ganzes.</b> Kontexte, Tabs, Feld liegen immer gleich übereinander, auf der Tastatur oder der Gestenleiste.</li>
+        <li><b>Das Dringendste liegt am Dock.</b> Fällig direkt über den Kontexten, das Neueste direkt über dem Feld, Nachhaken zuunterst. Kurze Listen fallen mitsamt Überschrift nach unten.</li>
+        <li><b>Der Hinweis nimmt Platz, statt zu verdecken.</b> Er schiebt die Liste um eine Zeile hoch, keine Zeile verschwindet dahinter.</li>
+        <li><b>Ziehen geht überall.</b> Auch im leeren Raum über einer kurzen Liste; kein Spinner, nur <b>Stand</b> ändert sich.</li>
+        <li><b>Alles steigt von unten auf.</b> Zeilenmenü, Mehr, Web-Details.</li>
+        <li><b>Bewegung nur für den Zustand.</b> Strich 120 ms, Einklappen 180 ms, mit reduzierter Bewegung gar nicht.</li>
+        <li><b>Marke ohne Effekt.</b> Warmes Papier, Ink, // vor jedem Abschnitt, eine Fraunces-Betonung je Überschrift, Koralle nur für Senden und Abhaken.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="rowhead"><span class="eyebrow"><span class="slash">//</span><span>06</span></span><h2>Einrichten und große Schrift</h2></div>
+  <div class="grid">
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>runway einrichten</figcaption>
+      <div class="device"><div class="screen setup">
+        <div class="statusbar"><span>9:41</span><span class="cam"></span><span class="sys"><span class="bat"></span></span></div>
+        <div class="shead">
+          <div class="eyebrow"><span class="slash">//</span><span>runway</span><span>·</span><span>by Agentic Reach</span></div>
+          <img src="../../shared/brand/logos/mark-color.svg" alt="">
+          <h1>runway <em>einrichten</em></h1>
+          <p>Einmal anmelden. Auf dem Gerät bleibt danach nur der API-Key, Passwort und Sitzung werden verworfen.</p>
+        </div>
+        <div class="sdock">
+          <label class="sfield"><span>Benutzername</span><input value="uli" aria-label="Benutzername"></label>
+          <label class="sfield focus"><span>Passwort</span><input type="password" value="geheimnis" aria-label="Passwort"></label>
+          <div class="srow"><button class="pill quiet">Erweitert</button><button class="pill quiet">Key einfügen</button></div>
+          <button class="big">Anmelden</button>
+        </div>
+        <div class="kb" data-kb aria-hidden="true" style="display:flex"></div>
+        <div class="gesture"><i></i></div>
+      </div></div>
+      <p class="note">Oben lesen, unten tippen, auch hier. <b>Erweitert</b> klappt <b>Server-URL</b> über den Feldern auf. <b>Key einfügen</b> tauscht die Felder gegen <b>API-Key</b>, <b>Einfügen</b> und <b>Verbinden</b>; <b>Mit Passwort anmelden</b> wechselt zurück. Fehler stehen als eine Zeile über den Feldern.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Nach dem Einrichten · Kachel-Hinweis</figcaption>
+      <div class="device"><div data-phone='{"tab":"inbox","banners":["connected"],"state":"hint"}'></div></div>
+      <p class="note"><b>Verbunden als uli</b> steht als Zeile im Dock. Der einmalige Hinweis <b>Zieh die Kachel + Todo in die erste Reihe</b> steigt als Blatt von unten auf, <b>OK</b> auf der Daumenseite.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Schrift 150 % · Tastatur offen</figcaption>
+      <div class="device"><div data-phone='{"tab":"inbox","fs":1.5,"kbd":true}'></div></div>
+      <p class="note">Bei großer Schrift und offener Tastatur tritt die Tab-Reihe zur Seite (daneben tippen holt sie zurück), die Kopfzeile bleibt bei 115 %. So bleiben alle fünf Inbox-Zeilen sichtbar, auch zweizeilige.</p>
+    </figure>
+  </div>
+
+  <div class="rowhead"><span class="eyebrow"><span class="slash">//</span><span>07</span></span><h2>Ziehen, Hinweise, Widget-Zustände</h2></div>
+  <div class="grid">
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Ziehen zum Aktualisieren</figcaption>
+      <div class="device"><div data-phone='{"tab":"waiting","state":"pull"}'></div></div>
+      <p class="note">Ein Zug nach unten startet überall im Inhaltsbereich, auch im leeren Raum über einer kurzen Liste. Kein Spinner: eine 1-px-Linie in Gelb füllt sich, nach 72 dp heißt es <b>Loslassen: aktualisieren</b>, danach springt <b>Stand</b> auf die neue Zeit.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Hinweise · neu einrichten · altes Konto</figcaption>
+      <div class="device"><div data-phone='{"tab":"inbox","banners":["rekey","old"],"state":"banners"}'></div></div>
+      <p class="note">Hinweise sind 48-dp-Zeilen im Dock, nicht oben: <b>Key abgelehnt – neu einrichten</b> und <b>Altes Konto: 2 nicht gesendet</b> mit <b>Verwerfen</b>, das an Ort und Stelle nachfragt. Zeilen ohne gültigen Key zeigen <b>wartet auf Setup</b>.</p>
+    </figure>
+    <figure class="slot">
+      <figcaption class="cap"><span class="slash">//</span>Widget-Zustände</figcaption>
+      <div class="device"><div class="screen"><div class="home">
+        <div class="statusbar"><span>9:41</span><span class="cam"></span><span class="sys"><span class="bat"></span></span></div>
+        <div class="wstack">
+          <div class="lab">// nicht gesendet</div>
+          <div class="wid"><div class="wh"><button class="t">Inbox 7 · fällig 1</button><button class="chip"><span>Alle</span></button></div>
+            <div class="wr od"><span class="d">Belege Oktober hochladen</span><span class="m">überfällig</span><button class="ring" aria-label="Abhaken: Belege Oktober hochladen"></button></div>
+            <div class="wf"><button class="badge">2 nicht gesendet</button><span class="sp"></span><button class="plus" aria-label="+ Todo">+</button></div></div>
+          <div class="lab">// lädt</div>
+          <div class="wid"><div class="wh"><button class="t">Inbox 5 · fällig 1</button><button class="chip"><span>@home</span></button></div>
+            <div class="wr"><span class="d">Paket bei der Post abholen</span><button class="ring" aria-label="Abhaken: Paket bei der Post abholen"></button></div>
+            <div class="wf"><span>lädt …</span><span class="sp"></span><button class="plus" aria-label="+ Todo">+</button></div></div>
+          <div class="lab">// nicht eingerichtet</div>
+          <div class="wid setupw"><span>runway einrichten</span><button class="plus" aria-label="runway einrichten">›</button></div>
+          <div class="lab">// Fehler, Systemfarben</div>
+          <div class="wid sys"><span>Widget konnte nicht angezeigt werden</span><button>Widget neu laden</button></div>
+        </div>
+        <div class="gesture" style="margin-top:auto"><i></i></div>
+      </div></div></div>
+      <p class="note">Die Fußzeile wechselt: <b>+K weitere</b> · <b>Stand</b>, für 5,5 s <b>Erledigt · Rückgängig</b>, das Abzeichen <b>N nicht gesendet</b> (öffnet die Inbox) oder <b>lädt …</b>. <b>+</b> bleibt immer unten rechts. Der Fehlerfall nutzt die neutralen Systemfarben.</p>
+    </figure>
+  </div>
+</main>
+<script type="module" src="daumen.js"></script>
+</body>
+</html>

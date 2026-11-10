@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Papier mobil</title>
+<meta name="description" content="runway auf Android, Mobil-Vorschlag m3 Papier mobil: dieselbe Seite wie im Web, gelesen oben, bedient unten mit dem Daumen.">
+<link rel="stylesheet" href="../../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../../shared/brand/tokens.css">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="board">
+
+  <section class="intro">
+    <div class="live" id="live"></div>
+    <div class="intro-text">
+      <div class="eyebrow"><span class="slash">//</span><span>Mobil-Vorschlag m3</span><span class="sep">·</span><span>Papier mobil</span><span class="sep">·</span><span>Android</span></div>
+      <h1>Oben lesen, unten <em>tippen</em></h1>
+      <p class="lead">Die Seite aus dem Web, auf die Hand zugeschnitten: dieselbe Überschrift mit einem kursiven Wort, dieselben Eyebrows, Haarlinien und der korallrote Strich für Erledigtes. <b>Bedienen liegt im unteren Drittel</b>: Rückgängig, Kontexte, Tabs und das Feld „Neues Todo“ auf jedem Tab. Der Ring zum Abhaken sitzt am rechten Rand jeder Zeile, wo der rechte Daumen hinkommt; obere Zeilen brauchen einen Wisch oder ein kurzes Strecken. Kein 3D, keine Effekte, Bewegung nur bei einer Zustandsänderung und höchstens 160 ms.</p>
+      <div class="try"><span>Tab wechseln</span><span>Text eingeben + Enter</span><span>Ring rechts antippen oder nach rechts wischen</span><span>Rückgängig</span><span>@work</span><span>Zeile oder ··· antippen</span></div>
+
+      <table class="ttable">
+        <caption><span class="eyebrow"><span class="slash">//</span><span>Tipps und Sekunden</span><span class="sep">·</span><span>geschätzt, Pixel 9, warm, ohne Tippzeit des Texts</span></span></caption>
+        <thead><tr><th>Aufgabe</th><th>Weg</th><th>Tipps</th><th>Sek.</th></tr></thead>
+        <tbody>
+          <tr><td>T1 Gedanken erfassen</td><td>Widget + · App-Icon (Feld schon fokussiert) · in der App auf jedem Tab: Feld; dann Enter · Kachel: erst ins Schnellmenü wischen</td><td class="n">2 · Kachel 1 Wisch + 2</td><td class="n">1–2</td></tr>
+          <tr><td>T2 Abhaken / zurück</td><td>Ring am rechten Rand (untere zwei Drittel) · obere Zeilen: Wisch nach rechts oder Strecken · Rückgängig über den Tabs</td><td class="n">1 / 1</td><td class="n">&lt; 1 · oben 1–1,5</td></tr>
+          <tr><td>T3 Was jetzt, im Kontext</td><td>Widget mit gemerktem Chip: 0 · in der App: Nächste + Chip</td><td class="n">0 / 2</td><td class="n">0,5 / 1,5–2</td></tr>
+          <tr><td>T4 Worauf warte ich</td><td>Tab Warten auf, Nachhaken steht oben</td><td class="n">1</td><td class="n">1</td></tr>
+          <tr><td>T5 Inbox abarbeiten</td><td>öffnet auf Inbox · abhaken 1 · löschen 2 · ändern 3 · klären im Web (Option: 2)</td><td class="n">1–3 je Eingang</td><td class="n">1–3</td></tr>
+        </tbody>
+      </table>
+
+      <div class="zones">
+        <div class="zonepic" aria-hidden="true"><div>lesen</div><div class="reach">tippen</div></div>
+        <ul>
+          <li><b>Oben</b> steht nur, was du liest: Eyebrow mit Liste, Kontext, Anzahl und „Stand hh:mm“ (ohne Netz dazu „kein Netz“), darunter die Überschrift mit der Strichliste von heute. Beim Scrollen und ab 130 % Schrift faltet die Überschrift weg.</li>
+          <li><b>Unten</b> liegt alles, was du bedienst: Rückgängig, Kontext-Chips, die drei Tabs und das Feld. Mit einer Hand am Pixel 9 ohne Umgreifen.</li>
+          <li><b>Rechts</b> sitzt der Ring zum Abhaken. Für Zeilen ganz oben reicht der Daumen nur gestreckt; dort ist der Wisch nach rechts der schnellere Weg.</li>
+          <li><b>Mit Tastatur</b> fallen Überschrift und Chips weg, Tabs bleiben über dem Feld. Bei einer Gboard-Höhe von 336 dp bleiben 6 Inbox-Zeilen sichtbar, mit Hinweis „In Inbox ✓“ 5. Pflicht sind 5.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="band-head"><h2>Die drei Listen</h2><p>Gleiche Zeile wie im Web: Text in zwei Zeilen, eine Mono-Zeile, Haarlinie. Der Ring steht auf dem Telefon rechts, beim Daumen. Überfällig mit rotem Rand und Wort, Nachhaken mit gelbem Ring.</p></div>
+    <div class="frames">
+      <figure class="frame"><div id="f-inbox"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Inbox · Tastatur offen</span></div>Öffnet mit fokussiertem Feld. Überschrift weg, <b>Tabs über dem Feld</b>. Zehn Eingänge, Tastatur 336 dp: sechs Zeilen sichtbar, der Rest scrollt.</figcaption></figure>
+      <figure class="frame"><div id="f-next"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Nächste · @work</span></div>„Fällig“ steht oben und ungefiltert, darunter „Nächste Aktionen“ ohne die schon fälligen. <b>Die Chips liegen über den Tabs</b>, ein Daumentipp.</figcaption></figure>
+      <figure class="frame"><div id="f-waiting"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Warten auf</span></div>Fälliges Nachhaken zuerst, mit gelbem Ring. Gezeigt beim Ziehen zum Neuladen: eine korallrote Linie statt Spinner, danach steht die neue Zeit hinter „Stand“.</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="band-head"><h2>Abhaken, offline, dunkel</h2><p>Was der Zustand ist, steht in Worten. Kein Spinner, kein Fehlertext fürs Offline-Sein.</p></div>
+    <div class="frames">
+      <figure class="frame"><div id="f-undo"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Abhaken · Rückgängig</span></div>Der korallrote Strich zieht in 160 ms durch, der Ring füllt sich mit Tinte, die Zeile klappt in 120 ms zu, die Strichliste neben der Überschrift bekommt einen Strich. „Rückgängig“ bleibt 6 s über den Chips und schiebt die Liste, statt sie zu verdecken.</figcaption></figure>
+      <figure class="frame"><div id="f-offline"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Ohne Netz</span></div>Oben steht in Worten <b>„kein Netz“</b> neben „Stand 08:12“. Zeilen sagen „wartet auf Netz“ oder „Nicht gesendet“; das Menü bietet „Erneut senden“.</figcaption></figure>
+      <figure class="frame"><div id="f-dark"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Dunkel</span></div>Ink-Grund, Papier-Schrift, Plum hell für das kursive Wort. Folgt dem System. Dazu die Fehlerkarte „Key abgelehnt – neu einrichten“, ein Tipp führt ins Einrichten.</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="band-head"><h2>Außerhalb der App</h2><p>Erfassen ohne die App zu öffnen. Widget nur Text (Glance, keine Bitmaps), Kachel und Teilen als schlanke Views für den Kaltstart.</p></div>
+    <div class="frames">
+      <figure class="frame"><div id="f-widget"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Widget 4×3</span></div>„Inbox 5 · fällig 1“, Chip @work, korallroter „+“. Chip, „+“ und Ringe sind je 48 dp groß. Systemschrift, weil Glance nur generische Familien kennt.</figcaption></figure>
+      <figure class="frame"><div id="f-tile"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Kachel + Todo</span></div>Nur Feld, Hinweis, Rückgängig und Schließen. Enter speichert und hält das Feld offen für den nächsten Gedanken. Auch gesperrt.</figcaption></figure>
+      <figure class="frame"><div id="f-share"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Teilen · runway</span></div>Titel aus dem Betreff, Link als Notiz. Ein Tipp auf „In Inbox“, auch offline. Der Knopf liegt unten, nie unter einer Tastatur.</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="band-head"><h2>Widget, Einrichten, Hinweise</h2><p>Was die Verträge sonst noch festlegen: Überlauf und Fehlerzustand im Widget, das Einrichten, die Kachel-Hinweise und Karten über der Liste.</p></div>
+    <div class="frames">
+      <figure class="frame"><div id="f-widget2"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Widget · Zustände</span></div>Chip „Alle“: fünf Zeilen, dann <b>„+8 weitere“</b> (öffnet Nächste mit demselben Chip) und das Abzeichen <b>„2 nicht gesendet“</b>. Darunter die Ersatzansicht mit „Widget neu laden“.</figcaption></figure>
+      <figure class="frame"><div id="f-setup"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Einrichten</span></div>Oben lesen, unten tippen, auch hier: „Benutzername“, „Passwort“, „Anmelden“; „Key einfügen“ und „Erweitert“ (Server-URL) darunter.</figcaption></figure>
+      <figure class="frame"><div id="f-hint"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Nach dem Einrichten</span></div>Karte „Verbunden als uli“, dann einmal der Hinweis „Zieh die Kachel + Todo in die erste Reihe“ mit „OK“.</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="band-head"><h2>Große Schrift und Tastatur</h2><p>Bei 150 % fällt die Überschrift weg, das Eyebrow nennt die Liste. Mit Tastatur verschwinden auch die Chips.</p></div>
+    <div class="frames">
+      <figure class="frame"><div id="f-big"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>150 % · Nächste</span></div>Ohne Überschrift, Chips in zwei Zeilen (nie scrollend), Tabs einzeilig. Die Inbox behält ihre Zahl.</figcaption></figure>
+      <figure class="frame"><div id="f-big-inbox"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>150 % · Inbox mit Tastatur</span></div>Der festgeschriebene Fall: Feld fokussiert, Tastatur 336 dp, fünf Zeilen vollständig sichtbar.</figcaption></figure>
+      <figure class="frame"><div id="f-next-kbd"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Nächste · nach Enter</span></div>Erfassen auf Nächste: Chips und Überschrift weichen, nach Enter landet der Eintrag in der Inbox (Tab zeigt 6). <b>„In Inbox ✓“ ist die einzige Rückmeldung</b>, deshalb mit Text des Eintrags.</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="band-head"><h2>Ohne Netz, Verknüpfungen und eine Option</h2><p>Die Basis bleibt Erfassen und Sehen. Was darüber hinausgeht, ist getrennt markiert.</p></div>
+    <div class="frames">
+      <figure class="frame"><div id="f-next-off"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Nächste · kein Netz</span></div>Auch ohne offene Eingänge sichtbar: „Stand 08:12“ und „kein Netz“ in Worten. Darunter die Karte „Altes Konto: 2 nicht gesendet“ mit „Verwerfen“.</figcaption></figure>
+      <figure class="frame"><div id="f-shortcuts"></div><figcaption><div class="eyebrow"><span class="slash">//</span><span>Verknüpfungen</span></div>Langer Druck aufs App-Icon: „Neues Todo“ öffnet dasselbe Feld wie die Kachel, „Inbox“ die App.</figcaption></figure>
+      <figure class="frame"><div id="f-option"></div><figcaption><span class="optiontag">Option · braucht Ulis Entscheidung</span><br>Schnell klären: Inbox-Zeile antippen, Ziel antippen; Inbox zählt 5 → 4. Der Hauptweg bleibt „Im Web klären“. Nicht Teil der Basis, PLAN.md schließt Klären auf dem Telefon aus.</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="frames">
+      <aside class="notecard" style="grid-column: 1 / -1; max-width: 900px">
+        <div class="eyebrow"><span class="slash">//</span><span>Agentic Reach ohne 3D</span></div>
+        <h3>Die Marke steckt in der <em>Schrift</em></h3>
+        <ul>
+          <li><b>Papier und Ink</b> als Grund, nie Weiß oder Schwarz.</li>
+          <li><b>Space Grotesk</b> für alles, <b>ein Wort Fraunces</b> kursiv in Plum je Überschrift.</li>
+          <li><b>JetBrains Mono</b> mit dem korallroten <b>//</b> für jede Eyebrow und Meta-Zeile.</li>
+          <li><b>Koralle</b> heißt handeln: „+“, „In Inbox“, Rückgängig, der Erledigt-Strich; dazu der Rand bei Überfälligem. Der erledigte Ring füllt sich mit Tinte, nicht mit Koralle.</li>
+          <li><b>Gelb</b> nur als Punkt (aktiver Tab), Ring (Nachhaken) und 1-px-Linie (Hinweis, Karte, Fokus).</li>
+          <li><b>Pillen</b> für Knöpfe, Chips und das Feld. Haarlinien statt Karten.</li>
+        </ul>
+      </aside>
+    </div>
+  </section>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

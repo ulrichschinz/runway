@@ -1,4 +1,7 @@
 data/
+# The unified-UI design's invented demo set (no user data), which every prototype imports.
+# `data/` above is for the Taskwarrior data root; this one path is design source (ADR 0042).
+!docs/design/2026-10-31-unified-ui/shared/data/
 users.db
 .env
 .claude/

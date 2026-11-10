@@ -1,0 +1,106 @@
+/* Papier mobil: semantic tokens.
+   The same --rw-* names and values as the web design (03 Papier & Tinte, base of 06 Kombination),
+   so one tokens.json feeds web CSS, RunwayTokens.kt (Compose), colors.xml (tile overlay, share card)
+   and the Glance ColorProviders. Only brand variables from shared/brand/tokens.css are used;
+   every neutral is a color-mix of ink or paper (brand rule 1).
+   Load after ../../shared/brand/tokens.css. */
+
+:root, .theme-light {
+  color-scheme: light;
+  --rw-bg: var(--ar-bg);
+  --rw-surface: var(--ar-paper);
+  --rw-sunk: var(--ar-bg-alt);
+  --rw-text: var(--ar-ink);
+  --rw-mute: color-mix(in srgb, var(--ar-ink) 66%, transparent);
+  --rw-soft: color-mix(in srgb, var(--ar-ink) 42%, transparent);
+  --rw-rule: color-mix(in srgb, var(--ar-ink) 10%, transparent);
+  --rw-rule-strong: color-mix(in srgb, var(--ar-ink) 22%, transparent);
+  --rw-press: color-mix(in srgb, var(--ar-ink) 5%, transparent);
+  --rw-accent: var(--ar-plum);
+  --rw-action: var(--ar-coral);
+  --rw-on-action: var(--ar-ink);
+  --rw-marker: var(--ar-yellow);
+  --rw-overdue: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink));   /* #a45150, measurably red */
+  --rw-overdue-edge: var(--ar-coral);
+  --rw-inverse: var(--ar-ink);
+  --rw-on-inverse: var(--ar-bg);
+  --rw-inverse-action: var(--ar-coral);
+  --rw-strike: var(--ar-coral);
+  --rw-scrim: color-mix(in srgb, var(--ar-ink) 42%, transparent);
+  --rw-kbd: color-mix(in srgb, var(--ar-ink) 7%, var(--ar-bg-alt));
+  --rw-key: var(--ar-paper);
+  --rw-swipe: color-mix(in srgb, var(--ar-coral) 16%, var(--ar-bg));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --rw-bg: var(--ar-ink);
+    --rw-surface: color-mix(in srgb, var(--ar-bg) 7%, var(--ar-ink));
+    --rw-sunk: color-mix(in srgb, var(--ar-bg) 4%, var(--ar-ink));
+    --rw-text: var(--ar-bg);
+    --rw-mute: color-mix(in srgb, var(--ar-bg) 72%, transparent);
+    --rw-soft: color-mix(in srgb, var(--ar-bg) 50%, transparent);
+    --rw-rule: color-mix(in srgb, var(--ar-bg) 12%, transparent);
+    --rw-rule-strong: color-mix(in srgb, var(--ar-bg) 24%, transparent);
+    --rw-press: color-mix(in srgb, var(--ar-bg) 6%, transparent);
+    --rw-accent: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg));
+    --rw-action: var(--ar-coral);
+    --rw-on-action: var(--ar-ink);
+    --rw-marker: var(--ar-yellow);
+    --rw-overdue: var(--ar-coral);
+    --rw-overdue-edge: var(--ar-coral);
+    --rw-inverse: var(--ar-bg);
+    --rw-on-inverse: var(--ar-ink);
+    --rw-inverse-action: color-mix(in srgb, var(--ar-coral) 62%, var(--ar-ink));
+    --rw-strike: var(--ar-coral);
+    --rw-scrim: color-mix(in srgb, var(--ar-ink) 70%, transparent);
+    --rw-kbd: color-mix(in srgb, var(--ar-bg) 9%, var(--ar-ink));
+    --rw-key: color-mix(in srgb, var(--ar-bg) 17%, var(--ar-ink));
+    --rw-swipe: color-mix(in srgb, var(--ar-coral) 22%, var(--ar-ink));
+  }
+}
+
+:root[data-theme="dark"], .theme-dark {
+  color-scheme: dark;
+  --rw-bg: var(--ar-ink);
+  --rw-surface: color-mix(in srgb, var(--ar-bg) 7%, var(--ar-ink));
+  --rw-sunk: color-mix(in srgb, var(--ar-bg) 4%, var(--ar-ink));
+  --rw-text: var(--ar-bg);
+  --rw-mute: color-mix(in srgb, var(--ar-bg) 72%, transparent);
+  --rw-soft: color-mix(in srgb, var(--ar-bg) 50%, transparent);
+  --rw-rule: color-mix(in srgb, var(--ar-bg) 12%, transparent);
+  --rw-rule-strong: color-mix(in srgb, var(--ar-bg) 24%, transparent);
+  --rw-press: color-mix(in srgb, var(--ar-bg) 6%, transparent);
+  --rw-accent: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg));
+  --rw-action: var(--ar-coral);
+  --rw-on-action: var(--ar-ink);
+  --rw-marker: var(--ar-yellow);
+  --rw-overdue: var(--ar-coral);
+  --rw-overdue-edge: var(--ar-coral);
+  --rw-inverse: var(--ar-bg);
+  --rw-on-inverse: var(--ar-ink);
+  --rw-inverse-action: color-mix(in srgb, var(--ar-coral) 62%, var(--ar-ink));
+  --rw-strike: var(--ar-coral);
+  --rw-scrim: color-mix(in srgb, var(--ar-ink) 70%, transparent);
+  --rw-kbd: color-mix(in srgb, var(--ar-bg) 9%, var(--ar-ink));
+  --rw-key: color-mix(in srgb, var(--ar-bg) 17%, var(--ar-ink));
+  --rw-swipe: color-mix(in srgb, var(--ar-coral) 22%, var(--ar-ink));
+}
+
+:root {
+  /* type (sp on Android; multiplied by the frame's font scale --fs) */
+  --rw-font-sans: var(--ar-font-sans);
+  --rw-font-serif: var(--ar-font-serif);
+  --rw-font-mono: var(--ar-font-mono);
+  /* size (dp) */
+  --rw-row: 56px;
+  --rw-touch: 48px;
+  --rw-ring: 22px;
+  /* motion: state changes only, never longer than 200 ms */
+  --rw-ease: var(--ar-ease);
+  --rw-dur-strike: 160ms;
+  --rw-dur-collapse: 120ms;
+  --rw-dur-notice: 120ms;
+  --rw-undo-hold: 6000ms;
+}

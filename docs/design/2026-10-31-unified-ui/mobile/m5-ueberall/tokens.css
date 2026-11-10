@@ -1,0 +1,95 @@
+/* M5 "Überall": semantic tokens. Same names and values as the web base (03 Papier & Tinte,
+   tokens.json there), so web and phone share one source. Load after shared/brand/tokens.css.
+   .is-dark forces the dark set on one frame (for the board); the page itself follows
+   prefers-color-scheme. */
+
+:root {
+  color-scheme: light;
+  --rw-bg: var(--ar-bg);
+  --rw-surface: var(--ar-paper);
+  --rw-sunk: var(--ar-bg-alt);
+  --rw-cool: var(--ar-bg-cool);
+  --rw-text: var(--ar-ink);
+  --rw-mute: color-mix(in srgb, var(--ar-ink) 62%, transparent);
+  --rw-soft: color-mix(in srgb, var(--ar-ink) 40%, transparent);
+  --rw-rule: color-mix(in srgb, var(--ar-ink) 10%, transparent);
+  --rw-rule-strong: color-mix(in srgb, var(--ar-ink) 20%, transparent);
+  --rw-hover: color-mix(in srgb, var(--ar-ink) 4%, transparent);
+  --rw-select: color-mix(in srgb, var(--ar-plum) 18%, transparent);
+  --rw-accent: var(--ar-plum);
+  --rw-action: var(--ar-coral);
+  --rw-on-action: var(--ar-ink);
+  --rw-marker: var(--ar-yellow);
+  --rw-overdue: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink)); /* #a45150, 5.0:1 on bg */
+  --rw-overdue-mark: var(--ar-coral);
+  --rw-inverse: var(--ar-ink);
+  --rw-on-inverse: var(--ar-bg);
+  --rw-inverse-action: var(--ar-coral);
+  --rw-scrim: color-mix(in srgb, var(--ar-ink) 45%, transparent);
+  --rw-wall: var(--ar-plum);                                  /* home and lock wallpaper in the mock */
+  --rw-on-wall: var(--ar-bg);
+  --rw-font-sans: var(--ar-font-sans);
+  --rw-font-serif: var(--ar-font-serif);
+  --rw-font-mono: var(--ar-font-mono);
+  --rw-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --rw-dur-fast: 120ms;
+  --rw-dur-base: 180ms;
+  --rw-dur-undo: 6000ms;
+  /* stand-ins for the SYSTEM's colours on system UI (shade, QS, notifications, launcher popup).
+     Not brand colours: on the device Android/Material You supplies them. Derived from ink/paper. */
+  --sys-shade: color-mix(in srgb, var(--ar-ink) 90%, var(--ar-bg));
+  --sys-surface: color-mix(in srgb, var(--ar-bg) 13%, var(--ar-ink));
+  --sys-tile: color-mix(in srgb, var(--ar-bg) 20%, var(--ar-ink));
+  --sys-tile-on: color-mix(in srgb, var(--ar-bg) 85%, var(--ar-ink));
+  --sys-on-tile-on: var(--ar-ink);
+  --sys-text: color-mix(in srgb, var(--ar-bg) 94%, var(--ar-ink));
+  --sys-mute: color-mix(in srgb, var(--ar-bg) 68%, var(--ar-ink));
+  --sys-accent: color-mix(in srgb, var(--ar-bg) 88%, var(--ar-ink));
+  --sys-rule: color-mix(in srgb, var(--ar-bg) 14%, transparent);
+  --sys-icon-tint: var(--ar-coral); /* the one app colour: setColor() on the small-icon circle */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --rw-bg: var(--ar-ink);
+    --rw-surface: color-mix(in srgb, var(--ar-bg) 7%, var(--ar-ink));
+    --rw-sunk: color-mix(in srgb, var(--ar-bg) 4%, var(--ar-ink));
+    --rw-cool: color-mix(in srgb, var(--ar-plum) 35%, var(--ar-ink));
+    --rw-text: var(--ar-bg);
+    --rw-mute: color-mix(in srgb, var(--ar-bg) 70%, transparent);
+    --rw-soft: color-mix(in srgb, var(--ar-bg) 50%, transparent);
+    --rw-rule: color-mix(in srgb, var(--ar-bg) 12%, transparent);
+    --rw-rule-strong: color-mix(in srgb, var(--ar-bg) 22%, transparent);
+    --rw-hover: color-mix(in srgb, var(--ar-bg) 5%, transparent);
+    --rw-select: color-mix(in srgb, color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg)) 34%, transparent);
+    --rw-accent: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg));
+    --rw-overdue: var(--ar-coral);
+    --rw-inverse: var(--ar-bg);
+    --rw-on-inverse: var(--ar-ink);
+    --rw-inverse-action: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink));
+    --rw-scrim: color-mix(in srgb, var(--ar-ink) 70%, transparent);
+    --rw-wall: color-mix(in srgb, var(--ar-plum) 55%, var(--ar-ink));
+  }
+}
+:root[data-theme="dark"], .is-dark {
+  color-scheme: dark;
+  --rw-bg: var(--ar-ink);
+  --rw-surface: color-mix(in srgb, var(--ar-bg) 7%, var(--ar-ink));
+  --rw-sunk: color-mix(in srgb, var(--ar-bg) 4%, var(--ar-ink));
+  --rw-cool: color-mix(in srgb, var(--ar-plum) 35%, var(--ar-ink));
+  --rw-text: var(--ar-bg);
+  --rw-mute: color-mix(in srgb, var(--ar-bg) 70%, transparent);
+  --rw-soft: color-mix(in srgb, var(--ar-bg) 50%, transparent);
+  --rw-rule: color-mix(in srgb, var(--ar-bg) 12%, transparent);
+  --rw-rule-strong: color-mix(in srgb, var(--ar-bg) 22%, transparent);
+  --rw-hover: color-mix(in srgb, var(--ar-bg) 5%, transparent);
+  --rw-select: color-mix(in srgb, color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg)) 34%, transparent);
+  --rw-accent: color-mix(in srgb, var(--ar-plum) 45%, var(--ar-bg));
+  --rw-overdue: var(--ar-coral);
+  --rw-inverse: var(--ar-bg);
+  --rw-on-inverse: var(--ar-ink);
+  --rw-inverse-action: color-mix(in srgb, var(--ar-coral) 60%, var(--ar-ink));
+  --rw-scrim: color-mix(in srgb, var(--ar-ink) 70%, transparent);
+  --rw-wall: color-mix(in srgb, var(--ar-plum) 55%, var(--ar-ink));
+}

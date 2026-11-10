@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runway Android · Startbahn</title>
+<meta name="description" content="Vorschlag 02 Startbahn: runway auf Android mit Widget, Kachel, Erfassen-Overlay und Teilen.">
+<link rel="stylesheet" href="../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../shared/brand/tokens.css">
+<link rel="stylesheet" href="tokens/tokens.css">
+<link rel="stylesheet" href="android.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+</head>
+<body>
+<div class="board">
+  <div class="device" aria-label="Pixel 9, runway">
+    <div class="screen" id="screen">
+      <div class="hdr" id="hdr">
+        <canvas id="gl" aria-hidden="true"></canvas>
+        <div class="hstatic" id="hstatic" aria-hidden="true"></div>
+        <svg id="trails" aria-hidden="true"></svg>
+        <div class="sbar" aria-hidden="true"><span>09:41</span><span class="sb-ic"><i class="sig"></i><i class="wifi"></i><i class="bat"></i></span></div>
+        <p class="hdr-cap" id="hdr-cap"></p>
+      </div>
+      <section class="sheet" id="sheet">
+        <nav class="tabs" id="tabs" aria-label="Listen"></nav>
+        <div class="list" id="list"></div>
+      </section>
+      <button class="fab" id="fab" aria-label="+ Todo"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg>Todo</button>
+      <div class="notice" id="notice" role="status" aria-live="polite"></div>
+      <form class="afield" id="afield" autocomplete="off">
+        <input id="afield-in" placeholder="Neues Todo" aria-label="Neues Todo" enterkeyhint="done">
+      </form>
+      <div class="kbd" id="kbd" aria-hidden="true"></div>
+      <div class="menu" id="menu" hidden></div>
+      <div class="ctab" id="ctab" hidden></div>
+      <div class="gbar" aria-hidden="true"><i></i></div>
+    </div>
+  </div>
+
+  <div class="side">
+    <header class="intro">
+      <p class="eyebrow"><span class="slash">//</span> vorschlag 02 · startbahn · android</p>
+      <h1>Dieselbe Startbahn, <em>nativ</em> gebaut.</h1>
+      <p>Kopf als AGSL-Shader mit Compose-Animation (176 dp, klappt mit Tastatur und unter Mehr zusammen), Listen in Compose, Widget in Glance (nur Text, keine Bitmaps). Kachel, Overlay und Teilen bleiben schnelle Views. Alles hier wirkt auf die App links.</p>
+    </header>
+    <div class="surfaces">
+      <figure class="surf">
+        <figcaption class="eyebrow"><span class="slash">//</span> widget · 4 × 3 · die nächsten drei, dann die schlange</figcaption>
+        <div class="home">
+          <div class="widget" id="widget"></div>
+          <div class="icons">
+            <span class="appicon"><span class="ai-mark"><svg viewBox="0 0 64 64" aria-hidden="true"><g stroke="#3D2B5C" stroke-width="1.4" fill="none" opacity="0.55"><line x1="32" y1="14" x2="47.588" y2="23"/><line x1="47.588" y1="23" x2="47.588" y2="41"/><line x1="47.588" y1="41" x2="32" y2="50"/><line x1="32" y1="50" x2="16.412" y2="41"/><line x1="16.412" y1="41" x2="16.412" y2="23"/><line x1="16.412" y1="23" x2="32" y2="14"/><line x1="32" y1="32" x2="32" y2="14"/><line x1="32" y1="32" x2="47.588" y2="23"/><line x1="32" y1="32" x2="47.588" y2="41"/><line x1="32" y1="32" x2="32" y2="50"/><line x1="32" y1="32" x2="16.412" y2="41"/><line x1="32" y1="32" x2="16.412" y2="23"/></g><circle cx="32" cy="32" r="3.6" fill="#3D2B5C"/><circle cx="47.588" cy="23" r="2.8" fill="#3D2B5C"/><circle cx="47.588" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="32" cy="50" r="2.8" fill="#3D2B5C"/><circle cx="16.412" cy="41" r="2.8" fill="#3D2B5C"/><circle cx="16.412" cy="23" r="2.8" fill="#3D2B5C"/><circle cx="32" cy="14" r="4.4" fill="#FF7A6B"/><circle cx="51.588" cy="19.000" r="2" fill="#F4C84A"/></svg></span>runway</span>
+            <span class="appicon ph"><span></span>Kalender</span>
+            <span class="appicon ph"><span></span>Mail</span>
+            <span class="appicon ph"><span></span>Kamera</span>
+          </div>
+        </div>
+      </figure>
+      <figure class="surf">
+        <figcaption class="eyebrow"><span class="slash">//</span> kachel + todo · schnelleinstellungen</figcaption>
+        <div class="qs">
+          <div class="qs-top"><span>09:41</span><span>Sa., 31. Okt.</span></div>
+          <div class="qs-grid">
+            <button class="tile" type="button"><span class="t-ic"><i class="wifi"></i></span><span><b>Internet</b><small>Zuhause</small></span></button>
+            <button class="tile" type="button"><span class="t-ic"><i class="bt"></i></span><span><b>Bluetooth</b><small>Aus</small></span></button>
+            <button class="tile on" type="button" id="tile" aria-label="+ Todo" title="Farbe kommt vom System"><span class="t-ic"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.6"/><path d="M10 7v6M7 10h6"/></svg></span><span><b>+ Todo</b><small>runway</small></span></button>
+            <button class="tile" type="button"><span class="t-ic"><i class="moon"></i></span><span><b>Nicht stören</b><small>Aus</small></span></button>
+          </div>
+          <p class="qs-hint">Ein Tipp öffnet nur das Eingabefeld, auch gesperrt. Die Kachelfarbe zeichnet das System.</p>
+        </div>
+      </figure>
+      <figure class="surf">
+        <figcaption class="eyebrow"><span class="slash">//</span> erfassen-overlay · nur feld, hinweis, schließen</figcaption>
+        <div class="ovl" id="ovl">
+          <div class="ovl-bg" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          <form class="ovl-card" id="ovl-form" autocomplete="off">
+            <div class="ovl-row"><input id="ovl-in" placeholder="Neues Todo" aria-label="Neues Todo" enterkeyhint="done"></div>
+            <div class="ovl-foot"><span id="ovl-note" role="status" aria-live="polite"></span><button type="button" class="link" id="ovl-close">Schließen</button></div>
+          </form>
+        </div>
+      </figure>
+      <figure class="surf">
+        <figcaption class="eyebrow"><span class="slash">//</span> teilen · ziel „runway“</figcaption>
+        <div class="share" id="share">
+          <div class="share-bg" aria-hidden="true"><b>Agenten-Evaluation: Was wirklich zählt</b><i></i><i></i><i></i><i></i></div>
+          <div class="share-card">
+            <p class="eyebrow"><span class="slash">//</span> in runway erfassen</p>
+            <h3 id="share-title">Agenten-Evaluation: Was wirklich zählt</h3>
+            <p class="share-note">https://beispiel.de/blog/agenten-evaluation<br>Wer Agenten einsetzt, braucht Messgrößen, die über Genauigkeit hinausgehen …</p>
+            <button class="pill" id="share-btn" type="button">In Inbox</button>
+          </div>
+        </div>
+      </figure>
+    </div>
+  </div>
+</div>
+<script type="module" src="android.js"></script>
+</body>
+</html>

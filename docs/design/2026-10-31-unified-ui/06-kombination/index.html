@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>runway · Kombination</title>
+<meta name="description" content="runway web, Vorschlag 06: Papier und Tinte als Basis, die Tageslinse als einziges 3D-Objekt, der Kartenstapel zum Klären.">
+<meta name="theme-color" content="#FBF6EE" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1B1428" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../shared/brand/tokens.css">
+<link rel="stylesheet" href="tokens/tokens.css">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="web.css">
+<link rel="stylesheet" href="combo.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+</head>
+<body>
+<!-- ink edge: a whisper of displacement so the strike reads as pen on paper, not as CSS (03) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <filter id="ink-edge" x="-4%" y="-60%" width="108%" height="220%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="3" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="1.5" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</svg>
+
+<div class="app" id="app">
+  <aside class="rail" id="rail" aria-label="Navigation"></aside>
+  <div class="page">
+    <header class="phonebar" id="phonebar"></header>
+    <main class="scroll" id="scroll">
+      <div class="col">
+        <div class="topline" id="topline">
+          <span id="back" class="back"></span>
+          <label class="search"><span class="sr" data-i18n="search.ph"></span><input id="search" type="search" data-i18n-attr="placeholder:search.ph" autocomplete="off"><kbd>/</kbd></label>
+          <button class="palbtn" data-act="palette"><span data-i18n="pal.title"></span><kbd>⌘K</kbd></button>
+          <span class="stand">Stand 09:41</span>
+          <button class="pill quiet todaybtn" id="todaybtn" data-act="today" aria-pressed="false" data-i18n="shell.today"></button>
+        </div>
+        <div id="head" class="head"></div>
+        <div id="body"></div>
+      </div>
+    </main>
+    <form class="capture" id="capture" autocomplete="off">
+      <span class="plus" aria-hidden="true">+</span>
+      <input type="text" data-i18n-attr="placeholder:capture.new;aria-label:capture.new" enterkeyhint="done">
+      <span class="hint" data-i18n="capture.hint"></span><kbd>n</kbd>
+    </form>
+  </div>
+  <aside class="margin" id="margin" data-i18n-attr="aria-label:shell.margin"></aside>
+</div>
+<div class="notice" id="notice" role="status" aria-live="polite"></div>
+<div class="sheet-scrim" id="keys"></div>
+<div class="pal-scrim" id="palette">
+  <div class="palette" role="dialog" aria-modal="true" data-i18n-attr="aria-label:pal.title">
+    <div class="pal-in"><span class="slash">//</span><input id="pal-input" data-i18n-attr="placeholder:pal.ph" autocomplete="off" spellcheck="false" aria-controls="pal-list"><kbd>Esc</kbd></div>
+    <div class="pal-list" id="pal-list" role="listbox"></div>
+    <div class="pal-foot mono" data-i18n="pal.foot"></div>
+  </div>
+</div>
+<svg class="flight" id="flight" aria-hidden="true"></svg>
+<script type="module" src="web.js"></script>
+</body>
+</html>

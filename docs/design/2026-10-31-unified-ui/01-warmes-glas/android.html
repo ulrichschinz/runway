@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runway Android · Warmes Glas</title>
+<meta name="description" content="Vorschlag 01 Warmes Glas: runway auf Android mit Tageslinse als AGSL-Shader, Widget, Kachel und Teilen.">
+<link rel="stylesheet" href="../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../shared/brand/tokens.css">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="android/android.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+</head>
+<body>
+<div class="stage">
+  <section class="phone-col" aria-label="runway auf dem Telefon">
+    <div class="bezel">
+      <div class="phone" id="phone">
+        <div class="statusbar"><span>9:42</span><span class="sb-icons" aria-hidden="true"><i class="sig"></i><i class="wifi"></i><i class="bat"></i></span></div>
+        <header class="topbar" id="topbar"></header>
+        <div class="chips" id="a-chips"></div>
+        <div class="scroll" id="a-list" role="list"></div>
+        <div class="a-notice" id="a-notice" hidden></div>
+        <form class="a-capture" id="a-capture" autocomplete="off"></form>
+        <div class="keyboard" id="keyboard" hidden aria-hidden="true"></div>
+        <nav class="navbar" id="navbar" aria-label="Listen"></nav>
+        <div class="gesture" aria-hidden="true"><i></i></div>
+        <svg class="a-flight" id="a-flight" aria-hidden="true"></svg>
+        <div class="sheet-scrim" id="a-scrim" hidden></div>
+        <div class="sheet" id="a-sheet" hidden></div>
+        <div class="menu" id="a-menu" hidden></div>
+      </div>
+    </div>
+    <p class="cap"><span class="slash">//</span> Pixel 9 · 412 × 915 dp · Kante zu Kante · Gestennavigation</p>
+  </section>
+
+  <section class="side-col">
+    <header class="intro">
+      <div class="lockup" id="lockup"></div>
+      <h1>runway auf <em>Android</em></h1>
+      <p>Gleiche Listen, gleiche Namen, gleiche Tageslinse wie im Web. Auf dem Telefon rechnet ein AGSL-Shader die Linse, die Perle fliegt als Compose-Animation. Was außerhalb der App erfasst, landet in derselben Inbox.</p>
+    </header>
+    <div class="surfaces">
+      <figure class="surface">
+        <div class="crop home" id="widget-home"></div>
+        <figcaption><span class="slash">//</span> Widget 4 × 3 · Glance, nur Text und Vektoren</figcaption>
+      </figure>
+      <figure class="surface">
+        <div class="crop qs" id="qs"></div>
+        <figcaption><span class="slash">//</span> Kachel „+ Todo“ und Erfassen-Overlay</figcaption>
+      </figure>
+      <figure class="surface">
+        <div class="crop share" id="share"></div>
+        <figcaption><span class="slash">//</span> Teilen an runway · ein Tipp</figcaption>
+      </figure>
+    </div>
+    <dl class="natives" id="natives"></dl>
+  </section>
+</div>
+<script type="module" src="android/android.js"></script>
+</body>
+</html>

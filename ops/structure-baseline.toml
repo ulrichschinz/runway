@@ -18,6 +18,11 @@ allowlist = [
   "backend/app/config.py",  # settings — same
   "frontend/src/api/client.js",  # the single HTTP egress; concentration here is the design
   "frontend/src/components/AppShell.vue",  # the layout every view wraps itself in
+  # The new UI's hubs by design, recorded before they exist (ADR 0042, 2026-11-01).
+  "frontend/src/layout/AppFrame.vue",  # AppShell's successor: the frame every new page wraps itself in
+  "frontend/src/shared/i18n.js",  # t(): every string of every new component goes through it
+  "frontend/src/shared/gtdRules.js",  # list membership and payloads, one copy shared with Android's vectors
+  "frontend/src/tasks/stores/gtd.js",  # the one snapshot store every task page, panel and projects page reads
 ]
 
 [hubs]

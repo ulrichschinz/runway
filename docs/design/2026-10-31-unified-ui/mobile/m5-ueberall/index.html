@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runway mobil · Überall</title>
+<meta name="description" content="runway auf Android, Mobil-Vorschlag M5 Überall: erfassen und sehen dort, wo das Handy schon ist. Widget, Kachel, Benachrichtigung, Kurzbefehle und Teilen als eine Familie, die App als schlanke Liste.">
+<link rel="stylesheet" href="../../shared/brand/fonts/fonts.css">
+<link rel="stylesheet" href="../../shared/brand/tokens.css">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="m5.css">
+</head>
+<body>
+<main class="board">
+
+  <section class="intro">
+    <div>
+      <div class="eyebrow"><span class="slash">//</span><span>Mobil M5</span><span class="sep">·</span><span>Überall</span><span class="sep">·</span><span>Android, Geschwister von 06 Kombination</span></div>
+      <h1>Erfassen, wo das Handy <em>schon</em> ist</h1>
+      <p class="lead">Die App ist die Fläche, die du am seltensten öffnest. Erfassen und Nachsehen passieren auf dem Startbildschirm, im Schatten, auf dem Sperrbildschirm und im Teilen-Menü. Eine Familie sind sie über Wörter, Reihenfolge und Abläufe: „Neues Todo“, „Inbox N · fällig M“, „Abhaken“, „In Inbox ✓“ mit Rückgängig.</p><p class="lead">Die Marke tragen nur die Flächen, die runway selbst zeichnet: das Widget, das Erfassen-Overlay, das Teilen-Blatt und die App. Kachel, Benachrichtigung und Kurzbefehl-Menü zeichnet Android in Systemfarben; dort liefert runway nur Text und ein einfarbiges Symbol.</p>
+      <p class="lead">Die App selbst ist eine schlanke Liste mit allem unten im Daumenbereich: Feld, Reiter, Kontexte. Kein 3D, keine Animation über 200 ms.</p>
+    </div>
+    <div class="ways" aria-label="Wege in die Inbox">
+      <div class="wh"><span class="eyebrow"><span class="slash">//</span><span>Bis „In Inbox ✓“, ohne Tippzeit</span></span><span class="eyebrow">entsperrt</span><span class="eyebrow">aus der Tasche, gesperrt</span></div>
+      <div class="way best"><div class="nm">Widget, Leiste<small>Startbildschirm</small></div><div class="steps"><span class="st">Leiste</span><span class="ar">→</span><span class="st">Overlay 0,7 s</span><span class="ar">→</span><span class="st type">tippen</span><span class="ar">→</span><span class="st done">↵ In Inbox ✓</span></div><div class="secs">1,4<small> s</small></div><div class="lk">3 Taps · 2,3 s</div></div>
+      <div class="way"><div class="nm">Kachel „+ Todo“<small>erste Reihe</small></div><div class="steps"><span class="st">Wisch</span><span class="ar">→</span><span class="st">+ Todo</span><span class="ar">→</span><span class="st">Overlay 0,7 s</span><span class="ar">→</span><span class="st type">tippen</span><span class="ar">→</span><span class="st done">↵</span></div><div class="secs">1,9<small> s</small></div><div class="lk">Display an + Wisch + 2 · 2,2 s</div></div>
+      <div class="way"><div class="nm">App-Icon<small>Feld fokussiert</small></div><div class="steps"><span class="st">Icon</span><span class="ar">→</span><span class="st">App 0,8 s</span><span class="ar">→</span><span class="st type">tippen</span><span class="ar">→</span><span class="st done">↵ In Inbox ✓</span></div><div class="secs">1,5<small> s</small></div><div class="lk">3 Taps · 2,4 s</div></div>
+      <div class="way"><div class="nm">Teilen<small>aus einer App</small></div><div class="steps"><span class="st">Teilen</span><span class="ar">→</span><span class="st">runway</span><span class="ar">→</span><span class="st done">In Inbox</span></div><div class="secs">1,6<small> s</small></div><div class="lk">entfällt</div></div>
+      <div class="way"><div class="nm">Benachrichtigung<small>optional, unter „Lautlos“</small></div><div class="steps"><span class="st">Wisch</span><span class="ar">→</span><span class="st">aufklappen</span><span class="ar">→</span><span class="st">+ Todo</span><span class="ar">→</span><span class="st type">tippen</span><span class="ar">→</span><span class="st done">➤</span></div><div class="secs">2,0<small> s</small></div><div class="lk">gesperrt nicht möglich</div></div>
+      <div class="way"><div class="nm">Kurzbefehl<small>langer Druck aufs Icon</small></div><div class="steps"><span class="st">lang drücken</span><span class="ar">→</span><span class="st">Neues Todo</span><span class="ar">→</span><span class="st type">tippen</span><span class="ar">→</span><span class="st done">↵</span></div><div class="secs">2,0<small> s</small></div><div class="lk">+ Entsperren · 2,9 s</div></div>
+      <div class="foot">Geschätzt auf dem Pixel 9, warm, einhändig: Tippen 0,35 s, Wisch 0,45 s, langer Druck 0,5 s, Overlay 0,7 s (Budget warm, kalt 1,2 s), App 0,8 s, Display an und Entsperren per Fingerabdruck 0,9 s (zählt als ein Tap). Kalt kommen bis 0,5 s dazu. Die Benachrichtigung liegt als „leise“ zugeklappt unter „Lautlos“, darum der Tipp zum Aufklappen; seit Android 14 lässt sie sich wegwischen, sie ist also nicht immer da.</div>
+    </div>
+  </section>
+
+  <section class="part fam">
+    <div class="part-head"><span class="eyebrow"><span class="slash">//</span><span>01</span></span><h2>Die <em>Familie</em></h2><p>Links die App zum Ausprobieren: Reiter wechseln, erfassen, abhaken, Rückgängig, Kontext filtern, nach rechts wischen. Rechts dieselben Daten auf den Flächen um die App herum. Erfasst du links, zählen Widget und Benachrichtigung sofort mit.</p></div>
+    <div class="family">
+      <div class="main-col">
+        <div class="dev" id="mainDev"><div class="dev-in"><div class="screen ime" id="phone" aria-label="Telefon, bedienbar"></div></div></div>
+        <div class="demo" id="demo"><span class="lbl">// nur für die Vorschau</span><button class="pill" data-demo="offline" aria-pressed="false">Kein Netz</button><button class="pill" data-demo="dark" aria-pressed="false">Dunkel</button></div>
+      </div>
+      <div class="surfaces">
+        <figure class="still" data-live style="--s:.6"><div class="dev"><div class="dev-in"><div class="screen sys" id="sHome"></div></div></div>
+          <figcaption><b>Startbildschirm, Marke.</b> Ein Widget „runway Übersicht“ (4×3): oben die Erfassen-Leiste, darunter „Inbox N · fällig M“ (Tipp lädt neu), Kontext-Chip, Ringe. Nur Text und Formen, keine Bilder. Darüber „Warten auf“ als abgelegter Kurzbefehl.</figcaption></figure>
+        <figure class="still" data-live style="--s:.6"><div class="dev"><div class="dev-in"><div class="screen sys" id="sShortcuts"></div></div></div>
+          <figcaption><b>Kurzbefehle, System.</b> Das Menü zeichnet der Launcher. runway liefert je Eintrag nur Symbol und Bezeichnung: Neues Todo, Inbox, neu Nächste und Warten auf. Keine Zähler, keine Untertitel.</figcaption></figure>
+        <figure class="still" data-live style="--s:.6"><div class="dev"><div class="dev-in"><div class="screen sys" id="sShade"></div></div></div>
+          <figcaption><b>Schatten, System.</b> Kachel „+ Todo“ in Systemfarben. Die optionale Anzeige „Nächste“ ist leise und liegt zugeklappt unter „Lautlos“: ein Tipp klappt sie auf. Seit Android 14 lässt sie sich wegwischen.</figcaption></figure>
+        <figure class="still" style="--s:.6"><div class="dev static"><div class="dev-in"><div class="screen sys" id="sReply"></div></div></div>
+          <figcaption><b>Aufgeklappt, System.</b> Titel ist das erste Todo, „Abhaken“ gilt ihm. „+ Todo“ öffnet das Antwortfeld des Systems, ohne App-Start. Senden landet in derselben Outbox.</figcaption></figure>
+        <figure class="still" style="--s:.6"><div class="dev static"><div class="dev-in"><div class="screen sys" id="sLock"></div></div></div>
+          <figcaption><b>Gesperrt, Marke.</b> Das Overlay der Kachel zeichnet runway: nur Feld, Hinweis, Rückgängig, Schließen. Keine Listen, keine Zähler. Die Benachrichtigung zeigt gesperrt nur „Inhalt ausgeblendet“.</figcaption></figure>
+        <figure class="still" style="--s:.6"><div class="dev static"><div class="dev-in"><div class="screen sys" id="sShare"></div></div></div>
+          <figcaption><b>Teilen, Marke.</b> „runway“ steht oben im Teilen-Menü. Titel aus dem Betreff, Link als Notiz, ein Tipp auf „In Inbox“. Ohne Tastatur, auch ohne Netz.</figcaption></figure>
+        <figure class="still" data-live style="--s:.6"><div class="dev static"><div class="dev-in"><div class="screen sys" id="sWidgets"></div></div></div>
+          <figcaption><b>Widget-Zustände.</b> Nach dem Abhaken 5,5 s „Erledigt · Rückgängig“; ohne Netz „1 nicht gesendet“; wenn das System das Widget nicht zeichnen kann, sein Fallback „Widget neu laden“.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="part">
+    <div class="part-head"><span class="eyebrow"><span class="slash">//</span><span>02</span></span><h2>Die App, <em>schlank</em></h2><p>Drei Reiter, eine Zeilenform, alles Bedienbare im unteren Drittel. Oben nur „Stand hh:mm“ und Mehr. Die Zustände, die zählen, als Standbilder.</p></div>
+    <div class="stills" id="stills"></div>
+  </section>
+
+  <section class="part">
+    <div class="part-head"><span class="eyebrow"><span class="slash">//</span><span>03</span></span><h2>Wie <em>schnell</em></h2><p>Taps und geschätzte Sekunden ohne Tippzeit, einmal entsperrt auf dem Startbildschirm, einmal aus der Tasche mit gesperrtem Display (Entsperren zählt als ein Tap, 0,9 s).</p></div>
+    <div class="ttwrap"><table class="ttable">
+      <thead><tr><th>Aufgabe</th><th>Schnellster Weg</th><th>Taps</th><th>Sekunden, entsperrt</th><th>Aus der Tasche, gesperrt</th><th>Weitere Wege (Taps / s, entsperrt)</th></tr></thead>
+      <tbody>
+        <tr><td>T1 Gedanken erfassen</td><td>Leiste im Übersicht-Widget<div class="m">gesperrt am schnellsten: Kachel „+ Todo“</div></td><td class="n"><b>2</b></td><td class="n"><b>1,4</b></td><td class="n">3 / 2,3<div class="m">Kachel: 3 + Wisch / 2,2</div></td><td><span class="m">Icon 2 / 1,5 · Teilen 3 / 1,6 · Kachel Wisch + 2 / 1,9 · Benachrichtigung Wisch + 3 / 2,0 · Kurzbefehl lang + 2 / 2,0</span></td></tr>
+        <tr><td>T2 Abhaken, Rückgängig</td><td>Ring im Widget oder in der App<div class="m">Rückgängig im Hinweis oder in der Widget-Fußzeile</div></td><td class="n"><b>1 + 1</b></td><td class="n"><b>0,4 + 0,4</b></td><td class="n">2 / 1,3</td><td><span class="m">Wisch nach rechts in der App · „Abhaken“ in der Benachrichtigung: Wisch + 2 / 1,2</span></td></tr>
+        <tr><td>T3 Was jetzt, im Kontext</td><td>Übersicht-Widget, Chip bleibt gesetzt<div class="m">nur, wenn du gerade auf dem Startbildschirm bist</div></td><td class="n"><b>0</b></td><td class="n"><b>0,5</b></td><td class="n">1 / 1,4</td><td><span class="m">Benachrichtigung Wisch + 1 / 1,1 · App: Icon + Nächste, Chip gemerkt 2 / 1,6 · Kontext wechseln: +1</span></td></tr>
+        <tr><td>T4 Worauf ich warte</td><td>Kurzbefehl „Warten auf“ als Icon</td><td class="n"><b>1</b></td><td class="n"><b>1,2</b></td><td class="n">2 / 2,1</td><td><span class="m">Icon + Reiter 2 / 1,5 · lang drücken + Warten auf 2 / 1,7</span></td></tr>
+        <tr><td>T5 Inbox abarbeiten</td><td>Icon öffnet die Inbox, Zeile: Ring oder Menü<div class="m">Klären bleibt im Web</div></td><td class="n"><b>1 + 1/Zeile</b></td><td class="n"><b>1,2 + 0,4</b></td><td class="n">2 / 2,1 + 0,4</td><td><span class="m">Löschen 2 Taps · Bearbeiten 2 + Tippen + ↵ · Option Klären: 2 Taps je Zeile</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="notes">
+      <div><span class="eyebrow"><span class="slash">//</span><span>Marke ohne 3D</span></span><h3>Papier, Tinte, ein Koralle-Punkt</h3><ul><li>warmes Papier, Ink, Haarlinien statt Karten</li><li>Koralle für das Plus und „In Inbox“; Abweichungen (Rückgängig, überfällig, erledigt) stehen begründet im README</li><li>Gelb als Punkt am aktiven Reiter, Ring für Nachhaken, 1 px Zeitlinie</li><li>Mono-Eyebrows mit //, ein Fraunces-Wort je Titel</li></ul></div>
+      <div><span class="eyebrow"><span class="slash">//</span><span>Bewegung</span></span><h3>Nur, wenn sich etwas ändert</h3><ul><li>Strich durch die Zeile 160 ms, dann ist sie weg</li><li>Rückgängig-Zeit läuft in sechs Schritten, nicht fließend</li><li>„läuft“ ist ein ruhiger Punkt, kein Puls</li><li>Reduzierte Bewegung: alles sofort</li></ul></div>
+      <div class="chg"><span class="eyebrow"><span class="slash">//</span><span>Braucht Ulis Freigabe</span></span><h3>Vertragsänderungen</h3><ul><li>Reiter und Kontext-Chips unten statt oben</li><li>Erfassen-Leiste im Übersicht-Widget, Daueranzeige Nächste, zwei Kurzbefehle</li><li>Kontext-Chip bleibt über App-Neustarts</li><li>Fälliges nur einmal, nicht auch in Nächste Aktionen</li><li>Widget in Markenfarben statt dynamischer Farbe</li><li>Benachrichtigung: Aktion „Abhaken“ ohne Beschreibung</li></ul></div>
+    </div>
+  </section>
+</main>
+
+<script type="module">
+import { appScreen, homeScreen, shortcutsScreen, shadeScreen, replyScreen, lockScreen, shareScreen, widgetStatesScreen, mount } from './app.js'
+import { freshTasks } from './model.js'
+
+const $ = (s) => document.querySelector(s)
+const base = () => ({ tasks: freshTasks(), tab: 'inbox', ctx: 'Alle', wctx: '@computer', ime: false, draft: '', notice: null, offline: false, stand: '09:41' })
+
+$('#sReply').innerHTML = replyScreen(base())
+$('#sLock').innerHTML = lockScreen()
+$('#sShare').innerHTML = shareScreen()
+$('#sWidgets').innerHTML = widgetStatesScreen(base())
+
+// offline: two captures in the outbox, one failed, its menu open
+const off = base()
+off.offline = true; off.stand = '09:12'
+off.tasks.unshift(
+  { id: 801, uuid: 'local-00000802', description: 'Reifenhändler wegen Termin anrufen', status: 'pending', tags: [], project: null, entry: '20261031T093500Z', local: true, net: 'wait', annotations: [] },
+  { id: 802, uuid: 'local-00000801', description: 'Idee: Newsletter als Serie', status: 'pending', tags: [], project: null, entry: '20261031T093400Z', local: true, net: 'fail', annotations: [] },
+)
+const offMenu = '<div class="scrim" style="background:transparent"></div><div class="menu" role="menu" style="top:252px;right:16px"><button>Erneut senden</button><button>Bearbeiten und erneut senden</button><button>Löschen</button></div>'
+
+const tick = base(); tick.tab = 'next'
+tick.notice = { text: 'Erledigt', undo: true }
+
+// a fuller Inbox for the keyboard frames, to show how many rows fit
+const fuller = () => { const b = { ...base(), ime: true }; b.tasks = [
+  ...['Druckerei: Proof freigeben', 'Lena wegen Samstag fragen', 'Steuer-Mail von gestern ablegen'].map((d, i) => ({ id: 700 + i, uuid: `0000000000${700 + i}`, description: d, status: 'pending', tags: [], project: null, entry: `20261031T08${10 + i}00Z`, annotations: [] })),
+  ...b.tasks]; return b }
+
+// key rejected: banner, captures pause with "wartet auf Setup"; new rows arrived above
+const setup = base()
+setup.tasks.unshift(
+  { id: 811, uuid: 'local-00000811', description: 'Kita-Formular unterschreiben', status: 'pending', tags: [], project: null, entry: '20261031T093000Z', local: true, net: 'setup', annotations: [] },
+)
+const keyBanner = '<div class="banner err"><div>Key abgelehnt – neu einrichten<small>Deine Todos bleiben hier und gehen raus, sobald du verbunden bist.</small></div><span class="bgo" aria-hidden="true">→</span></div>'
+const oldAcct = '<div class="banner ok"><div class="eyebrow" style="font-size:12px"><span class="slash">//</span><span>Verbunden als uli</span></div></div><div class="banner"><div>Altes Konto: 2 nicht gesendet<small>Sie gehen raus, sobald du dich mit dem alten Konto anmeldest.</small></div><button class="pill">Verwerfen</button></div>'
+const HINT = '<div class="scrim"></div><div class="hint" role="dialog" aria-label="Kachel einrichten" style="top:auto;bottom:150px"><div class="eyebrow"><span class="slash">//</span><span>Einmalig</span><span class="sep">·</span><span>nach dem Einrichten</span></div><h3>Die Kachel in <em>Reichweite</em></h3><p>Zieh die Kachel + Todo in die erste Reihe. Dann erfasst du mit einem Wisch, auch gesperrt.</p><div class="qmini"><span class="me">+ Todo</span><span>Internet</span><span>Bluetooth</span><span>Lampe</span></div><div class="acts"><button class="pill">OK</button></div></div>'
+
+const STILLS = [
+  { cap: '<b>Inbox, Tastatur offen.</b> Feld direkt über der Tastatur, Reiter darüber, sieben Zeilen sichtbar. Neueste oben.', st: fuller(), o: { fieldText: 'Rückruf Druckerei wegen Pro' }, ime: true },
+  { cap: '<b>Nächste, @computer.</b> „Fällig“ oben und ungefiltert, Kontext-Chips unten am Daumen. Ohne Tastatur.', st: { ...base(), tab: 'next', ctx: '@computer' } },
+  { cap: '<b>Warten auf.</b> Nachhaken fällig zuerst, mit gelbem Ring. Sonst Wiedervorlage und seit wann.', st: { ...base(), tab: 'waiting' } },
+  { cap: '<b>Abhaken + Rückgängig.</b> Koralle-Strich 160 ms, dann ist die Zeile weg. Der Hinweis schiebt die Liste hoch, statt Zeilen zu verdecken; 6 s, die gelbe Linie zählt in Schritten.', st: tick, o: { done: 6, static: true, tl: 0.67 } },
+  { cap: '<b>Kein Netz.</b> „Stand 09:12“, Zeilen sagen „wartet auf Netz“ und „Nicht gesendet“. Kein Fehlertext, kein Spinner.', st: off, o: { menu: offMenu } },
+  { cap: '<b>Dunkel.</b> Ink-Grund, Papier-Text, überfällig in Koralle. Folgt dem System.', st: { ...base(), tab: 'next', ctx: 'Alle' }, dark: true },
+  { cap: '<b>Inbox, 150 % Schrift.</b> Mit Tastatur weiterhin fünf ganze Zeilen; die sechste läuft unten aus, die Liste scrollt.', st: fuller(), o: { fieldText: 'Zahnarzt' }, ime: true, fs: 1.5 },
+  { cap: '<b>Nächste, 150 % Schrift.</b> Titel fällt weg, Chips dürfen umbrechen (alle sichtbar), Reiter tragen die Zahl darunter. Abstand zwischen den Reitern bleibt.', st: { ...base(), tab: 'next', ctx: '@computer' }, fs: 1.5 },
+  { cap: '<b>Key abgelehnt.</b> Banner „neu einrichten“ oben, neue Erfassungen „wartet auf Setup“. Kam oben Neues an, während du weiter unten liest: „↑ Neue Todos oben“.', st: setup, o: { banners: keyBanner, newPill: true } },
+  { cap: '<b>Anderes Konto, Kachel-Hinweis.</b> „Altes Konto: 2 nicht gesendet“ mit Verwerfen. Einmalig danach: „Zieh die Kachel + Todo in die erste Reihe“ mit OK.', st: base(), o: { banners: oldAcct, menu: HINT } },
+  { cap: '<b>Ziehen zum Aktualisieren.</b> Auf jeder Liste. Der Kreis des Systems nur während des Ziehens; danach sagt „Stand“, wie frisch die Liste ist.', st: { ...base(), tab: 'waiting' }, o: { pull: true } },
+  { cap: '<span class="opt">Option, braucht Ulis Entscheidung.</span> <b>Schnell klären</b> aus dem Zeilenmenü: Kontext wählen heißt Nächste. Nicht Teil der Basis.', st: { ...base(), ime: false }, option: true },
+]
+
+const CLARIFY = `<div class="scrim"></div><div style="position:absolute;left:0;right:0;bottom:0;z-index:9;background:var(--rw-surface);border-radius:22px 22px 0 0;padding:20px 20px 30px;box-shadow:var(--ar-shadow-xl)">
+  <div class="eyebrow"><span class="slash">//</span><span>Option</span><span class="sep">·</span><span>Schnell klären</span></div>
+  <div style="font-size:20px;font-weight:500;margin:8px 0 14px">Rechnung Druckerei prüfen</div>
+  <div class="eyebrow" style="margin-bottom:8px">Nächste, im Kontext</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">${['@home', '@computer', '@work', '@business'].map((c) => `<span class="chip" style="min-height:44px">${c}</span>`).join('')}</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px"><span class="pill" style="min-height:48px">Warten auf</span><span class="pill" style="min-height:48px">Irgendwann</span><span class="pill" style="min-height:48px;color:var(--rw-mute)">Im Web klären</span></div>
+  </div>`
+
+$('#stills').innerHTML = STILLS.map((s, i) => `<figure class="still${s.option ? ' option' : ''}" style="--s:.72"><div class="dev static"><div class="dev-in"><div class="screen${s.ime ? ' ime' : ''}${s.dark ? ' is-dark' : ''}${s.fs >= 1.5 ? ' fs15' : ''}" style="--fs:${s.fs || 1}" data-still="${i}"></div></div></div><figcaption>${s.cap}</figcaption></figure>`).join('')
+STILLS.forEach((s, i) => {
+  const o = { ...(s.o || {}) }
+  if (s.option) o.menu = CLARIFY
+  document.querySelector(`[data-still="${i}"]`).innerHTML = appScreen(s.st, o)
+})
+
+mount($('#phone'), { home: $('#sHome'), shortcuts: $('#sShortcuts'), shade: $('#sShade'), widgets: $('#sWidgets') }, $('#demo'))
+</script>
+</body>
+</html>
