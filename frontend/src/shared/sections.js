@@ -53,8 +53,11 @@ export function inContext(t, ctx) {
   return contexts.length === 0 || contexts.includes(ctx)
 }
 
-/** Running first, then priority H, then urgency (highest first). */
-const byWeight = (a, b) =>
+/**
+ * Running first, then priority H, then urgency (highest first): the order inside Nächste's
+ * sections, and of Irgendwann and "ohne Liste".
+ */
+export const byWeight = (a, b) =>
   (b.start ? 1 : 0) - (a.start ? 1 : 0) ||
   (b.priority === 'H' ? 1 : 0) - (a.priority === 'H' ? 1 : 0) ||
   (b.urgency || 0) - (a.urgency || 0)

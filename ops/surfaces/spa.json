@@ -2,6 +2,7 @@
   "local_storage_keys": [
     "email",
     "fullName",
+    "outbox",
     "role",
     "theme",
     "token",

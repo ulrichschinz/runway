@@ -23,6 +23,12 @@ const dayParts = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 })
 const weekdayShort = new Intl.DateTimeFormat('de-DE', { timeZone: 'UTC', weekday: 'short' })
+const clock = new Intl.DateTimeFormat('de-DE', {
+  timeZone: SERVER_TZ,
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
 
 /**
  * A Taskwarrior stamp (`20261030T230000Z`) or an ISO 8601 instant as a Date.
@@ -70,6 +76,14 @@ export function plusDays(day, n) {
   d.setUTCDate(d.getUTCDate() + n)
   return d.toISOString().slice(0, 10)
 }
+
+/**
+ * The time of day of an instant in the server's zone, as "Stand 09:41" shows it.
+ *
+ * @param {number|Date} instant ms since the epoch, or a Date
+ * @returns {string} `HH:MM`
+ */
+export const timeOf = (instant) => clock.format(instant)
 
 /** 0 = Sunday … 6 = Saturday. */
 export const weekdayOf = (day) => noon(day).getUTCDay()
