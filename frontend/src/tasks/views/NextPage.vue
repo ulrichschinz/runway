@@ -53,6 +53,13 @@ function chipByKey(k) {
   const c = gtd.contexts[k - 1]
   return c ? { value: c } : null
 }
+/** The palette offers the chips by name; Kontextfilter aufheben only while one is set. */
+const offers = () => Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((k) => {
+  const chip = chipByKey(k)
+  if (!chip) return [`ctx.${k}`, false]
+  if (k === 0) return ['ctx.0', contextFilter.value != null]
+  return [`ctx.${k}`, { c: k === 6 ? t('ctx.none') : chip.value }]
+}))
 const keys = Object.fromEntries(
   [0, 1, 2, 3, 4, 5, 6].map((k) => [`ctx.${k}`, () => {
     const chip = chipByKey(k)
@@ -62,7 +69,7 @@ const keys = Object.fromEntries(
 </script>
 
 <template>
-  <ListFrame :eyebrow="eyebrow" :heading="t('h.next')" :heading-hidden="phone" :sections="sections" :scopes="['next']" :keys="keys">
+  <ListFrame :eyebrow="eyebrow" :heading="t('h.next')" :heading-hidden="phone" :sections="sections" :scopes="['next']" :keys="keys" :offers="offers">
     <template #aside>
       <p v-if="caption" class="caption">{{ caption }}</p>
     </template>

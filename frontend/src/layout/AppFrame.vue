@@ -15,14 +15,28 @@
  * (a todo's detail, plan M7: it takes the margin column's place on wide screens, docks as a 360 px
  * column beside the page at 761-1180 px, and is a sheet from the bottom on the phone; a tap on the
  * sheet's scrim emits `closePanel`).
+ *
+ * The frame also owns what every page has (plan M9): the command palette (⌘K / Ctrl+K, the rail's
+ * foot, "Befehle" in "···"), the `?` sheet, the `/` search (the top line's field on wide screens,
+ * the Mehr sheet on the phone, on a page that shows hits: `searchable`; elsewhere `/` opens the
+ * palette, which finds todos too), and a keymap layer with Gehe zu, Darstellung and Erneut senden, which
+ * the palette offers like every other command. `searchEnter` asks the page to put the cursor on
+ * the first hit.
  */
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { useRouter } from 'vue-router'
+import CommandPalette from './CommandPalette.vue'
 import MarginColumn from './MarginColumn.vue'
 import PhoneDock from './PhoneDock.vue'
 import RailNav from './RailNav.vue'
+import ShortcutsSheet from './ShortcutsSheet.vue'
+import TopLine from './TopLine.vue'
+import { useKeymap } from '../composables/useKeymap.js'
 import { PHONE, WIDE, useMedia, useVisualViewport } from '../composables/useMedia.js'
+import { paletteKeyAction } from '../shared/commands.js'
+import { LISTS, PLACES } from '../shared/navigation.js'
 
-defineProps({
+const props = defineProps({
   /** the route's view (`meta.view`): marks the current rail entry and dock tab */
   view: { type: String, default: null },
   /** `{inbox, next, waiting, projects, someday}`: the numbers rail and dock show */
@@ -39,9 +53,12 @@ defineProps({
   themeChoice: { type: String, default: 'system' },
   /** the accessible name of the `panel` slot's sheet on the phone */
   panelLabel: { type: String, default: '' },
+  /** the page shows `/` search hits (the list pages) */
+  searchable: { type: Boolean, default: false },
 })
-defineEmits(['retry', 'theme', 'signout', 'closePanel'])
+const emit = defineEmits(['retry', 'theme', 'signout', 'closePanel', 'searchEnter'])
 
+const router = useRouter()
 const phone = useMedia(PHONE)
 const wide = useMedia(WIDE)
 const viewport = useVisualViewport()
@@ -50,6 +67,54 @@ const viewport = useVisualViewport()
 const phoneBox = computed(() =>
   phone.value && viewport.value ? { top: `${viewport.value.top}px`, height: `${viewport.value.height}px` } : null,
 )
+
+const palette = ref(false)
+const sheet = ref(false)
+/** Where the focus goes back to when the palette or the sheet closes: captured as the first opens. */
+const returnTo = shallowRef(null)
+
+/** Open the palette or the `?` sheet in place of the other; the focus target stays the first one's. */
+function open(which) {
+  if (!palette.value && !sheet.value) returnTo.value = document.activeElement
+  palette.value = which === 'palette'
+  sheet.value = which === 'sheet'
+}
+const topLine = ref(null)
+const dock = ref(null)
+
+/** `/`: the search field where this page has one, else the palette (it finds todos too). */
+function search() {
+  if (!props.searchable) open('palette')
+  else if (phone.value) dock.value?.openSearch()
+  else topLine.value?.focus()
+}
+
+useKeymap(
+  {
+    ...Object.fromEntries([...LISTS, ...PLACES].map((item) => [`go.${item.key}`, () => router.push(item.to)])),
+    shortcuts: () => open('sheet'),
+    search,
+    'theme.light': () => emit('theme', 'light'),
+    'theme.dark': () => emit('theme', 'dark'),
+    'theme.system': () => emit('theme', 'system'),
+    retry: () => emit('retry'),
+  },
+  [],
+  () => ({ retry: props.failedCount > 0 && { n: props.failedCount } }),
+)
+
+// ⌘K / Ctrl+K from anywhere, also while typing; the open sheet gives way to the palette. A held
+// key's auto-repeat toggles nothing. Closing unmounts the palette, which gives the focus back.
+function onPaletteKey(event) {
+  const action = paletteKeyAction(event)
+  if (!action) return
+  event.preventDefault()
+  if (action !== 'toggle') return
+  if (palette.value) palette.value = false
+  else open('palette')
+}
+onMounted(() => window.addEventListener('keydown', onPaletteKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onPaletteKey))
 </script>
 
 <template>
@@ -57,11 +122,12 @@ const phoneBox = computed(() =>
   <div class="rw frame" :class="{ phone, wide, docked: !phone && !wide && !!$slots.panel }" :style="phoneBox">
     <RailNav
       v-if="!phone" :view="view" :counts="counts" :flags="flags" :stand="stand" :offline="offline"
-      :failed-count="failedCount" :user="user" @retry="$emit('retry')"
+      :failed-count="failedCount" :user="user" @retry="emit('retry')" @palette="open('palette')" @shortcuts="open('sheet')"
     />
     <div class="page">
       <main class="scroll">
         <div class="col">
+          <TopLine v-if="!phone" ref="topLine" :searchable="searchable" :stand="stand" @palette="open('palette')" @enter="emit('searchEnter')" />
           <header class="head">
             <slot name="head" />
             <div v-if="!phone && $slots.chips" class="chips"><slot name="chips" /></div>
@@ -74,8 +140,9 @@ const phoneBox = computed(() =>
         <slot name="capture" />
       </template>
       <PhoneDock
-        v-else :view="view" :counts="counts" :flags="flags" :failed-count="failedCount" :theme-choice="themeChoice"
-        @theme="$emit('theme', $event)" @signout="$emit('signout')" @retry="$emit('retry')"
+        v-else ref="dock" :view="view" :counts="counts" :flags="flags" :failed-count="failedCount" :theme-choice="themeChoice"
+        :searchable="searchable" @theme="emit('theme', $event)" @signout="emit('signout')" @retry="emit('retry')"
+        @palette="open('palette')" @search-enter="emit('searchEnter')"
       >
         <template #notice>
           <div class="notice-region" role="status" aria-live="polite"><slot name="notice" /></div>
@@ -89,9 +156,11 @@ const phoneBox = computed(() =>
       <slot v-else name="margin" />
     </MarginColumn>
     <template v-if="phone && $slots.panel">
-      <div class="scrim" aria-hidden="true" @click="$emit('closePanel')" />
+      <div class="scrim" aria-hidden="true" @click="emit('closePanel')" />
       <section class="sheet" role="dialog" :aria-label="panelLabel"><slot name="panel" /></section>
     </template>
+    <CommandPalette v-if="palette" :return-to="returnTo" @close="palette = false" />
+    <ShortcutsSheet v-if="sheet" :return-to="returnTo" @close="sheet = false" />
   </div>
 </template>
 
@@ -103,7 +172,8 @@ const phoneBox = computed(() =>
 .frame.wide { grid-template-columns: 224px minmax(0, 1fr) 376px; }
 .frame.phone { display: flex; flex-direction: column; bottom: auto; height: 100dvh; }
 .page { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; }
-.scroll { flex: 1; min-height: 0; overflow: auto; padding: 48px 48px 48px; scroll-padding: 80px; }
+/* 06 web.css: the top line sits in the top padding */
+.scroll { flex: 1; min-height: 0; overflow: auto; padding: 22px 48px 48px; scroll-padding: 80px; }
 .col { max-width: 760px; container: page / inline-size; }
 .head { margin-bottom: 22px; }
 .chips { margin-top: 22px; }
