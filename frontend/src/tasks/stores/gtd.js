@@ -30,14 +30,12 @@ import {
   reviewDue as reviewDueRule,
 } from '../../shared/gtdRules.js'
 import { applyOutbox, captureRow, captureText, withSettled } from '../../shared/outboxQueue.js'
-import { byWeight, nextSections } from '../../shared/sections.js'
+import { byWeight, followUpOf, nextSections } from '../../shared/sections.js'
 
 /** Newest first; Taskwarrior stamps sort in time order. */
 const byEntryDesc = (a, b) => (b.entry || '').localeCompare(a.entry || '')
 /** Oldest end first; a done still on its way (no `end` yet) last. */
 const byEndAsc = (a, b) => (a.end || 'Z').localeCompare(b.end || 'Z')
-/** The follow-up day of a waiting todo: `scheduled`, else the `wait` that hides it. */
-const followUpOf = (t) => dayOf(t.scheduled || t.wait)
 /** Soonest follow-up first, then those without one, oldest first. */
 const byFollowUp = (a, b) => {
   const fa = followUpOf(a)

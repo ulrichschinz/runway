@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { NO_CONTEXT } from '../src/shared/contexts.js'
-import { inContext, nextSections, ringOf } from '../src/shared/sections.js'
+import { followUpOf, inContext, nextSections, ringOf, waitingSections } from '../src/shared/sections.js'
 
 const TODAY = '2026-10-31'
 const next = (uuid, extra = {}) => ({ uuid, tags: ['next', '@a'], urgency: 1, ...extra })
@@ -80,5 +80,30 @@ describe('rings', () => {
   it('count the seventh day as Bald and the eighth as Später, in Berlin days', () => {
     expect(ringOf(next('x', { due: '20261107T225959Z' }), TODAY)).toBe('bald')
     expect(ringOf(next('x', { due: '20261107T230000Z' }), TODAY)).toBe('spaeter')
+  })
+})
+
+describe('Warten auf sections', () => {
+  const w = (uuid, extra = {}) => ({ uuid, tags: ['waiting'], ...extra })
+
+  it('reads the follow-up from scheduled, else from the wait that hides the todo', () => {
+    expect(followUpOf(w('a', { scheduled: '20261102T230000Z', wait: '20261110T230000Z' }))).toBe('2026-11-03')
+    expect(followUpOf(w('b', { wait: '20261103T230000Z' }))).toBe('2026-11-04')
+    expect(followUpOf(w('c'))).toBe(null)
+  })
+
+  it('splits into Nachhaken (day has come), this week (seven days) and later or without a day, keeping order', () => {
+    const tasks = [
+      w('yesterday', { scheduled: '20261029T230000Z' }),
+      w('none'),
+      w('today', { scheduled: '20261030T230000Z' }),
+      w('in7', { scheduled: '20261106T230000Z' }),
+      w('in8', { scheduled: '20261107T230000Z' }),
+      w('tomorrow', { wait: '20261031T230000Z' }),
+    ]
+    const s = waitingSections(tasks, TODAY)
+    expect(s.due.map((t) => t.uuid)).toEqual(['yesterday', 'today'])
+    expect(s.soon.map((t) => t.uuid)).toEqual(['in7', 'tomorrow'])
+    expect(s.later.map((t) => t.uuid)).toEqual(['none', 'in8'])
   })
 })
