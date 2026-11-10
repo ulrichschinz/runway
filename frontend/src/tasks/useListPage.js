@@ -1,7 +1,9 @@
 import { nextTick, ref, toValue, watch } from 'vue'
 import { useKeymap } from '../composables/useKeymap.js'
+import { readyBead } from '../layout/lens/useBeadFlight.js'
 import { moveLabel } from '../shared/clarify.js'
 import { visibleCursor } from '../shared/commands.js'
+import { countsAsPlanned } from '../shared/dayProgress.js'
 import { NeedsAnswer, listOf, planPayload } from '../shared/gtdRules.js'
 import { t } from '../shared/i18n.js'
 import { notice, showNotice, undoNotice } from './notice.js'
@@ -79,9 +81,10 @@ export function useListPage({
    * @param {'done'|'delete'|'filed'} how
    * @param {() => object|null} write the store action; its op, or null when nothing was sent
    * @param {string} text the notice, through `t()`
+   * @param {() => void} [onUndo] also run on Rückgängig (the bead's flight is called back)
    * @returns {object|null} the op
    */
-  function leave(uuid, how, write, text) {
+  function leave(uuid, how, write, text, onUndo = null) {
     const ids = visibleIds()
     const i = ids.indexOf(uuid)
     const focused = document.activeElement?.closest?.('[data-row]')?.dataset.row === uuid
@@ -96,14 +99,28 @@ export function useListPage({
       cursor.value = [...ids.slice(i + 1), ...ids.slice(0, i).reverse()].find((id) => now.includes(id)) ?? null
       if (focused) focusRow(cursor.value)
     })
-    showNotice(text, () => gtd.undo(op))
+    showNotice(text, () => {
+      onUndo?.()
+      return gtd.undo(op)
+    })
     return op
   }
 
-  /** Tick off ('done') or delete a todo. */
+  /**
+   * Tick off ('done') or delete a todo. A todo that counts for today sends the bead from its ring
+   * into the Tageslinse (plan M11), decided before the row leaves and launched once the hold is
+   * stored; the level it rises to is the store's progress when it lands. Rückgängig while it flies
+   * calls it back, so nothing lands for a tick that was taken back.
+   */
   function finish(uuid, how) {
+    const task = how === 'done' ? rows.value.find((x) => x.uuid === uuid) : null
+    const bead = task && gtd.today
+      ? readyBead(rowEl(uuid)?.querySelector('.tick'), countsAsPlanned(task, gtd.today))
+      : null
     const write = how === 'delete' ? () => gtd.remove(uuid) : () => gtd.complete(uuid)
-    leave(uuid, how, write, t(how === 'delete' ? 'notice.deleted' : 'notice.done'))
+    let flight = null
+    const op = leave(uuid, how, write, t(how === 'delete' ? 'notice.deleted' : 'notice.done'), () => flight?.cancel())
+    if (op && bead) flight = bead(() => gtd.progress?.level ?? 0)
   }
 
   /** `m` then `n` / `w` / `v`: another list; a move that needs an answer opens the detail asking it. */

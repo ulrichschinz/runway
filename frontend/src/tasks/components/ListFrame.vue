@@ -15,7 +15,7 @@
  * Exposes `cursor`, `select`, `leave` (`useListPage`), `open`, `detailOpen` and `searching`, so a page's panel acts on the cursor row
  * the way the rows do. Emits `closePanel` when the page's panel should close (`Esc`, the scrim).
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppFrame from '../../layout/AppFrame.vue'
 import NoticeBar from '../../layout/NoticeBar.vue'
 import EmptyState from '../../layout/ui/EmptyState.vue'
@@ -31,7 +31,10 @@ import { useListPage } from '../useListPage.js'
 import { searchSections } from '../useTaskSearch.js'
 import CaptureLine from './CaptureLine.vue'
 import SectionList from './SectionList.vue'
-import TaskDetail from './TaskDetail.vue'
+
+// The detail is a chunk of its own, fetched when a todo is first opened (brief 0058: the entry's
+// 130 kB budget while both UIs ship, after M11 added the Tageslinse).
+const TaskDetail = defineAsyncComponent(() => import('./TaskDetail.vue'))
 
 const props = defineProps({
   /** the eyebrow's parts after the `//` */
@@ -183,6 +186,7 @@ defineExpose({
         <div class="text">
           <EyebrowLine :parts="eyebrow" />
           <PageHeading :parts="heading" :class="{ sr: headingHidden }" />
+          <slot name="byline" />
         </div>
         <slot name="aside" />
       </div>

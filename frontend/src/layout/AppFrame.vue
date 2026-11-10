@@ -21,11 +21,12 @@
  * the Mehr sheet on the phone, on a page that shows hits: `searchable`; elsewhere `/` opens the
  * palette, which finds todos too), and a keymap layer with Gehe zu, Darstellung and Erneut senden, which
  * the palette offers like every other command. `searchEnter` asks the page to put the cursor on
- * the first hit.
+ * the first hit. It holds the Tageslinse's bead overlay (plan M11, `lens/BeadFlight.vue`).
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import CommandPalette from './CommandPalette.vue'
+import BeadFlight from './lens/BeadFlight.vue'
 import MarginColumn from './MarginColumn.vue'
 import PhoneDock from './PhoneDock.vue'
 import RailNav from './RailNav.vue'
@@ -161,6 +162,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPaletteKey))
     </template>
     <CommandPalette v-if="palette" :return-to="returnTo" @close="palette = false" />
     <ShortcutsSheet v-if="sheet" :return-to="returnTo" @close="sheet = false" />
+    <BeadFlight />
   </div>
 </template>
 

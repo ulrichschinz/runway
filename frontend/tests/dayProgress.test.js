@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { countsAsPlanned, dayProgress, lensCaption } from '../src/shared/dayProgress.js'
+import { countsAsPlanned, dayProgress, lensCaption, lensCaptionParts } from '../src/shared/dayProgress.js'
 import { applyPayload, contextPayload, listPayload, planPayload } from '../src/shared/gtdRules.js'
 
 const TODAY = '2026-10-31'
@@ -109,5 +109,11 @@ describe('a todo outside the plan', () => {
       expect(state.done.at(-1).plannedAtHold, tags.join()).toBe(false)
       expect(counts(dayProgress(state.open, state.done, TODAY)), tags.join()).toEqual([before[0], before[1], 1])
     }
+  })
+
+  it('splits into the count and the extra part, so a narrow head can wrap the second (plan M11)', () => {
+    expect(lensCaptionParts({ done: 3, total: 7, extra: 1 })).toEqual(['3 von 7 heute', ' · 1 zusätzlich'])
+    expect(lensCaptionParts({ done: 3, total: 7, extra: 0 })).toEqual(['3 von 7 heute', ''])
+    expect(lensCaptionParts({ done: 3, total: 7, extra: 1 }).join('')).toBe(lensCaption({ done: 3, total: 7, extra: 1 }))
   })
 })

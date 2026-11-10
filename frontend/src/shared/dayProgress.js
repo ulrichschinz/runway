@@ -59,6 +59,18 @@ export function dayProgress(open, doneToday, today) {
  * @returns {string} `3 von 7 heute · 1 zusätzlich`
  */
 export function lensCaption(p, { short = false } = {}) {
+  return lensCaptionParts(p, { short }).join('')
+}
+
+/**
+ * The caption in its two parts, so a narrow head can wrap the second onto its own line (plan
+ * M11, judge point 3: `3 von 7 heute` / `· 1 zusätzlich`, never `+1`).
+ *
+ * @param {{done: number, total: number, extra: number}} p
+ * @param {{short?: boolean}} [opts]
+ * @returns {[string, string]} the count and the extra part ('' without extra)
+ */
+export function lensCaptionParts(p, { short = false } = {}) {
   const base = t(short ? 'lens.short' : 'lens.cap', { done: p.done, total: p.total })
-  return p.extra ? base + t('lens.extra', { n: p.extra }) : base
+  return [base, p.extra ? t('lens.extra', { n: p.extra }) : '']
 }
