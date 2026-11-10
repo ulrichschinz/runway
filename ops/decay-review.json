@@ -26,7 +26,7 @@
         "current": 2,
         "delta": 0,
         "previous": 2,
-        "prior_reviews": 1,
+        "prior_reviews": 2,
         "since": "2026-08-30"
       }
     },
@@ -92,23 +92,25 @@
         "current": 40,
         "delta": 0,
         "previous": 40,
-        "prior_reviews": 1,
+        "prior_reviews": 2,
         "since": "2026-08-30"
       }
     },
     {
       "commit_cap": 15,
-      "commits_considered": 32,
-      "commits_in_window": 60,
+      "commits_considered": 48,
+      "commits_in_window": 92,
       "does_not_cover": "co-change is correlation over commits, and this repository's commits are plan steps. It cannot distinguish two files that belong together from two files that were edited on the same afternoon, and it says nothing at all about files that change rarely.",
       "findings": [
+        "backend/app/dependencies.py and backend/app/routers/auth.py changed together in 3 commits but live in be/di and be/routers",
+        "docs/operations.md and ops/deploy/docker-compose.yml changed together in 3 commits but live in docs and ops",
         "frontend/index.html and frontend/src/components/AppShell.vue changed together in 3 commits but live in ops and fe/layout"
       ],
       "min_commits": 3,
       "name": "co-change",
       "pairs": [
         {
-          "commits": 7,
+          "commits": 9,
           "explained_by": "the meta-rule and the task-interface agreement rules",
           "files": [
             "docs/operations.md",
@@ -120,7 +122,19 @@
           ]
         },
         {
-          "commits": 5,
+          "commits": 7,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/plan/STATUS.md",
+            "rules/ledger.yaml"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 7,
           "explained_by": "the meta-rule and the task-interface agreement rules",
           "files": [
             "docs/task-interface.md",
@@ -132,11 +146,35 @@
           ]
         },
         {
-          "commits": 5,
+          "commits": 6,
           "explained_by": "the meta-rule and the task-interface agreement rules",
           "files": [
             "docs/task-interface.md",
             "tools/fixtures/negative.sh"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 5,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            ".github/workflows/deploy.yml",
+            "docs/operations.md"
+          ],
+          "units": [
+            "ops",
+            "docs"
+          ]
+        },
+        {
+          "commits": 5,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "AGENTS.md",
+            "rules/ledger.yaml"
           ],
           "units": [
             "docs",
@@ -160,6 +198,18 @@
           "explained_by": "the meta-rule and the task-interface agreement rules",
           "files": [
             "docs/operations.md",
+            "rules/waivers.yaml"
+          ],
+          "units": [
+            "docs",
+            "ops"
+          ]
+        },
+        {
+          "commits": 4,
+          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "files": [
+            "docs/operations.md",
             "tools/checks/profiles.conf"
           ],
           "units": [
@@ -171,8 +221,8 @@
           "commits": 4,
           "explained_by": "the meta-rule and the task-interface agreement rules",
           "files": [
-            "docs/plan/STATUS.md",
-            "rules/ledger.yaml"
+            "docs/operations.md",
+            "tools/fixtures/negative.sh"
           ],
           "units": [
             "docs",
@@ -193,22 +243,22 @@
         },
         {
           "commits": 3,
-          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "explained_by": null,
           "files": [
-            ".github/workflows/deploy.yml",
-            "docs/operations.md"
+            "backend/app/dependencies.py",
+            "backend/app/routers/auth.py"
           ],
           "units": [
-            "ops",
-            "docs"
+            "be/di",
+            "be/routers"
           ]
         },
         {
           "commits": 3,
-          "explained_by": "the meta-rule and the task-interface agreement rules",
+          "explained_by": null,
           "files": [
-            "AGENTS.md",
-            "rules/ledger.yaml"
+            "docs/operations.md",
+            "ops/deploy/docker-compose.yml"
           ],
           "units": [
             "docs",
@@ -219,19 +269,7 @@
           "commits": 3,
           "explained_by": "the meta-rule and the task-interface agreement rules",
           "files": [
-            "docs/operations.md",
-            "rules/waivers.yaml"
-          ],
-          "units": [
-            "docs",
-            "ops"
-          ]
-        },
-        {
-          "commits": 3,
-          "explained_by": "the meta-rule and the task-interface agreement rules",
-          "files": [
-            "docs/operations.md",
+            "docs/plan/STATUS.md",
             "tools/fixtures/negative.sh"
           ],
           "units": [
@@ -264,33 +302,26 @@
           ]
         }
       ],
-      "summary": "13 cross-unit pair(s) at >= 3 commits, 1 of them not explained by a declared coupling",
+      "summary": "16 cross-unit pair(s) at >= 3 commits, 3 of them not explained by a declared coupling",
       "window_days": 365
     },
     {
       "does_not_cover": "an exception that was never written down. Nothing detects a decision that was made and not registered; that is what the registers are for.",
       "findings": [
-        "WAIVER-TYPE-001 expires on 2026-11-04, in 66 day(s): decide now, because on that date it stops the gate",
-        "SHIM-SEC-006 expires on 2026-11-25, in 87 day(s): decide now, because on that date it stops the gate"
+        "SHIM-SEC-006 expires on 2026-11-25, in 15 day(s): decide now, because on that date it stops the gate",
+        "WAIVER-SEC-003 expires on 2027-01-31, in 82 day(s): decide now, because on that date it stops the gate"
       ],
       "horizon_days": 93,
       "inventory": [
         {
-          "days": 66,
-          "expires": "2026-11-04",
-          "id": "WAIVER-TYPE-001",
-          "kind": "waiver",
-          "owner": "maintainer"
-        },
-        {
-          "days": 87,
+          "days": 15,
           "expires": "2026-11-25",
           "id": "SHIM-SEC-006",
           "kind": "shim",
           "owner": "maintainer"
         },
         {
-          "days": 154,
+          "days": 82,
           "expires": "2027-01-31",
           "id": "WAIVER-SEC-003",
           "kind": "waiver",
@@ -303,11 +334,12 @@
         "note": "The plan names a quarantine inventory alongside the waiver and shim registers. This repository never built one: the ratchet that occupies that role is the cycle inventory in architecture.toml `known_cycles`, reported above, and it carries no expiry date \u2014 only a teardown path."
       },
       "resolved_waivers": [
+        "WAIVER-TYPE-001",
         "WAIVER-OPS-001",
         "WAIVER-SEC-002",
         "WAIVER-SEC-001"
       ],
-      "summary": "3 dated exception(s): 0 expired, 2 inside the 93-day horizon"
+      "summary": "2 dated exception(s): 0 expired, 2 inside the 93-day horizon"
     },
     {
       "blind_spots": [
@@ -321,39 +353,39 @@
       ],
       "counts": {
         "blind_spots": 7,
-        "edges": 826,
-        "files": 244,
-        "nodes": 555
+        "edges": 1151,
+        "files": 317,
+        "nodes": 730
       },
       "does_not_cover": "whether the extractors are right. Every number here is produced by the thing being measured; RULE-IDX-003's qualification suite is what tests the extractors against known answers, and a drift both would share is invisible to both.",
       "edge_evidence_classes": {
-        "CONFIG_CONFIRMED": 81,
-        "CONTRACT_DECLARED": 278,
-        "STATIC_CONFIRMED": 467
+        "CONFIG_CONFIRMED": 100,
+        "CONTRACT_DECLARED": 359,
+        "STATIC_CONFIRMED": 692
       },
       "edge_kinds": {
-        "CALLS": 145,
-        "DEFINES": 133,
-        "DEPENDS_ON": 26,
-        "DERIVES_TOOL": 32,
-        "EXPOSES": 32,
-        "GOVERNED_BY": 23,
-        "IMPORTS": 116,
-        "INJECTS": 47,
-        "OWNS": 244,
+        "CALLS": 225,
+        "DEFINES": 192,
+        "DEPENDS_ON": 27,
+        "DERIVES_TOOL": 40,
+        "EXPOSES": 40,
+        "GOVERNED_BY": 82,
+        "IMPORTS": 127,
+        "INJECTS": 58,
+        "OWNS": 317,
         "RUNS": 2,
-        "TESTED_BY": 26
+        "TESTED_BY": 41
       },
       "findings": [],
       "freshness": "current",
       "name": "index-quality",
       "node_evidence_classes": {
-        "CONFIG_CONFIRMED": 44,
-        "CONTRACT_DECLARED": 118,
-        "STATIC_CONFIRMED": 393
+        "CONFIG_CONFIRMED": 52,
+        "CONTRACT_DECLARED": 144,
+        "STATIC_CONFIRMED": 534
       },
       "schema_version": "1.0.0",
-      "summary": "555 nodes, 826 edges, 244 files, 7 blind spots, index current",
+      "summary": "730 nodes, 1151 edges, 317 files, 7 blind spots, index current",
       "unowned_tracked_files": []
     },
     {
@@ -365,7 +397,7 @@
         },
         {
           "assertion": "every answer carries an index revision and a freshness verdict",
-          "detail": "index_revision=81edfbbd freshness=current",
+          "detail": "index_revision=27d98802 freshness=current",
           "passed": true
         },
         {
@@ -390,12 +422,12 @@
         },
         {
           "assertion": "step 3 \u2014 the protecting tests are named, and unprotected files are listed",
-          "detail": "5 test edge(s)",
+          "detail": "12 test edge(s)",
           "passed": true
         },
         {
           "assertion": "step 3 \u2014 an end-to-end path exists from a REST route to the adapter",
-          "detail": "17 path(s)",
+          "detail": "22 path(s)",
           "passed": true
         },
         {
@@ -415,18 +447,18 @@
         },
         {
           "assertion": "inside the time budget",
-          "detail": "0.085s of 5.0s",
+          "detail": "0.12s of 5.0s",
           "passed": true
         }
       ],
       "does_not_cover": "the agent. It does not run a session, so it cannot show that an agent queried the index instead of grepping (RISK-DOC-001), cannot compare the result against a grep/manual baseline, cannot judge whether the contract was read or the Delivery Pattern chosen, and covers one change request rather than the three the plan requires. It also carries this session's toolchain rather than a cold one. All of that is 16d.",
-      "elapsed_seconds": 0.085,
+      "elapsed_seconds": 0.12,
       "findings": [],
       "name": "cold-agent-change-reduced",
       "queries": 4,
       "scenario": "Add a field to the response of the task-update endpoint \u2014 a public-surface change to backend/app/routers/tasks.py.",
       "suite_version": "1.0.0",
-      "summary": "12/12 assertions, 4 queries, 0.085s"
+      "summary": "12/12 assertions, 4 queries, 0.12s"
     }
   ],
   "findings": [
@@ -436,25 +468,33 @@
     },
     {
       "check": "co-change",
+      "message": "backend/app/dependencies.py and backend/app/routers/auth.py changed together in 3 commits but live in be/di and be/routers"
+    },
+    {
+      "check": "co-change",
+      "message": "docs/operations.md and ops/deploy/docker-compose.yml changed together in 3 commits but live in docs and ops"
+    },
+    {
+      "check": "co-change",
       "message": "frontend/index.html and frontend/src/components/AppShell.vue changed together in 3 commits but live in ops and fe/layout"
     },
     {
       "check": "expiries",
-      "message": "WAIVER-TYPE-001 expires on 2026-11-04, in 66 day(s): decide now, because on that date it stops the gate"
+      "message": "SHIM-SEC-006 expires on 2026-11-25, in 15 day(s): decide now, because on that date it stops the gate"
     },
     {
       "check": "expiries",
-      "message": "SHIM-SEC-006 expires on 2026-11-25, in 87 day(s): decide now, because on that date it stops the gate"
+      "message": "WAIVER-SEC-003 expires on 2027-01-31, in 82 day(s): decide now, because on that date it stops the gate"
     }
   ],
-  "generated_at": "2026-08-30",
-  "index_revision": "81edfbbd2db7b98aae382428a73a346dce4bf4da",
-  "index_sources_sha256": "21db4cd4e3ea236e44916d22e299aee8fe281dcf19f8bfc8e0447a6826a2bfaa",
+  "generated_at": "2026-11-10",
+  "index_revision": "27d98802ab5337419725636b273de78d6cc6e1ea",
+  "index_sources_sha256": "1650d3855eded700fb0392a7bbe25d06746143e49b838e00db2348859ce1682f",
   "overdue_after_days": 45,
-  "prior_reviews": 1,
+  "prior_reviews": 2,
   "repo_dirty": false,
-  "repo_revision": "81edfbbd2db7b98aae382428a73a346dce4bf4da",
-  "report_sha256": "7d67c068dc8331962c8e9f169ea01940f2cd079bd77f3bbcfa0f21b01c0d8748",
+  "repo_revision": "27d98802ab5337419725636b273de78d6cc6e1ea",
+  "report_sha256": "30b822e385cfcb444cdf098a74641a9afdaf79d02ec07a4a282a060fe2810931",
   "result": "attention",
   "review_period_days": 31,
   "schema": 1
