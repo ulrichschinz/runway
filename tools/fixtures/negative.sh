@@ -655,14 +655,20 @@ expect_red "RULE-001" "tools/checks/contract.sh" "RULE-RULE-001"
 #
 # The whole point of an expiry: when the date passes, the gate stops. A waiver without a
 # working expiry is a permanent exception wearing a temporary label.
+#
+# Whichever active waiver comes first, not a named one: resolved entries carry no `expires`,
+# so the first date in the file is a live waiver's. Anchoring on one waiver's date broke this
+# arm the day that waiver was resolved (brief 0056).
 python3 - "$SANDBOX/rules/waivers.yaml" <<'PATCH'
 import pathlib
+import re
 import sys
 
 p = pathlib.Path(sys.argv[1])
 t = p.read_text()
-assert "expires: 2026-11-04" in t, "expiry target not found in waivers.yaml"
-p.write_text(t.replace("expires: 2026-11-04", "expires: 2020-01-01", 1))
+pattern = re.compile(r"^(\s+expires: )\d{4}-\d{2}-\d{2}$", re.M)
+assert pattern.search(t), "no active waiver with an expiry in waivers.yaml"
+p.write_text(pattern.sub(r"\g<1>2020-01-01", t, count=1))
 PATCH
 expect_red "RULE-002" "tools/checks/contract.sh" "RULE-RULE-002"
 

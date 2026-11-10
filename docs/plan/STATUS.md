@@ -277,13 +277,13 @@ One unimplemented command remains, exiting `3` and naming its step: `rebuild-ver
 
 ## 5. Open debt with dates on it
 
-**Two waivers expire 2026-11-04**, and one shim expires 2026-11-25. When that date passes, `RULE-RULE-002` stops the gate
-until each is resolved or deliberately re-approved:
+**Both waivers that expired 2026-11-04 are resolved**, and one shim expires 2026-11-25. When that date passes,
+`RULE-RULE-002` stops the gate until it is resolved or deliberately re-approved:
 
 | Waiver | Finding | Resolved by |
 |---|---|---|
-| `WAIVER-OPS-001` | migrations swallow every exception | Step 15 |
-| `WAIVER-TYPE-001` | unchecked `Row \| None` in two handlers — a reachable 500 on `/auth/me` | its own step |
+| ~~`WAIVER-OPS-001`~~ | migrations swallow every exception | Step 15b, 2026-08-28 ([brief 0019](../briefs/0019-narrowing-the-migration-except.md)) |
+| ~~`WAIVER-TYPE-001`~~ | unchecked `Row \| None` in two handlers — a reachable 500 on `/auth/me` | 2026-11-10 ([brief 0056](../briefs/0056-a-vanished-user-gets-401.md)) — a vanished account now gets 401 |
 
 Thirty-nine residual risks are recorded in `rules/ledger.yaml`. The ones that shape decisions:
 
@@ -375,8 +375,8 @@ Four things are queued behind it, none blocking, in the order they should be tak
 1. ~~**The lock-drift rule**~~ — done 2026-09-19: `RULE-DEP-005`, [ADR 0034](../adr/0034-the-lock-must-match-the-intent.md),
    [brief 0027](../briefs/0027-the-lock-must-match-the-intent.md). A Dependabot pip PR now goes red until
    `./run lock` is run on its branch.
-2. **`WAIVER-TYPE-001`**, expiring 2026-11-04 — an unchecked `Row | None` reaching a 500 on `/auth/me`.
-   Small enough that fixing it beats renewing it.
+2. ~~**`WAIVER-TYPE-001`**~~ — done 2026-11-10, [brief 0056](../briefs/0056-a-vanished-user-gets-401.md):
+   `GET /auth/me` and every other guarded route answer 401 for a token whose account is gone.
 3. **`SHIM-SEC-006`**, expiring 2026-11-25 — decide from `audit.db`, counting only rows written after the
    2026-09-18 deploy, for the reason in the banner.
 

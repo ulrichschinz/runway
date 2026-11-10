@@ -125,46 +125,32 @@ waivers:
       existing agents and MCP clients authenticate with keys that were issued in cleartext
       and cannot be re-derived.
 
-  - id: WAIVER-TYPE-001
-    class: scheduled_remediation
-    rule: "mypy index — Value of type 'Row | None' is not indexable"
-    scope: "backend/app/routers/auth.py (GET /auth/me), backend/app/routers/admin.py (PUT /admin/users/{target}/role)"
-    finding: "NEW — not present in the Phase 0 baseline; found by mypy in Step 2"
-    reason: >
-      Both handlers index the result of aiosqlite fetchone() without checking for None.
-      In GET /auth/me this is reachable: a user authenticated by a still-valid JWT whose
-      row has since been deleted produces a TypeError and a 500. In the admin handler the
-      row was checked and updated on the same connection, so None is not reachable in
-      practice, but the types do not prove it.
-    alternatives_evaluated: >
-      Fixing it here was rejected: the correct behaviour for "authenticated user no
-      longer exists" is a status-code decision on a hard-promise public surface (401 vs
-      404 vs 500), and F2 requires surface changes to go through the migration pattern.
-      Relaxing the mypy configuration was rejected because it would hide the whole class
-      of finding, which is the one thing the type checker was added to catch.
-    risk: >
-      Low. A 500 instead of a clean 401 on a rare race. No data loss, no authorisation
-      bypass — the request is already authenticated when it fails.
-    mitigation: >
-      None needed at this severity. `warn_unused_ignores` is enabled, so the suppressions
-      self-report as stale the moment the code is fixed.
-    owner: maintainer
-    approver: maintainer
-    approved_on: 2026-08-04
-    approval_reference: "discovered during Step 2; recorded rather than fixed silently"
-    expires: 2026-11-04
-    re_open_trigger: >
-      Step 3 characterization tests reach these handlers, or a 500 is observed in
-      production on /auth/me, or the expiry date passes
-    resolution: >
-      Decide the status code for the missing-user state, apply it under the
-      Public-Surface Migration pattern with a regression test, and delete the ignores.
-
 # Resolved waivers. Kept rather than deleted: briefs and decision records cite these ids,
 # and RULE-DOC-004 resolves every identifier a record names. Deleting the entry would make
 # a truthful historical document fail the gate, and editing the document to match would
 # falsify the history it exists to preserve.
 resolved:
+  - id: WAIVER-TYPE-001
+    finding: "NEW — mypy in Step 2: Value of type 'Row | None' is not indexable"
+    was: >
+      GET /auth/me (backend/app/routers/auth.py) and PUT /admin/users/{target}/role
+      (backend/app/routers/admin.py) indexed the result of aiosqlite fetchone() without
+      checking for None, with seven `# type: ignore[index]` suppressions. In GET /auth/me it
+      was reachable: a still-valid JWT whose account row had been deleted produced a
+      TypeError and a 500. Fixing it meant choosing a status on a public surface, so it was
+      recorded rather than patched, and it expired on 2026-11-04 with the choice still open.
+    resolved_on: 2026-11-10
+    resolved_by: >
+      The owner decided 401: the token's user is gone, so the caller is not authenticated
+      and the client logs in again. The check sits where authentication is decided —
+      get_current_user now confirms that a decoded JWT names an existing account, as both
+      API-key shapes already did — so every guarded route answers the vanished account the
+      same way, not only /auth/me. `me` answers the remaining race with the same 401;
+      set_user_role answers its unreachable None with the 404 it already gives a missing
+      target. All seven suppressions are gone and mypy passes without them. Pinned by
+      TestVanishedAccount in backend/tests/unit/test_auth.py, written first and watched fail.
+    evidence: docs/briefs/0056-a-vanished-user-gets-401.md
+
   - id: WAIVER-OPS-001
     finding: SEC-10
     was: >

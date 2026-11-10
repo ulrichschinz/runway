@@ -132,12 +132,14 @@ async def set_user_role(
         "SELECT username, role, full_name, email FROM users WHERE username=?", (target,)
     ) as cur:
         r = await cur.fetchone()
-    # WAIVER-TYPE-001: the row's existence was checked above and it was just updated on
-    # the same connection, so None is not reachable in practice — but it is not proven
-    # by the types either. Left as-is with the rest of the family.
+    # The row was checked above and just updated on the same connection, so None is not
+    # reachable in practice; the check is what lets the types prove it (brief 0056). Should
+    # it ever happen, the answer is the one this handler already gives for a missing target.
+    if r is None:
+        raise HTTPException(status_code=404, detail="User not found")
     return UserInfo(
-        username=r["username"],  # type: ignore[index]
-        role=r["role"] or "user",  # type: ignore[index]
-        full_name=r["full_name"] or "",  # type: ignore[index]
-        email=r["email"] or "",  # type: ignore[index]
+        username=r["username"],
+        role=r["role"] or "user",
+        full_name=r["full_name"] or "",
+        email=r["email"] or "",
     )

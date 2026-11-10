@@ -115,6 +115,41 @@ class TestAuthenticationPaths:
         assert client.get("/auth/me", headers=headers).status_code == 401
 
 
+def _delete_account(username: str) -> None:
+    """Remove a user's row behind the API's back, the way an operator on the host would."""
+    con = sqlite3.connect(settings.db_path)
+    con.execute("DELETE FROM users WHERE username=?", (username,))
+    con.commit()
+    con.close()
+
+
+class TestVanishedAccount:
+    """A JWT outlives the account it names: it is signed, not looked up. Until brief 0056
+    GET /auth/me answered such a token with a 500 (WAIVER-TYPE-001), and every other route
+    accepted it as if the account still existed. The decision is 401: the token's user is
+    gone, so the caller is not authenticated, and the client logs in again."""
+
+    def test_auth_me_is_401_for_a_valid_jwt_whose_account_is_gone(self, client, registered, auth):
+        _delete_account(registered["username"])
+        r = client.get("/auth/me", headers=auth)
+        assert r.status_code == 401
+        assert r.json()["detail"] == "Not authenticated"
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [("GET", "/tasks"), ("GET", "/gtd/next"), ("GET", "/auth/apikey"), ("PUT", "/auth/me")],
+    )
+    def test_every_user_route_refuses_the_same_token(self, client, registered, auth, method, path):
+        _delete_account(registered["username"])
+        r = client.request(method, path, headers=auth, json={} if method == "PUT" else None)
+        assert r.status_code == 401
+
+    def test_admin_routes_say_401_not_403(self, client, registered, auth):
+        """Not "you are not an admin" — there is no "you" any more."""
+        _delete_account(registered["username"])
+        assert client.get("/admin/users", headers=auth).status_code == 401
+
+
 class TestProfile:
     def test_updates_only_the_supplied_fields(self, client, auth):
         client.put("/auth/me", json={"full_name": "Alice A"}, headers=auth)

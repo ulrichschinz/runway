@@ -122,15 +122,16 @@ async def me(username: str = Depends(get_current_user), db: Connection = Depends
         "SELECT role, full_name, email FROM users WHERE username=?", (username,)
     ) as cur:
         row = await cur.fetchone()
-    # WAIVER-TYPE-001: fetchone() may return None if the user disappeared between
-    # authentication and this query, and the code below would raise TypeError -> 500.
-    # Choosing the correct status for that state changes a hard-promise public surface,
-    # so it needs its own step with tests rather than a drive-by fix here.
+    # get_current_user already refuses a token whose account is gone; this is the narrow race
+    # in which the row disappears after that check. Same answer: the caller is no longer
+    # anyone (brief 0056).
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return UserInfo(
         username=username,
-        role=row["role"] or "user",  # type: ignore[index]
-        full_name=row["full_name"] or "",  # type: ignore[index]
-        email=row["email"] or "",  # type: ignore[index]
+        role=row["role"] or "user",
+        full_name=row["full_name"] or "",
+        email=row["email"] or "",
     )
 
 

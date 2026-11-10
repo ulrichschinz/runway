@@ -27,7 +27,11 @@ Two credentials reach the same principal, checked in this order by `get_current_
 1. **`X-Api-Key`** — matched against the `api_key` column. Checked **first**, before any
    token work, which is why rotating `JWT_SECRET` does not disturb agents, MCP clients or
    automations, and why an account locked out of password login can still be used by them.
-2. **`Authorization: Bearer <jwt>`** — signed with `JWT_SECRET`, `HS256`, 24h.
+2. **`Authorization: Bearer <jwt>`** — signed with `JWT_SECRET`, `HS256`, 24h. A valid
+   signature is not enough: the account the token names must still exist, or the request
+   gets the same **401** as no credential at all, on every route. A token outlives the row
+   it was issued for; until 2026-11-10 it kept working everywhere except `GET /auth/me`,
+   which answered 500 (`WAIVER-TYPE-001`, [brief 0056](briefs/0056-a-vanished-user-gets-401.md)).
 3. **`Authorization: Bearer <api_key>`** — an API key in the Bearer slot, tried last, only
    after a JWT decode fails. This is `SHIM-SEC-006`, not a design: it is the shape `/inbox`
    used before it was unified onto `get_current_user` (finding SEC-6), kept because every
