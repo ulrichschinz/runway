@@ -343,6 +343,13 @@ describe('applyOutbox: the snapshot as the user should see it', () => {
     expect(applyOutbox(snapshot(), enqueue([], cleared)).tasks[1]).toMatchObject({ description: 'Idee', priority: null })
   })
 
+  it('patches the dependencies a PUT sends as the complete list', () => {
+    const op = createOp('put', { uuid: 'u-idee', body: { depends: ['u-vermieter'] } }, meta())
+    expect(applyOutbox(snapshot(), enqueue([], op)).tasks[1].depends).toEqual(['u-vermieter'])
+    const cleared = createOp('put', { uuid: 'u-idee', body: { depends: [] } }, meta())
+    expect(applyOutbox({ ...snapshot(), tasks: [{ ...inboxTodo(), depends: ['x'] }] }, enqueue([], cleared)).tasks[0].depends).toEqual([])
+  })
+
   it('adds an unsent capture to the Inbox with its note', () => {
     const op = createOp('capture', { description: 'Milch', note: 'fettarm' }, meta(T0))
     const failed = fail(begin(enqueue([], op), op.id), op.id, { reason: 'network' })

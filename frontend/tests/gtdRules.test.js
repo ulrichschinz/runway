@@ -14,6 +14,7 @@ import {
   listPayload,
   planPayload,
   reviewDue,
+  tagPayload,
 } from '../src/shared/gtdRules.js'
 import { allTagParts } from '../src/shared/contextTags.js'
 
@@ -233,5 +234,26 @@ describe('reviewDue', () => {
   it('is never due before today is known', () => {
     expect(reviewDue(null, null)).toBe(false)
     expect(reviewDue('20261001T100000Z', null)).toBe(false)
+  })
+})
+
+describe('tagPayload: one tag on or off, as a delta', () => {
+  it('adds a tag the todo does not carry, and removes one it does', () => {
+    expect(tagPayload(todo({ tags: ['next', '@home'] }), 'büro-2026')).toEqual({ tags_add: ['büro-2026'] })
+    expect(tagPayload(todo({ tags: ['next', 'büro-2026'] }), 'büro-2026')).toEqual({ tags_remove: ['büro-2026'] })
+  })
+
+  it('repairs a legacy comma tag: the raw tag goes, its other parts come back singly (F2)', () => {
+    expect(tagPayload(todo({ tags: ['kunde,@home'] }), 'kunde')).toEqual({ tags_remove: ['kunde,@home'], tags_add: ['@home'] })
+  })
+
+  it('refuses before sending when a part could not be added back', () => {
+    expect(() => tagPayload(todo({ tags: ['kunde,a/b'] }), 'kunde')).toThrow(NeedsAnswer)
+  })
+
+  it('is what contextPayload sends for a context', () => {
+    const t = todo({ tags: ['next', '@unterwegs,@buero'] })
+    expect(contextPayload(t, '@buero')).toEqual(tagPayload(t, '@buero'))
+    expect(contextPayload(t, '@home')).toEqual(tagPayload(t, '@home'))
   })
 })

@@ -26,8 +26,11 @@ const LEAVE_MARK_MS = 1000
  * @param {string[]|(() => string[])} options.scopes command scopes (`rows`, …)
  * @param {Object<string, Function>} [options.keys] the page's own commands
  * @param {boolean} [options.plannable] whether `t` plans a todo for today here (not in the Inbox)
+ * @param {(uuid: string, how: {edit: boolean}) => void} [options.onOpen] opens a todo's detail
+ *   (`Enter`/`o`; `e` opens it to edit the text)
+ * @param {(uuid: string) => void} [options.onMove] the cursor moved to a row by `j` / `k`
  */
-export function useListPage({ rows, scopes, keys = {}, plannable = true }) {
+export function useListPage({ rows, scopes, keys = {}, plannable = true, onOpen = () => {}, onMove = () => {} }) {
   const gtd = useGtdStore()
   const router = useRouter()
   const cursor = ref(null)
@@ -54,6 +57,7 @@ export function useListPage({ rows, scopes, keys = {}, plannable = true }) {
     const i = ids.indexOf(cursor.value)
     cursor.value = ids[Math.max(0, Math.min(ids.length - 1, i < 0 ? 0 : i + step))]
     focusRow(cursor.value)
+    onMove(cursor.value)
   }
 
   /** Tick off ('done') or delete a todo; the cursor moves on to the next row. */
@@ -78,6 +82,12 @@ export function useListPage({ rows, scopes, keys = {}, plannable = true }) {
     if (op) showNotice(t(op.body.scheduled ? 'notice.planned' : 'notice.unplanned'), () => gtd.undo(op))
   }
 
+  /** `s`: start a todo, or pause the one that runs. */
+  function toggleStart(uuid) {
+    const task = rows.value.find((x) => x.uuid === uuid)
+    if (task) (task.start ? gtd.stop : gtd.start)(uuid)
+  }
+
   const go = Object.fromEntries([...LISTS, ...PLACES].map((item) => [`go.${item.key}`, () => router.push(item.to)]))
   const onCursor = (fn) => () => {
     const uuid = visibleCursor(visibleIds(), cursor.value)
@@ -89,6 +99,9 @@ export function useListPage({ rows, scopes, keys = {}, plannable = true }) {
       undo: undoNotice,
       'cursor.down': () => moveCursor(1),
       'cursor.up': () => moveCursor(-1),
+      open: onCursor((uuid) => onOpen(uuid, { edit: false })),
+      edit: onCursor((uuid) => onOpen(uuid, { edit: true })),
+      start: onCursor(toggleStart),
       check: onCursor((uuid) => finish(uuid, 'done')),
       delete: onCursor((uuid) => finish(uuid, 'delete')),
       ...(plannable ? { plan: onCursor(plan) } : {}),
@@ -104,6 +117,9 @@ export function useListPage({ rows, scopes, keys = {}, plannable = true }) {
       cursor.value = uuid
     },
     check: (uuid) => finish(uuid, 'done'),
+    remove: (uuid) => finish(uuid, 'delete'),
+    plan,
+    focusRow,
     retry: (opId) => gtd.retry(opId),
   }
 }
