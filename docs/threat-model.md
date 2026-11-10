@@ -164,9 +164,9 @@ any string field in that file. `RISK-SEC-004`.
 
 ### Headers, and the three credential shapes
 
-`get_current_user` at [`backend/app/dependencies.py:12-66`](../backend/app/dependencies.py) accepts
+`get_current_user` at [`backend/app/dependencies.py:12-76`](../backend/app/dependencies.py) accepts
 `X-Api-Key` (line 33), `Authorization: Bearer <jwt>` (line 41), and — last, only after a JWT decode
-fails — an API key in the Bearer slot (line 58). The third is `SHIM-SEC-006`, kept because every
+fails — an API key in the Bearer slot (line 68). The third is `SHIM-SEC-006`, kept because every
 agent and MCP client sends it today, and it now leaves a distinguishable trace: each successful
 authentication records which shape let it in (`api-key-header`, `bearer-jwt`, `bearer-api-key`, at
 [`backend/app/audit.py:98-100`](../backend/app/audit.py)).
@@ -230,7 +230,7 @@ throughout, because it is offline-attackable.
 [`backend/app/database.py:138-147`](../backend/app/database.py), so guessing one is not the threat.
 **Storing one is.** They are held in `users.db` as the cleartext value that authenticates, they are
 permanent, unscoped and un-expiring, and `GET /auth/apikey` hands the value back in cleartext
-([`backend/app/routers/auth.py:190-209`](../backend/app/routers/auth.py)). That is finding **SEC-5**,
+([`backend/app/routers/auth.py:191-210`](../backend/app/routers/auth.py)). That is finding **SEC-5**,
 severity High, and it is the one open finding of its severity in this repository. It is not fixed
 here: the fix changes that endpoint's response contract, which decision **F2** makes a public-surface
 migration with its own step. It now has an owner and a date — `WAIVER-SEC-003`, expiring 2027-01-31

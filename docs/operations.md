@@ -713,6 +713,19 @@ Nothing compares the checked-in copy against the host. A gate check cannot do it
 deploy host — so the honest options are a scheduled job that reports divergence from somewhere that does, or
 accepting that this file is correct as of the date on it.
 
+## Defect fixed 2026-11-10: a token for a deleted account was still accepted
+
+Until this date a valid JWT whose account row had been removed from `users.db` was accepted by every
+`user` route as if the account still existed — `/tasks` and `/gtd/*` served the old data directory,
+`GET /auth/apikey` returned an empty key, `/admin/*` answered 403 — while `GET /auth/me` crashed on the
+missing row and answered **500**. Every route now answers **401**, and the web UI goes back to the login
+page. There is no route that deletes an account, so the state arises only from removing a row on the host
+by hand; no occurrence is known.
+
+What would have caught it: a test that deletes an account and keeps using its token. It exists now
+(`TestVanishedAccount`, [brief 0056](briefs/0056-a-vanished-user-gets-401.md)); the defect itself was
+found by mypy in Step 2 and carried as `WAIVER-TYPE-001` until its expiry stopped the gate.
+
 ## Defect fixed 2026-10-12: a wrong password reloaded the login page without a word
 
 Until this date, logging in with a wrong username or password in the web UI brought the login form back

@@ -41,6 +41,16 @@ async def get_current_user(
     if credentials:
         username = decode_token(credentials.credentials)
         if username:
+            # A JWT is signed, not looked up: it outlives the account it names. Both API-key
+            # shapes can only match an existing row, so this holds the token to the same
+            # precondition — a valid token for a deleted account is "not authenticated", 401,
+            # on every route alike (WAIVER-TYPE-001, resolved by brief 0056).
+            async with db.execute("SELECT 1 FROM users WHERE username=?", (username,)) as cur:
+                exists = await cur.fetchone()
+            if not exists:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
+                )
             _record(username, audit.SHAPE_BEARER_JWT, request)
             return username
 
