@@ -2,10 +2,11 @@
 /**
  * The frame every list page shares: AppFrame with the page's eyebrow, heading and chips, the
  * sections, the notice, and the row behaviour of `useListPage` (cursor, tick off, delete, plan,
- * keys). A page only says what its head shows and which sections it has. Slots: `aside` (right
- * of the heading: Nächste's caption), `head` (under it), `chips`, default (above the list).
+ * keys), and the capture line (`n` focuses it). A page only says what its head shows and which
+ * sections it has. Slots: `aside` (right of the heading: Nächste's caption), `head` (under it),
+ * `chips`, default (above the list).
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import AppFrame from '../../layout/AppFrame.vue'
 import NoticeBar from '../../layout/NoticeBar.vue'
 import EyebrowLine from '../../layout/ui/EyebrowLine.vue'
@@ -14,6 +15,7 @@ import { useFrame } from '../../composables/useFrame.js'
 import { notice, undoNotice } from '../notice.js'
 import { useGtdStore } from '../stores/gtd.js'
 import { useListPage } from '../useListPage.js'
+import CaptureLine from './CaptureLine.vue'
 import SectionList from './SectionList.vue'
 
 const props = defineProps({
@@ -35,7 +37,13 @@ const props = defineProps({
 const frame = useFrame()
 const gtd = useGtdStore()
 const rows = computed(() => props.sections.filter((s) => s.kind !== 'done').flatMap((s) => s.tasks))
-const page = useListPage({ rows, scopes: () => ['rows', ...props.scopes], keys: props.keys, plannable: props.plannable })
+const captureLine = ref(null)
+const page = useListPage({
+  rows,
+  scopes: () => ['rows', ...props.scopes],
+  keys: { capture: () => captureLine.value?.focus(), ...props.keys },
+  plannable: props.plannable,
+})
 </script>
 
 <template>
@@ -56,6 +64,9 @@ const page = useListPage({ rows, scopes: () => ['rows', ...props.scopes], keys: 
       v-if="gtd.today" :sections="sections" :today="gtd.today" :cursor="page.cursor.value" :leaving="page.leaving"
       @check="page.check" @select="page.select" @retry="page.retry"
     />
+    <template #capture>
+      <CaptureLine ref="captureLine" :focus-on-open="frame.props.value.view === 'inbox'" />
+    </template>
     <template #notice>
       <NoticeBar v-if="notice" :key="notice.id" :text="notice.text" :undo="!!notice.undo" :ms="notice.ms" @undo="undoNotice" />
     </template>

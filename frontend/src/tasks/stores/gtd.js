@@ -29,7 +29,8 @@ import {
   beforeOf, clarifyPayload, contextPayload, inversePayload, listOf, listPayload, planPayload, projectNameError,
   reviewDue as reviewDueRule,
 } from '../../shared/gtdRules.js'
-import { applyOutbox, captureRow, captureText, withSettled } from '../../shared/outboxQueue.js'
+import { cap } from '../../shared/capping.js'
+import { applyOutbox, captureRow, withSettled } from '../../shared/outboxQueue.js'
 import { byWeight, followUpOf, nextSections } from '../../shared/sections.js'
 
 /** Newest first; Taskwarrior stamps sort in time order. */
@@ -76,6 +77,8 @@ export const useGtdStore = defineStore('gtd', () => {
   const lastAction = ref(null)
   /** Uuids completed while they counted as planned (F6: `start` is dropped on done). */
   const plannedAtDone = ref([])
+  /** A capture the Inbox has not been visited since: the yellow dot on its count (plan M6). */
+  const inboxDot = ref(false)
   /** Per task uuid, the state the last reply gave it and when (`withSettled`). */
   const settled = new Map()
 
@@ -201,11 +204,30 @@ export const useGtdStore = defineStore('gtd', () => {
   const move = (t, body) =>
     remember(outbox.add('put', { uuid: t.uuid, body, label: t.description, inverse: inversePayload(beforeOf(t), body) }))
 
-  /** A new todo into the Inbox, sent at once. @returns the op, or null for empty text */
-  function capture(text, note = '') {
-    const { description, note: full } = captureText(text, note)
-    if (!description) return null
-    return remember(outbox.add('capture', { description, note: full, label: description }))
+  /**
+   * A new todo into the Inbox, sent at once, capped as Android caps it (`shared/capping.js`).
+   * @returns the op, or null when there is nothing to capture
+   */
+  function capture(text, note = null) {
+    const capped = cap(text, note)
+    if (!capped) return null
+    inboxDot.value = true
+    return remember(outbox.add('capture', { ...capped, label: capped.description }))
+  }
+
+  /**
+   * The page goes away with a draft: capture it and send it with keepalive at once, so it
+   * reaches the server although the page does not live to see the answer.
+   */
+  function captureOnLeave(text) {
+    const op = capture(text)
+    if (op) outbox.flush()
+    return op
+  }
+
+  /** The Inbox is on screen: what was captured has been seen. */
+  function seeInbox() {
+    inboxDot.value = false
   }
 
   /** Tick a todo off; sent after the hold unless undone. */
@@ -227,6 +249,8 @@ export const useGtdStore = defineStore('gtd', () => {
    */
   function undo(action = lastAction.value) {
     if (!action) return false
+    // A capture the server has named since: its Rückgängig deletes that uuid.
+    if (lastAction.value?.id === action.id) action = lastAction.value
     const undone = outbox.undo(action)
     if (undone && lastAction.value?.id === action.id) lastAction.value = null
     return undone
@@ -303,7 +327,7 @@ export const useGtdStore = defineStore('gtd', () => {
 
   return {
     // state
-    summary, today, loaded, stand, offline, lastAction,
+    summary, today, loaded, stand, offline, lastAction, inboxDot,
     // lists
     open, inbox, next, waiting, someday, unlisted, doneToday, doneWeek, projects,
     contexts, contextCount, progress, caption, reviewDue, sectionsFor,
@@ -311,7 +335,7 @@ export const useGtdStore = defineStore('gtd', () => {
     ops: outbox.ops, failed, paused, held,
     // actions
     refresh: freshness.refresh,
-    capture, complete, remove, undo, clarify, setList, setContext, togglePlanned, update,
+    capture, captureOnLeave, seeInbox, complete, remove, undo, clarify, setList, setContext, togglePlanned, update,
     start, stop, annotate, createProject, setProjectStatus, recordReview, retry,
   }
 })

@@ -15,7 +15,7 @@
 export default {
   // lists and navigation (pinned on Android: keep literally)
   'list.inbox': 'Inbox', 'list.next': 'Nächste', 'list.waiting': 'Warten auf', 'list.projects': 'Projekte', 'list.someday': 'Irgendwann',
-  'nav.review': 'Rückblick', 'nav.all': 'Alle', 'nav.settings': 'Einstellungen', 'nav.lists': 'Listen', 'nav.more': 'Mehr', 'nav.due': 'fällig',
+  'nav.review': 'Rückblick', 'nav.all': 'Alle', 'nav.settings': 'Einstellungen', 'nav.lists': 'Listen', 'nav.more': 'Mehr', 'nav.due': 'fällig', 'nav.captured': 'neu erfasst',
   'title.inbox': 'Inbox', 'title.next': 'Nächste', 'title.waiting': 'Warten auf', 'title.projects': 'Projekte', 'title.someday': 'Irgendwann',
   'title.review': 'Rückblick', 'title.all': 'Alle', 'title.settings': 'Einstellungen',
   stand: 'Stand {t}', close: 'schließen', undo: 'Rückgängig', 'shell.margin': 'Randspalte', 'shell.today': 'Heute',

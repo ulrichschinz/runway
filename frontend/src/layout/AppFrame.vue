@@ -24,7 +24,7 @@ defineProps({
   view: { type: String, default: null },
   /** `{inbox, next, waiting, projects, someday}`: the numbers rail and dock show */
   counts: { type: Object, required: true },
-  /** `{stalled, reviewDue}`: the yellow rings */
+  /** `{stalled, reviewDue, inboxDot}`: the yellow rings, and the dot of a capture not yet seen */
   flags: { type: Object, required: true },
   /** "hh:mm" of the last good snapshot, '' before the first */
   stand: { type: String, default: '' },

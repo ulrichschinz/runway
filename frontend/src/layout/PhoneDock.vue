@@ -41,7 +41,12 @@ async function closeMore({ refocus = true } = {}) {
         v-for="tab in DOCK_TABS" :key="tab.key" :to="tab.to" class="tab"
         :aria-current="current === tab.key ? 'page' : undefined"
       >
-        <span class="l">{{ t(tab.label) }} <span class="n">{{ counts[tab.key] || '' }}</span></span>
+        <span class="l">
+          {{ t(tab.label) }} <span class="n">{{ counts[tab.key] || '' }}</span>
+          <template v-if="tab.key === 'inbox' && flags.inboxDot">
+            <span class="dot" aria-hidden="true" /><span class="sr">{{ t('nav.captured') }}</span>
+          </template>
+        </span>
       </RouterLink>
       <button
         ref="moreButton" type="button" class="tab more"
@@ -78,6 +83,7 @@ async function closeMore({ refocus = true } = {}) {
   content: ''; position: absolute; left: 50%; bottom: 4px; width: 6px; height: 6px; margin-left: -3px;
   border-radius: 50%; background: var(--rw-marker);
 }
+.dot { align-self: center; width: 6px; height: 6px; border-radius: 50%; background: var(--rw-marker); }
 .more { font-family: var(--rw-font-mono); font-size: 16px; letter-spacing: 0.1em; }
 .warn { position: absolute; top: 10px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--rw-overdue); }
 </style>

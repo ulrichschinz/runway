@@ -44,6 +44,9 @@ const unsent = computed(() => t('sync.n', { n: props.failedCount }))
           <span v-if="item.key === 'projects' && flags.stalled" class="ring-mark" :title="t('proj.stalled')" />
           <span v-if="item.key === 'projects' && flags.stalled" class="sr">{{ t('proj.stalled') }}</span>
           {{ counts[item.key] ?? '' }}
+          <template v-if="item.key === 'inbox' && flags.inboxDot">
+            <span class="dot" aria-hidden="true" /><span class="sr">{{ t('nav.captured') }}</span>
+          </template>
         </span>
       </RouterLink>
       <div class="gap" aria-hidden="true" />
@@ -99,6 +102,7 @@ const unsent = computed(() => t('sync.n', { n: props.failedCount }))
   font-family: var(--rw-font-mono); font-size: 11.5px; font-weight: 400; color: var(--rw-mute);
 }
 .count.hot { color: var(--rw-text); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--rw-marker); flex: none; }
 .ring-mark { width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--rw-marker); flex: none; }
 .gap { height: 22px; }
 .foot {

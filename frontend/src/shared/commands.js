@@ -16,6 +16,7 @@ const go = (id, second, label) => ({ id: `go.${id}`, keys: [['g', second]], scop
 
 export const COMMANDS = [
   { id: 'undo', keys: [['z']], scope: 'global', group: 'keys.g.all', label: 'keys.undo' },
+  { id: 'capture', keys: [['n']], scope: 'global', group: 'keys.g.all', label: 'capture.new' },
   go('inbox', 'i', 'list.inbox'),
   go('next', 'n', 'list.next'),
   go('waiting', 'w', 'list.waiting'),

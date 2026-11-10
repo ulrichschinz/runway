@@ -1,5 +1,6 @@
 {
   "local_storage_keys": [
+    "captureDraft",
     "email",
     "fullName",
     "outbox",

@@ -2,9 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import { beforeOf, inversePayload, listPayload } from '../src/shared/gtdRules.js'
 import {
-  CAPTURE_MAX, IN_FLIGHT_MS, captureText,
-  HOLD_MS, alreadyApplied, applyOutbox, begin, captureRow, commit, createOp, enqueue, fail, failureOf, hold,
-  isSendable, opsOf, pauseAuth, recover, restore, resume, retry, serialize, undo, verifyRequest, withOpsOf, withSettled,
+  HOLD_MS, IN_FLIGHT_MS, alreadyApplied, applyOutbox, begin, captureRow, commit, createOp, enqueue, fail, failureOf, hold,
+  inFlightUntil, isSendable, KEEPALIVE_MS, opsOf, pauseAuth, recover, restore, resume, retry, serialize, undo, verifyRequest, withOpsOf, withSettled,
 } from '../src/shared/outboxQueue.js'
 
 const T0 = Date.UTC(2026, 10, 1, 8, 41) // 09:41 in Berlin
@@ -432,15 +431,6 @@ describe('long captures', () => {
     const prefixOnly = { ...twin, uuid: 'u-other', description: params.q }
     expect(alreadyApplied(failed, [prefixOnly, twin])).toEqual({ uuid: 'u-long', description: text })
   })
-
-  it('cuts the text at 500 code points, never inside an emoji, and moves the rest into the note', () => {
-    const text = 'x'.repeat(CAPTURE_MAX - 1) + '😀😀 Rest  des\nTexts'
-    const { description, note } = captureText(text, ' Notiz ')
-    expect(Array.from(description)).toHaveLength(CAPTURE_MAX)
-    expect(description.endsWith('😀')).toBe(true)
-    expect(note).toBe('😀 Rest des Texts\n\nNotiz')
-    expect(captureText('  Milch   kaufen ')).toEqual({ description: 'Milch kaufen', note: '' })
-  })
 })
 
 describe('two tabs', () => {
@@ -450,6 +440,18 @@ describe('two tabs', () => {
     expect(states(recover(sending, T0 + 1000, { authed: true, tab: 'tab-b' }))).toEqual(['sending'])
     const late = recover(sending, T0 + IN_FLIGHT_MS + 1, { authed: true, tab: 'tab-b' })
     expect(late.map((o) => [o.state, o.verify])).toEqual([['queued', true]])
+  })
+
+  it('an op sent with keepalive as its page went away is taken over, verified, after KEEPALIVE_MS', () => {
+    const op = captureOp('Milch', T0)
+    const sending = begin(enqueue([], op), op.id, { now: T0, tab: 'tab-a', keepalive: true })
+    expect(inFlightUntil(sending[0])).toBe(T0 + KEEPALIVE_MS)
+    expect(states(recover(sending, T0 + KEEPALIVE_MS - 1, { authed: true, tab: 'tab-b' }))).toEqual(['sending'])
+    const late = recover(sending, T0 + KEEPALIVE_MS, { authed: true, tab: 'tab-b' })
+    expect(late.map((o) => [o.state, o.verify])).toEqual([['queued', true]])
+    // sent again the normal way, it gets the normal window
+    const again = begin(late, op.id, { now: T0 + KEEPALIVE_MS, tab: 'tab-b' })
+    expect(inFlightUntil(again[0])).toBe(T0 + KEEPALIVE_MS + IN_FLIGHT_MS)
   })
 
   it('a tab never takes back its own op in flight, however long the request takes', () => {
