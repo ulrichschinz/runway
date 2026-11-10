@@ -3,7 +3,8 @@
  * The phone's thumb zone (m3 "ThumbBar", plan D2): in the layout flow at the bottom of the frame,
  * top to bottom the notice, the context chips (Nächste), the tabs `Inbox · Nächste · Warten auf ·
  * ···` and the capture field. Because it is in the flow, a notice pushes the list up instead of
- * covering a row. "···" opens the Mehr sheet upward from the tabs.
+ * covering a row. "···" opens the Mehr sheet upward from the tabs, with the search and the command
+ * palette (plan M9); `openSearch()` opens it with the focus in the search field (the `/` key).
  */
 import { computed, nextTick, ref } from 'vue'
 import MoreSheet from './MoreSheet.vue'
@@ -16,12 +17,39 @@ const props = defineProps({
   flags: { type: Object, required: true },
   failedCount: { type: Number, default: 0 },
   themeChoice: { type: String, required: true },
+  searchable: { type: Boolean, default: false },
 })
-defineEmits(['theme', 'signout', 'retry'])
+const emit = defineEmits(['theme', 'signout', 'retry', 'palette', 'searchEnter'])
 
 const current = computed(() => dockKeyOf(props.view))
 const moreOpen = ref(false)
 const moreButton = ref(null)
+const searchFirst = ref(false)
+
+function openMore(search = false) {
+  searchFirst.value = search && props.searchable
+  moreOpen.value = true
+}
+
+/** "Befehle" in the sheet: the sheet closes, the palette opens (it brings the focus back here). */
+function openPalette() {
+  moreOpen.value = false
+  moreButton.value?.focus()
+  emit('palette')
+}
+
+defineExpose({ openSearch: () => openMore(true) })
+
+/**
+ * `⏎` in the sheet's search: the sheet is gone, the page puts the cursor on the first hit
+ * (`searchEnter`, as the top line's field does); without a hit the focus goes back to "···".
+ */
+async function toHits() {
+  await nextTick()
+  emit('searchEnter')
+  await nextTick()
+  if (!document.activeElement || document.activeElement === document.body) moreButton.value?.focus()
+}
 
 async function closeMore({ refocus = true } = {}) {
   moreOpen.value = false
@@ -53,7 +81,7 @@ async function closeMore({ refocus = true } = {}) {
         :aria-label="failedCount ? `${t('nav.more')} · ${t('sync.n', { n: failedCount })}` : t('nav.more')"
         :aria-expanded="moreOpen" aria-haspopup="dialog"
         :aria-current="current === 'more' ? 'page' : undefined"
-        @click="moreOpen ? closeMore() : (moreOpen = true)"
+        @click="moreOpen ? closeMore() : openMore()"
       >
         <span aria-hidden="true">···</span><span v-if="failedCount" class="warn" aria-hidden="true" />
       </button>
@@ -61,7 +89,9 @@ async function closeMore({ refocus = true } = {}) {
     <slot name="capture" />
     <MoreSheet
       v-if="moreOpen" :view="view" :counts="counts" :flags="flags" :failed-count="failedCount" :theme-choice="themeChoice"
-      @close="closeMore" @theme="$emit('theme', $event)" @signout="$emit('signout')" @retry="$emit('retry')"
+      :searchable="searchable" :focus-search="searchFirst"
+      @close="closeMore" @theme="emit('theme', $event)" @signout="emit('signout')" @retry="emit('retry')" @palette="openPalette"
+      @enter="toHits"
     />
   </div>
 </template>

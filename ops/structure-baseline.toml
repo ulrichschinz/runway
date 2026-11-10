@@ -66,3 +66,27 @@ allowlist = [
 # Raised from 5 on 2026-11-01 (brief 0054, approved by the owner, RISK-GOV-001): the clarify panel's
 # `// Klären · noch n` is the sixth user. M12's margin panels are expected to be the seventh.
 "frontend/src/layout/ui/EyebrowLine.vue" = 6
+# Recorded on 2026-11-10 (brief 0055, approved by the owner, RISK-GOV-001: not an independent
+# approval): the command state of the new UI — the palette's items (`paletteItems`), the `/` search
+# query, the modifier name and the runtime search registry `fe/tasks` fills (so `fe/layout` imports
+# no feature; the palette's open flag lives in the frame). Its
+# seven readers are the palette, the shortcuts sheet, the top line, the rail foot, "···", the list
+# frame (search results) and the task search that registers itself. An eighth is a new place that
+# opens the palette or reads the query and is worth a look.
+"frontend/src/composables/useCommands.js" = 7
+# Recorded on 2026-11-10 (brief 0055, approved by the owner, RISK-GOV-001: not an independent
+# approval): the one command table that the keymap, the palette and the `?` sheet all read, so a key
+# and its palette entry cannot drift apart. Its readers are the keymap, the palette's command state,
+# the frame (its own commands), the shortcuts sheet and the list pages' keys. A sixth is a new
+# reader of the table and should be one of those three, not a fourth copy.
+"frontend/src/shared/commands.js" = 5
+# Recorded on 2026-11-10 (brief 0055, approved by the owner, RISK-GOV-001: not an independent
+# approval): the one rule for which tags are contexts, read by both UIs. The fifth importer is the
+# task search (`tasks/useTaskSearch.js`), whose todo hits show their list, project and contexts
+# on the palette's second line. Falls back by two when M17 deletes the old TaskModal and tasks store.
+"frontend/src/shared/contextTags.js" = 5
+# Recorded on 2026-11-10 (brief 0055, approved by the owner, RISK-GOV-001: not an independent
+# approval): the new UI's single notice line ("… · Rückgängig"). The fifth writer is the task
+# search, whose "Als Todo erfassen" says "In Inbox ✓ · Rückgängig" like the capture line. A sixth
+# is a new action that reports itself and is expected (M10's card stack, M11's lens).
+"frontend/src/tasks/notice.js" = 5

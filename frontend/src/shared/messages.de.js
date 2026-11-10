@@ -150,6 +150,8 @@ export default {
   'pal.toStack': 'Inbox als Stapel', 'pal.toList': 'Inbox als Liste', 'pal.retry': 'Nicht Gesendetes erneut senden ({n})',
   'pal.ctx': 'Kontext {c}', 'pal.ctxOff': 'Kontextfilter aufheben', 'pal.theme': 'Darstellung: {v}', 'pal.capture': 'Als Todo erfassen: „{q}“',
   'pal.nothing': 'Nichts gefunden', 'pal.foot': '↑ ↓ wählen · ⏎ ausführen · Esc schließen',
+  'pal.open': 'Öffnen: {d}', 'pal.edit': 'Text ändern: {d}', 'pal.start': 'Starten: {d}', 'pal.stop': 'Pausieren: {d}',
+  'pal.delete': 'Löschen: {d}', 'pal.move': 'Nach {l}: {d}', 'pal.cl': 'Klären: {v}',
   'pal.g.act': 'Aktionen', 'pal.g.nav': 'Gehe zu', 'pal.g.ctx': 'Kontext', 'pal.g.look': 'Ansicht', 'pal.g.todo': 'Todos', 'pal.g.proj': 'Projekte', 'pal.g.new': 'Neu',
   // shortcuts sheet
   'keys.title': 'Tastenkürzel', 'keys.close': 'Schließen', 'keys.g.all': 'Überall', 'keys.g.lists': 'Listen', 'keys.g.rows': 'Zeilen', 'keys.g.inbox': 'Inbox klären',

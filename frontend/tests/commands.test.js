@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { ASKING_SCOPES, COMMANDS, ownsKey, repeatsOnHold, resolveKey, shortcutSheet, visibleCursor } from '../src/shared/commands.js'
+import {
+  ASKING_SCOPES, COMMANDS, isPaletteKey, modKey, ownsKey, paletteCommands, paletteHint, paletteKeyAction, repeatsOnHold, resolveKey, shortcutSheet, visibleCursor,
+} from '../src/shared/commands.js'
 import messages from '../src/shared/messages.de.js'
 
 const seqs = (c) => c.keys.map((k) => k.join(' '))
@@ -92,6 +94,15 @@ describe('resolving keys', () => {
     expect(ownsKey({ key: 'x', isComposing: true, target: el('DIV') })).toBe(false)
     for (const mod of ['ctrlKey', 'metaKey', 'altKey']) expect(ownsKey({ key: 'x', [mod]: true, target: el('DIV') }), mod).toBe(false)
   })
+
+  it('takes no key while a modal is open, even when a click on its text left the focus on <body>', () => {
+    const body = { tagName: 'BODY', closest: () => null }
+    for (const key of ['x', 'Delete', 'Escape', 'ArrowDown', 'Enter', 'j']) {
+      expect(ownsKey({ key, target: body }), key).toBe(true)
+      expect(ownsKey({ key, target: body }, true), key).toBe(false)
+    }
+    expect(ownsKey({ key: 'x' }, true)).toBe(false)
+  })
 })
 
 describe('the ? sheet', () => {
@@ -105,8 +116,121 @@ describe('the ? sheet', () => {
     expect(rows.find((r) => r.label === 'keys.ctx').keys).toEqual(['0', '1', '2', '3', '4', '5', '6'])
     expect(rows.find((r) => r.label === 'keys.moveTo').keys).toEqual(['m n', 'm w', 'm v'])
     expect(rows.find((r) => r.label === 'keys.cl.back').keys).toEqual(['Esc'])
-    const keyCount = COMMANDS.reduce((n, c) => n + c.keys.length, 0)
+    const keyCount = COMMANDS.reduce((n, c) => n + (c.sheetKeys ?? c.keys).length, 0)
     expect(rows.reduce((n, r) => n + r.keys.length, 0)).toBe(keyCount)
+  })
+
+  it('names the palette, the search and itself, and leaves out what has no key', () => {
+    const all = shortcutSheet(COMMANDS, 'Ctrl').find((g) => g.group === 'keys.g.all').rows
+    expect(all.find((r) => r.label === 'keys.palette').keys).toEqual(['Ctrl K'])
+    expect(shortcutSheet()[0].rows.find((r) => r.label === 'keys.palette').keys).toEqual(['⌘ K'])
+    expect(all.find((r) => r.label === 'keys.search').keys).toEqual(['/'])
+    expect(all.find((r) => r.label === 'keys.title').keys).toEqual(['?'])
+    const labels = shortcutSheet().flatMap((g) => g.rows.map((r) => r.label))
+    for (const keyless of ['set.light', 'set.dark', 'set.system', 'sync.retry']) expect(labels).not.toContain(keyless)
+  })
+})
+
+describe('the palette key', () => {
+  it('is ⌘ on Apple devices and Ctrl elsewhere', () => {
+    expect(modKey('MacIntel')).toBe('⌘')
+    expect(modKey('iPhone')).toBe('⌘')
+    expect(modKey('macOS')).toBe('⌘')
+    expect(modKey('Win32')).toBe('Ctrl')
+    expect(modKey('Linux armv8l')).toBe('Ctrl')
+    expect(modKey()).toBe('Ctrl')
+  })
+
+  it('is K with ⌘ or Ctrl, nothing else', () => {
+    expect(isPaletteKey({ key: 'k', metaKey: true })).toBe(true)
+    expect(isPaletteKey({ key: 'k', ctrlKey: true })).toBe(true)
+    expect(isPaletteKey({ key: 'K', ctrlKey: true })).toBe(true)
+    expect(isPaletteKey({ key: 'k' })).toBe(false)
+    expect(isPaletteKey({ key: 'k', metaKey: true, shiftKey: true })).toBe(false)
+    expect(isPaletteKey({ key: 'k', ctrlKey: true, altKey: true })).toBe(false)
+    expect(isPaletteKey({ key: 'k', metaKey: true, isComposing: true })).toBe(false)
+    expect(isPaletteKey({ key: 'j', metaKey: true })).toBe(false)
+  })
+
+  it('toggles on a fresh press and swallows a held key\'s auto-repeat', () => {
+    expect(paletteKeyAction({ key: 'k', metaKey: true })).toBe('toggle')
+    expect(paletteKeyAction({ key: 'k', ctrlKey: true, repeat: false })).toBe('toggle')
+    expect(paletteKeyAction({ key: 'k', metaKey: true, repeat: true })).toBe('swallow')
+    expect(paletteKeyAction({ key: 'k', repeat: true })).toBe(null)
+    expect(paletteKeyAction({ key: 'j', metaKey: true })).toBe(null)
+    // held for a second: one toggle, then only repeats, so it ends open
+    const held = [false, true, true, true, true].map((repeat) => paletteKeyAction({ key: 'k', metaKey: true, repeat }))
+    expect(held.filter((a) => a === 'toggle')).toHaveLength(1)
+  })
+
+  it('is shown as ⌘K, or as Ctrl K like the ? sheet shows it — never CtrlK', () => {
+    expect(paletteHint('⌘')).toBe('⌘K')
+    expect(paletteHint('Ctrl')).toBe('Ctrl K')
+    const sheet = shortcutSheet(COMMANDS, 'Ctrl')[0].rows.find((r) => r.label === 'keys.palette').keys
+    expect(sheet).toEqual([paletteHint('Ctrl')])
+  })
+})
+
+describe('the palette', () => {
+  const run = () => {}
+  const everything = Object.fromEntries(COMMANDS.map((c) => [c.id, run]))
+  const allScopes = [...new Set(COMMANDS.map((c) => c.scope))]
+  const offerAll = Object.fromEntries(COMMANDS.map((c) => [c.id, { d: 'Belege hochladen' }]))
+  const ids = (list) => list.map((c) => c.id)
+
+  /** Commands that are the palette's own business: its ↑ ↓, its Esc, an open question's answers, its own key and `/`. */
+  const OWN = ['palette', 'search', 'cursor.down', 'cursor.up', 'close', 'step.back', 'step.new',
+    ...['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) => `step.${k}`)]
+
+  it('offers table entries only, each once, with the table key as its hint', () => {
+    const entries = paletteCommands({ handlers: everything, scopes: allScopes, offers: offerAll })
+    const table = new Map(COMMANDS.map((c) => [c.id, c]))
+    expect(new Set(ids(entries)).size).toBe(entries.length)
+    for (const e of entries) {
+      expect(table.has(e.id), e.id).toBe(true)
+      expect(e.group).toBe(table.get(e.id).pal.group)
+      expect(Object.hasOwn(messages, e.label), e.label).toBe(true)
+      expect(Object.hasOwn(messages, `pal.g.${e.group}`), e.group).toBe(true)
+    }
+    expect(entries.find((e) => e.id === 'go.waiting').hint).toBe('g w')
+    expect(entries.find((e) => e.id === 'delete').hint).toBe('Entf')
+    expect(entries.find((e) => e.id === 'theme.dark').hint).toBe('')
+  })
+
+  it('reaches every key action of the table, except the palette\'s own', () => {
+    const entries = ids(paletteCommands({ handlers: everything, scopes: allScopes, offers: offerAll }))
+    const keyed = COMMANDS.filter((c) => c.keys.length || c.sheetKeys).map((c) => c.id)
+    expect(keyed.filter((id) => !entries.includes(id)).sort()).toEqual([...OWN].sort())
+  })
+
+  it('lists only what a mounted keymap handles, in an active scope', () => {
+    const handlers = { 'go.inbox': run, check: run, 'ctx.1': run, toggleDone: run }
+    expect(ids(paletteCommands({ handlers, scopes: [], offers: { check: { d: 'x' }, 'ctx.1': { c: '@a' } } }))).toEqual(['go.inbox'])
+    expect(ids(paletteCommands({ handlers, scopes: ['rows'], offers: { check: { d: 'x' }, 'ctx.1': { c: '@a' } } })))
+      .toEqual(['go.inbox', 'check'])
+    expect(ids(paletteCommands({ handlers, scopes: ['next', 'rows'], offers: { check: { d: 'x' }, 'ctx.1': { c: '@a' } } })))
+      .toEqual(['go.inbox', 'check', 'ctx.1'])
+    expect(ids(paletteCommands({ handlers, scopes: ['all', 'rows'], offers: {} }))).toEqual(['go.inbox', 'toggleDone'])
+  })
+
+  it('offers row actions only while the page offers them, labelled with the todo', () => {
+    const handlers = { check: run, start: run, undo: run, capture: run }
+    expect(ids(paletteCommands({ handlers, scopes: ['rows'], offers: {} }))).toEqual(['capture'])
+    const entries = paletteCommands({
+      handlers, scopes: ['rows'], offers: { check: { d: 'Belege' }, start: { d: 'Belege', label: 'pal.stop' }, undo: true },
+    })
+    expect(entries.map(({ id, label, params }) => ({ id, label, params }))).toEqual([
+      { id: 'capture', label: 'capture.new', params: {} },
+      { id: 'undo', label: 'keys.undo', params: {} },
+      { id: 'check', label: 'pal.check', params: { d: 'Belege' } },
+      { id: 'start', label: 'pal.stop', params: { d: 'Belege' } },
+    ])
+    expect(ids(paletteCommands({ handlers, scopes: ['rows'], offers: { check: false, capture: false } }))).toEqual([])
+  })
+
+  it('labels Gehe zu and Darstellung through the command\'s own label', () => {
+    const entries = paletteCommands({ handlers: { 'go.next': run, 'theme.dark': run }, scopes: [], offers: {} })
+    expect(entries.map(({ label, of }) => [label, of])).toEqual([['pal.theme', 'set.dark'], ['pal.goto', 'list.next']])
   })
 })
 

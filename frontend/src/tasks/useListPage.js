@@ -1,12 +1,10 @@
 import { nextTick, ref, toValue, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { useKeymap } from '../composables/useKeymap.js'
 import { moveLabel } from '../shared/clarify.js'
 import { visibleCursor } from '../shared/commands.js'
-import { NeedsAnswer } from '../shared/gtdRules.js'
+import { NeedsAnswer, listOf, planPayload } from '../shared/gtdRules.js'
 import { t } from '../shared/i18n.js'
-import { LISTS, PLACES } from '../shared/navigation.js'
-import { showNotice, undoNotice } from './notice.js'
+import { notice, showNotice, undoNotice } from './notice.js'
 import { useGtdStore } from './stores/gtd.js'
 
 /** A leaving row's mark is dropped after this, should its element never have left. */
@@ -17,7 +15,8 @@ const LEAVE_MARK_MS = 1000
  * `setList`, the keydown handler): the keyboard cursor, ticking off and deleting through the
  * outbox hold with "Erledigt · Rückgängig" / "Gelöscht · Rückgängig", moving to another list
  * with `m` then `n` / `w` / `v` ("→ Nächste · @computer · Rückgängig", plan M8), planning for
- * today with `t`, and the keys of the command table.
+ * today with `t`, and the keys of the command table. What the keys do to the cursor row the
+ * command palette offers too, labelled with the todo's text ("Abhaken: Belege Oktober hochladen").
  *
  * Every row that leaves by an action goes through `leave`: the write to the store first — a
  * done is in the stored hold, a move sent, before anything moves; a move that needs an answer
@@ -30,6 +29,8 @@ const LEAVE_MARK_MS = 1000
  *   (the ones the cursor visits)
  * @param {string[]|(() => string[])} options.scopes command scopes (`rows`, …)
  * @param {Object<string, Function>} [options.keys] the page's own commands
+ * @param {() => Object<string, boolean|object>} [options.offers] the page's own palette offers
+ *   (see `paletteCommands`); they win over the rows' offers
  * @param {boolean} [options.plannable] whether `t` plans a todo for today here (not in the Inbox)
  * @param {boolean|(() => boolean)} [options.holdCursor] the cursor never leaves the rows while
  *   there are some (the Inbox: its clarify panel files the cursor row)
@@ -39,10 +40,9 @@ const LEAVE_MARK_MS = 1000
  * @param {(uuid: string) => void} [options.onMove] the cursor moved to a row by `j` / `k`
  */
 export function useListPage({
-  rows, scopes, keys = {}, plannable = true, holdCursor = false, onOpen = () => {}, onMove = () => {},
+  rows, scopes, keys = {}, offers = () => ({}), plannable = true, holdCursor = false, onOpen = () => {}, onMove = () => {},
 }) {
   const gtd = useGtdStore()
-  const router = useRouter()
   const cursor = ref(null)
   const leaving = new Map()
   const visibleIds = () => rows.value.map((x) => x.uuid)
@@ -130,14 +130,34 @@ export function useListPage({
     if (task) (task.start ? gtd.stop : gtd.start)(uuid)
   }
 
-  const go = Object.fromEntries([...LISTS, ...PLACES].map((item) => [`go.${item.key}`, () => router.push(item.to)]))
   const onCursor = (fn) => () => {
     const uuid = visibleCursor(visibleIds(), cursor.value)
     if (uuid) fn(uuid)
   }
+  /** The cursor row's actions for the palette, with its text (and the list a move goes to). */
+  function rowOffers() {
+    const task = rows.value.find((x) => x.uuid === visibleCursor(visibleIds(), cursor.value))
+    const offers = { undo: !!notice.value?.undo }
+    if (!task) return offers
+    const d = task.description
+    const list = listOf(task)
+    const planned = plannable && gtd.today ? planPayload(task, gtd.today) : null
+    return {
+      ...offers,
+      open: { d },
+      edit: { d },
+      check: { d },
+      delete: { d },
+      start: { d, label: task.start ? 'pal.stop' : 'pal.start' },
+      plan: planned ? { d, label: planned.scheduled ? 'pal.plan' : 'pal.unplan' } : false,
+      ...Object.fromEntries(['next', 'waiting', 'someday'].map((to) => [
+        `move.${to}`, to !== list && { d, l: t(`list.${to}`) },
+      ])),
+    }
+  }
+
   useKeymap(
     {
-      ...go,
       undo: undoNotice,
       'cursor.down': () => moveCursor(1),
       'cursor.up': () => moveCursor(-1),
@@ -153,6 +173,7 @@ export function useListPage({
       ...keys,
     },
     scopes,
+    () => ({ ...rowOffers(), ...offers() }),
   )
 
   return {

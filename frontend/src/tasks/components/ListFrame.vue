@@ -8,19 +8,27 @@
  * (right of the heading: Nächste's caption), `head` (under it), `chips`, default (above the list),
  * and `panel` (the page's own panel while no detail is open: the Inbox's clarify panel).
  *
- * Exposes `cursor`, `select`, `leave` (`useListPage`), `open` and `detailOpen`, so a page's panel acts on the cursor row
+ * While the `/` search has a query (plan M9, 06 `sectionsFor('search')`), the page steps aside: the
+ * head says "Gefunden in allen Listen" with the hits by list, rows work as rows, and the page's own
+ * head, chips, panel and keys rest until the search ends (`Esc`, "Suche beenden", leaving the page).
+ *
+ * Exposes `cursor`, `select`, `leave` (`useListPage`), `open`, `detailOpen` and `searching`, so a page's panel acts on the cursor row
  * the way the rows do. Emits `closePanel` when the page's panel should close (`Esc`, the scrim).
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppFrame from '../../layout/AppFrame.vue'
 import NoticeBar from '../../layout/NoticeBar.vue'
+import EmptyState from '../../layout/ui/EmptyState.vue'
 import EyebrowLine from '../../layout/ui/EyebrowLine.vue'
 import PageHeading from '../../layout/ui/PageHeading.vue'
+import PillButton from '../../layout/ui/PillButton.vue'
+import { searchQuery } from '../../composables/useCommands.js'
 import { useFrame } from '../../composables/useFrame.js'
 import { t } from '../../shared/i18n.js'
 import { notice, undoNotice } from '../notice.js'
 import { useGtdStore } from '../stores/gtd.js'
 import { useListPage } from '../useListPage.js'
+import { searchSections } from '../useTaskSearch.js'
 import CaptureLine from './CaptureLine.vue'
 import SectionList from './SectionList.vue'
 import TaskDetail from './TaskDetail.vue'
@@ -38,6 +46,8 @@ const props = defineProps({
   scopes: { type: Array, default: () => [] },
   /** the page's own commands, by command id */
   keys: { type: Object, default: () => ({}) },
+  /** the page's own palette offers, by command id (see `paletteCommands`) */
+  offers: { type: Function, default: () => ({}) },
   plannable: { type: Boolean, default: true },
   /** the cursor stays on a row while there are rows (`useListPage`) */
   holdCursor: { type: Boolean, default: false },
@@ -50,7 +60,15 @@ const emit = defineEmits(['select', 'closePanel'])
 
 const frame = useFrame()
 const gtd = useGtdStore()
-const rows = computed(() => props.sections.filter((s) => s.kind !== 'done').flatMap((s) => s.tasks))
+const searching = computed(() => searchQuery.value.trim() !== '')
+const shown = computed(() => {
+  if (!searching.value) return props.sections
+  return gtd.today ? searchSections(gtd, searchQuery.value) : []
+})
+const rows = computed(() => shown.value.filter((s) => s.kind !== 'done').flatMap((s) => s.tasks))
+const searchEyebrow = computed(() => [
+  t('search.title'), `»${searchQuery.value.trim()}«`, t('search.hits', { n: rows.value.length }),
+])
 const captureLine = ref(null)
 /** The todo whose detail is open, from the address. */
 const openId = frame.taskId
@@ -67,9 +85,30 @@ function open(uuid, { edit = false, ask = null } = {}) {
   if (openId.value !== uuid) frame.openTask(uuid)
 }
 
-/** `Esc`, "schließen", the scrim: the detail closes (the focus back on its row), else the page's panel. */
+function endSearch() {
+  searchQuery.value = ''
+}
+// Leaving the page ends the search (06 `show`).
+onBeforeUnmount(endSearch)
+
+/** `⏎` or `↓` in the search field: the cursor on the first hit. */
+function toHits() {
+  const first = rows.value[0]?.uuid
+  if (!first) return
+  page.select(first)
+  page.focusRow(first)
+}
+
+/**
+ * `Esc`, "schließen", the scrim: the detail closes (the focus back on its row), else the search
+ * ends, else the page's panel.
+ */
 function close() {
   const uuid = openId.value
+  if (!uuid && searching.value) {
+    endSearch()
+    return
+  }
   if (!uuid) {
     emit('closePanel')
     return
@@ -81,9 +120,10 @@ function close() {
 /** A row was clicked: an open todo opens its detail, a done one (Alle) only takes the cursor. */
 function onSelect(uuid) {
   const pending = rows.value.some((x) => x.uuid === uuid)
-  if (pending && !props.selectOnly) open(uuid)
+  const selectOnly = props.selectOnly && !searching.value
+  if (pending && !selectOnly) open(uuid)
   else page.select(uuid)
-  if (pending && props.selectOnly) emit('select', uuid)
+  if (pending && selectOnly) emit('select', uuid)
 }
 
 /** Abhaken or Löschen in the detail: the list page's own action and notice; the focus goes to the next row. */
@@ -95,10 +135,12 @@ function finish(action, uuid) {
 
 const page = useListPage({
   rows,
-  scopes: () => [...props.scopes, 'rows'],
+  // While searching, the page's own scopes rest: the hits are rows of every list.
+  scopes: () => (searching.value ? ['rows'] : [...props.scopes, 'rows']),
   keys: { capture: () => captureLine.value?.focus(), close, ...props.keys },
+  offers: () => (searching.value ? {} : props.offers()),
   plannable: props.plannable,
-  holdCursor: () => props.holdCursor,
+  holdCursor: () => props.holdCursor && !searching.value,
   onOpen: open,
   // While a detail is open, the cursor takes it along (06 moveFocus).
   onMove: (uuid) => {
@@ -117,12 +159,24 @@ watch([openId, () => rows.value.some((x) => x.uuid === openId.value)], ([uuid, s
   if (uuid && shown) page.select(uuid)
 }, { immediate: true })
 
-defineExpose({ cursor: page.cursor, select: page.select, leave: page.leave, open, detailOpen: computed(() => !!openId.value) })
+defineExpose({
+  cursor: page.cursor, select: page.select, leave: page.leave, open, detailOpen: computed(() => !!openId.value), searching,
+})
 </script>
 
 <template>
-  <AppFrame v-bind="frame.props.value" :panel-label="openId ? t('d.title') : panelLabel" v-on="frame.on" @close-panel="close">
-    <template #head>
+  <AppFrame
+    v-bind="frame.props.value" :panel-label="openId ? t('d.title') : panelLabel" searchable
+    v-on="frame.on" @close-panel="close" @search-enter="toHits"
+  >
+    <template v-if="searching" #head>
+      <EyebrowLine :parts="searchEyebrow" />
+      <PageHeading :parts="t('h.search')" class="search-h" />
+      <div class="actions">
+        <PillButton quiet @click="endSearch">{{ t('search.end') }} <kbd aria-hidden="true">Esc</kbd></PillButton>
+      </div>
+    </template>
+    <template v-else #head>
       <div class="head" :class="{ aside: $slots.aside }">
         <div class="text">
           <EyebrowLine :parts="eyebrow" />
@@ -132,10 +186,11 @@ defineExpose({ cursor: page.cursor, select: page.select, leave: page.leave, open
       </div>
       <slot name="head" />
     </template>
-    <template v-if="$slots.chips" #chips><slot name="chips" /></template>
-    <slot />
+    <template v-if="$slots.chips && !searching" #chips><slot name="chips" /></template>
+    <slot v-if="!searching" />
+    <EmptyState v-if="searching && gtd.today && !rows.length" :text="t('empty.search')" />
     <SectionList
-      v-if="gtd.today" :sections="sections" :today="gtd.today" :cursor="page.cursor.value" :leaving="page.leaving"
+      v-if="gtd.today" :sections="shown" :today="gtd.today" :cursor="page.cursor.value" :leaving="page.leaving"
       @check="page.check" @select="onSelect" @retry="page.retry"
     />
     <template #capture>
@@ -148,7 +203,7 @@ defineExpose({ cursor: page.cursor, select: page.select, leave: page.leave, open
         @check="finish(page.check, $event)" @delete="finish(page.remove, $event)"
       />
     </template>
-    <template v-else-if="$slots.panel" #panel><slot name="panel" /></template>
+    <template v-else-if="$slots.panel && !searching" #panel><slot name="panel" /></template>
     <template #notice>
       <NoticeBar v-if="notice" :key="notice.id" :text="notice.text" :undo="!!notice.undo" :ms="notice.ms" @undo="undoNotice" />
     </template>
@@ -156,6 +211,8 @@ defineExpose({ cursor: page.cursor, select: page.select, leave: page.leave, open
 </template>
 
 <style scoped>
+.search-h { margin-top: 12px; }
+.actions { display: flex; gap: 10px; margin-top: 20px; align-items: center; flex-wrap: wrap; }
 .text { min-width: 0; display: grid; row-gap: 12px; }
 .head.aside { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 24px; align-items: center; }
 @media (max-width: 760px) {

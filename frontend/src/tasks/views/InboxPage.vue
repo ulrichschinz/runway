@@ -34,8 +34,9 @@ const sections = computed(() => (gtd.today && !empty.value ? [{ key: 'inbox', ki
 
 /** The item being clarified: the cursor row (ListFrame holds it on a row on wide screens). */
 const target = computed(() => gtd.inbox.find((x) => x.uuid === list.value?.cursor) ?? null)
-/** Shown, and so its keys live: not while a todo's detail takes the panel's place. */
-const shown = computed(() => !!gtd.today && !!target.value && !list.value?.detailOpen && (!phone.value || sheet.value))
+/** Shown, and so its keys live: not while a todo's detail takes the panel's place, nor during a search. */
+const shown = computed(() => !!gtd.today && !!target.value && !list.value?.detailOpen && !list.value?.searching
+  && (!phone.value || sheet.value))
 /** A filing leaves the list; on the phone the sheet closes with it, so the notice's Rückgängig is in reach. */
 function leave(...args) {
   const op = list.value.leave(...args)
@@ -73,12 +74,17 @@ const keys = {
   'step.new': answer('n'),
   'step.back': () => clarify.back(),
 }
+/** The palette offers the panel's questions for the item, not the rows' list moves (they ask the same). */
+const offers = () => ({
+  'move.next': false, 'move.waiting': false, 'move.someday': false,
+  ...(target.value ? Object.fromEntries(['next', 'waiting', 'someday', 'project'].map((k) => [`clarify.${k}`, true])) : {}),
+})
 </script>
 
 <template>
   <ListFrame
     ref="list" :eyebrow="eyebrow" :heading="t(empty ? 'h.inboxEmpty' : 'h.inbox')" :sections="sections" :plannable="false"
-    :scopes="scopes" :keys="keys" :hold-cursor="!phone" select-only :panel-label="t('cl.title')"
+    :scopes="scopes" :keys="keys" :offers="offers" :hold-cursor="!phone" select-only :panel-label="t('cl.title')"
     @select="sheet = phone" @close-panel="sheet = false"
   >
     <template v-if="empty">

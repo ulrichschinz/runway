@@ -8,6 +8,8 @@
  * unit read it there, so no page has to reach into another feature's store. It also reads the todo
  * a `?task=<uuid>` link names (Android's Custom Tab; the list pages open their detail from the same
  * query) — a deferred one the lists leave out is held for the detail — and keeps the document title.
+ * It registers the task search the command palette offers (`useTaskSearch`, plan M9), so the
+ * layout's palette finds todos and projects without importing a feature.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -18,12 +20,14 @@ import { t } from '../shared/i18n.js'
 import { taskParam } from '../shared/returnPath.js'
 import { useAuthStore } from '../stores/auth.js'
 import { useGtdStore } from '../tasks/stores/gtd.js'
+import { useTaskSearch } from '../tasks/useTaskSearch.js'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const gtd = useGtdStore()
 const theme = useTheme()
+useTaskSearch()
 
 const view = computed(() => route.meta.view ?? null)
 

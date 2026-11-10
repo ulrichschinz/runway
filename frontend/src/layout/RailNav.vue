@@ -3,10 +3,12 @@
  * The rail on wide screens (06 `renderRail`): lockup, the lists with their counts, the places below,
  * the outbox line and the footer with the user and "Stand". The current entry carries a yellow dot;
  * a yellow ring means "needs a look" and always comes with a word (`fällig`) or a title, never
- * alone. Everything it shows comes in as props (brief 0050).
+ * alone. Everything it shows comes in as props (brief 0050). The foot opens the command palette
+ * and the `?` sheet (06 `.rail-foot`).
  */
 import { computed } from 'vue'
 import BrandMark from '../components/BrandMark.vue'
+import { paletteKeyHint } from '../composables/useCommands.js'
 import { LISTS, PLACES, navKeyOf } from '../shared/navigation.js'
 import { t } from '../shared/i18n.js'
 
@@ -19,7 +21,7 @@ const props = defineProps({
   failedCount: { type: Number, default: 0 },
   user: { type: String, default: '' },
 })
-defineEmits(['retry'])
+defineEmits(['retry', 'palette', 'shortcuts'])
 
 const current = computed(() => navKeyOf(props.view))
 const unsent = computed(() => t('sync.n', { n: props.failedCount }))
@@ -72,6 +74,10 @@ const unsent = computed(() => t('sync.n', { n: props.failedCount }))
         {{ user }}<template v-if="user && stand"> · </template>{{ stand ? t('stand', { t: stand }) : '' }}
         <span v-if="offline" class="offline">{{ t('shell.offline') }}</span>
       </span>
+      <button type="button" class="key" @click="$emit('palette')">
+        <kbd aria-hidden="true">{{ paletteKeyHint }}</kbd> {{ t('pal.title') }}
+      </button>
+      <button type="button" class="key" @click="$emit('shortcuts')"><kbd aria-hidden="true">?</kbd> {{ t('keys.title') }}</button>
     </div>
   </aside>
 </template>
@@ -109,6 +115,8 @@ const unsent = computed(() => t('sync.n', { n: props.failedCount }))
   margin-top: auto; padding-top: 18px; display: grid; gap: 10px;
   font-family: var(--rw-font-mono); font-size: 11px; letter-spacing: 0.02em; color: var(--rw-mute);
 }
+.key { justify-self: start; display: inline-flex; align-items: center; gap: 8px; min-height: 24px; color: var(--rw-mute); }
+.key:hover { color: var(--rw-text); }
 .unsent { justify-self: start; min-height: 32px; color: var(--rw-overdue); text-align: left; }
 .unsent:hover { color: var(--rw-text); }
 .offline {
