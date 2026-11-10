@@ -77,7 +77,7 @@ export default {
   'filed.next': 'Nächste · {ctx}', 'filed.waiting': 'Warten auf', 'filed.waitingOn': 'Warten auf · nachhaken {day}', 'filed.someday': 'Irgendwann',
   'filed.project': 'Projekt · {p} · {ctx}', 'filed.deleted': 'gelöscht', 'filed.done': 'erledigt',
   // card stack (05)
-  'stack.trays': 'Fächer', 'stack.key': 'Taste {k}', 'stack.done': 'Erledigt', 'stack.delete': 'Löschen', 'stack.back': 'Zurück',
+  'stack.key': 'Taste {k}', 'stack.inTray': '{n} darin', 'stack.done': 'Erledigt', 'stack.delete': 'Löschen', 'stack.back': 'Zurück',
   'stack.hint.next': 'dann Kontext', 'stack.hint.waiting': 'dann Nachhaken', 'stack.hint.someday': 'nicht jetzt', 'stack.hint.done': 'unter 2 Minuten',
   'stack.hint.delete': 'braucht keiner', 'stack.hint.back': 'anderes Fach', 'stack.projNext': '{n} nächste',
   'stack.q.what': 'Was ist es?', 'stack.q.ctx': ['Nächste · ', 'wo erledigst du das?', ''], 'stack.q.follow': ['Warten auf · ', 'wann fragst du nach?', ''],
@@ -151,7 +151,7 @@ export default {
   'pal.ctx': 'Kontext {c}', 'pal.ctxOff': 'Kontextfilter aufheben', 'pal.theme': 'Darstellung: {v}', 'pal.capture': 'Als Todo erfassen: „{q}“',
   'pal.nothing': 'Nichts gefunden', 'pal.foot': '↑ ↓ wählen · ⏎ ausführen · Esc schließen',
   'pal.open': 'Öffnen: {d}', 'pal.edit': 'Text ändern: {d}', 'pal.start': 'Starten: {d}', 'pal.stop': 'Pausieren: {d}',
-  'pal.delete': 'Löschen: {d}', 'pal.move': 'Nach {l}: {d}', 'pal.cl': 'Klären: {v}',
+  'pal.delete': 'Löschen: {d}', 'pal.move': 'Nach {l}: {d}', 'pal.cl': 'Klären: {v}', 'pal.skip': 'Überspringen: {d}',
   'pal.g.act': 'Aktionen', 'pal.g.nav': 'Gehe zu', 'pal.g.ctx': 'Kontext', 'pal.g.look': 'Ansicht', 'pal.g.todo': 'Todos', 'pal.g.proj': 'Projekte', 'pal.g.new': 'Neu',
   // shortcuts sheet
   'keys.title': 'Tastenkürzel', 'keys.close': 'Schließen', 'keys.g.all': 'Überall', 'keys.g.lists': 'Listen', 'keys.g.rows': 'Zeilen', 'keys.g.inbox': 'Inbox klären',
@@ -161,4 +161,5 @@ export default {
   'keys.ctx': 'Kontext auf Nächste, 6 ohne Kontext', 'keys.cl.next': 'Nächste Aktion, dann Kontext', 'keys.cl.wait': 'Warten auf, dann Nachhaken',
   'keys.cl.proj': 'Zu einem Projekt, dann Kontext', 'keys.cl.answer': 'Antwort wählen', 'keys.cl.back': 'Einen Schritt zurück',
   'keys.moveTo': 'Verschieben nach Nächste, Warten auf, Irgendwann', 'keys.cl.mode': 'Liste oder Stapel', 'keys.cl.stack': 'Im Stapel: Fach',
+  'keys.g.stack': 'Inbox als Stapel', 'keys.stack.skip': 'Karte überspringen',
 }

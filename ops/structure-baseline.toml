@@ -26,6 +26,13 @@ allowlist = [
 ]
 
 [hubs]
+# Recorded on 2026-11-10 (brief 0057, approved by the owner, RISK-GOV-001: not an independent
+# approval): the one rule for what a field edit sends (`fieldEdit`: a description is replaced,
+# never cleared, and an unchanged one is not sent). The fifth importer is the card stack
+# (`tasks/useCardStack.js`), whose `e` edits the text on the card and must send exactly what the
+# detail's text edit sends rather than a second copy of the rule. A sixth is a new place that
+# edits a todo's fields and is worth a look.
+"frontend/src/shared/detailFields.js" = 5
 "backend/app/database.py" = 7
 # Recorded on 2026-08-28 with the audit log. Five dependents is the shape of the thing: an
 # audit writer is a single sink that everything with an event to record reaches — the auth

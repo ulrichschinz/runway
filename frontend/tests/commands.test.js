@@ -64,6 +64,39 @@ describe('resolving keys', () => {
     expect(resolveKey(null, 'a', ['inbox', 'rows']).command).toBe('clarify.next')
   })
 
+  it('switches the Inbox mode with s on the Inbox, and still starts a todo elsewhere', () => {
+    expect(resolveKey(null, 's', ['inboxPage', 'rows']).command).toBe('inbox.mode')
+    expect(resolveKey(null, 's', ['inbox', 'inboxPage', 'rows']).command).toBe('inbox.mode')
+    expect(resolveKey(null, 's', ['next', 'rows']).command).toBe('start')
+  })
+
+  it('files the top card with 1–5, x and Entf in the stack, and leaves the rows\' keys alone outside it', () => {
+    const stack = ['stack', 'inboxPage', 'rows']
+    expect(['1', '2', '3', '4', '5'].map((k) => resolveKey(null, k, stack).command))
+      .toEqual(['tray.next', 'tray.waiting', 'tray.someday', 'tray.done', 'tray.delete'])
+    expect(resolveKey(null, 'x', stack).command).toBe('tray.done')
+    expect(resolveKey(null, 'Delete', stack).command).toBe('tray.delete')
+    expect(resolveKey(null, 'p', stack).command).toBe('stack.project')
+    expect(resolveKey(null, 'e', stack).command).toBe('stack.edit')
+    expect(resolveKey(null, 'ArrowRight', stack).command).toBe('stack.skip')
+    expect(resolveKey(null, 'l', stack).command).toBe('stack.skip')
+    expect(resolveKey(null, 'n', stack).command).toBe('capture')
+    expect(resolveKey(null, 'z', stack).command).toBe('undo')
+    // a search rests the page's scopes: the rows' keys are back
+    expect(resolveKey(null, 'x', ['rows']).command).toBe('check')
+    expect(resolveKey(null, '1', ['rows']).command).toBe(null)
+  })
+
+  it('answers an open question of the stack with digits, and goes back with 0, Esc and ⌫', () => {
+    const step = ['stackStep', 'step', 'inboxPage', 'rows']
+    expect(resolveKey(null, '3', step).command).toBe('step.3')
+    expect(resolveKey(null, '0', step).command).toBe('stack.back')
+    expect(resolveKey(null, 'Backspace', step).command).toBe('stack.back')
+    expect(resolveKey(null, 'Escape', step).command).toBe('step.back')
+    expect(resolveKey(null, 'x', step).command).toBe('check')
+    expect(resolveKey(null, 'n', ['stepProject', ...step]).command).toBe('step.new')
+  })
+
   it('moves a row with m then n, w or v', () => {
     expect(resolveKey(null, 'm', ['rows'])).toEqual({ command: null, pending: 'm' })
     expect(resolveKey('m', 'n', ['rows']).command).toBe('move.next')
@@ -108,7 +141,7 @@ describe('resolving keys', () => {
 describe('the ? sheet', () => {
   it('is generated from the table: every command once, commands sharing a label on one line', () => {
     const sheet = shortcutSheet()
-    expect(sheet.map((g) => g.group)).toEqual(['keys.g.all', 'keys.g.lists', 'keys.g.rows', 'keys.g.inbox'])
+    expect(sheet.map((g) => g.group)).toEqual(['keys.g.all', 'keys.g.lists', 'keys.g.rows', 'keys.g.inbox', 'keys.g.stack'])
     const rows = sheet.flatMap((g) => g.rows)
     expect(rows.find((r) => r.label === 'keys.move').keys).toEqual(['j', '↓', 'k', '↑'])
     expect(rows.find((r) => r.label === 'keys.delete').keys).toEqual(['Entf', '⌫'])
@@ -116,6 +149,12 @@ describe('the ? sheet', () => {
     expect(rows.find((r) => r.label === 'keys.ctx').keys).toEqual(['0', '1', '2', '3', '4', '5', '6'])
     expect(rows.find((r) => r.label === 'keys.moveTo').keys).toEqual(['m n', 'm w', 'm v'])
     expect(rows.find((r) => r.label === 'keys.cl.back').keys).toEqual(['Esc'])
+    const stack = sheet.find((g) => g.group === 'keys.g.stack').rows
+    expect(stack.map((r) => [r.label, r.keys])).toEqual([
+      ['keys.cl.next', ['1']], ['keys.cl.wait', ['2']], ['list.someday', ['3']], ['cl.done', ['4', 'x']], ['cl.delete', ['5', 'Entf']],
+      ['keys.cl.proj', ['p']], ['keys.edit', ['e']], ['keys.stack.skip', ['→', 'l']], ['keys.cl.back', ['0', '⌫']],
+    ])
+    expect(sheet.find((g) => g.group === 'keys.g.inbox').rows.find((r) => r.label === 'keys.cl.mode').keys).toEqual(['s'])
     const keyCount = COMMANDS.reduce((n, c) => n + (c.sheetKeys ?? c.keys).length, 0)
     expect(rows.reduce((n, r) => n + r.keys.length, 0)).toBe(keyCount)
   })
@@ -179,7 +218,7 @@ describe('the palette', () => {
   const ids = (list) => list.map((c) => c.id)
 
   /** Commands that are the palette's own business: its ↑ ↓, its Esc, an open question's answers, its own key and `/`. */
-  const OWN = ['palette', 'search', 'cursor.down', 'cursor.up', 'close', 'step.back', 'step.new',
+  const OWN = ['palette', 'search', 'cursor.down', 'cursor.up', 'close', 'step.back', 'step.new', 'stack.back',
     ...['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) => `step.${k}`)]
 
   it('offers table entries only, each once, with the table key as its hint', () => {

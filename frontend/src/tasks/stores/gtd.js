@@ -35,11 +35,14 @@ import {
 } from '../../shared/gtdRules.js'
 import { cap } from '../../shared/capping.js'
 import { isDeferred } from '../../shared/detailFields.js'
-import { applyOutbox, captureRow, withSettled } from '../../shared/outboxQueue.js'
+import { applyOutbox, captureRow, localUuid, withSettled } from '../../shared/outboxQueue.js'
 import { byWeight, followUpOf, nextSections } from '../../shared/sections.js'
 
-/** Newest first; Taskwarrior stamps sort in time order. */
-const byEntryDesc = (a, b) => (b.entry || '').localeCompare(a.entry || '')
+/**
+ * Newest first; Taskwarrior stamps sort in time order. Captures of the same second keep one order
+ * (by uuid), so a reply that replaces a task never reshuffles them (the card stack's top card).
+ */
+const byEntryDesc = (a, b) => (b.entry || '').localeCompare(a.entry || '') || a.uuid.localeCompare(b.uuid)
 /** Oldest end first; a done still on its way (no `end` yet) last. */
 const byEndAsc = (a, b) => (a.end || 'Z').localeCompare(b.end || 'Z')
 /** Soonest follow-up first, then those without one, oldest first. */
@@ -86,6 +89,10 @@ export const useGtdStore = defineStore('gtd', () => {
   const inboxDot = ref(false)
   /** Uuids a rhythm turned into Taskwarrior's template: the detail says why they are gone. */
   const recurred = ref([])
+  /** A capture's `local:…` uuid → the uuid the server gave it, so a view that holds one can follow it. */
+  const named = ref({})
+  /** The uuid a task has now: a capture's server uuid once it is known, else the uuid given. */
+  const uuidNow = (uuid) => named.value[uuid] ?? uuid
   /** Per task uuid, the state the last reply gave it and when (`withSettled`). */
   const settled = new Map()
   /** Deferred todos the detail shows although no list does (`keepAside`). */
@@ -143,6 +150,7 @@ export const useGtdStore = defineStore('gtd', () => {
         settleTask(op.uuid, null)
         break
       case 'capture':
+        named.value = { ...named.value, [localUuid(op.id)]: op.uuid }
         settleTask(op.uuid, captureRow(op))
         readTask(op.uuid)
         break
@@ -377,7 +385,7 @@ export const useGtdStore = defineStore('gtd', () => {
     // state
     summary, today, loaded, stand, offline, lastAction, inboxDot, recurred,
     // lists
-    open, taskOf, keepAside, inbox, next, waiting, someday, unlisted, doneToday, doneWeek, projects,
+    open, taskOf, uuidNow, keepAside, inbox, next, waiting, someday, unlisted, doneToday, doneWeek, projects,
     contexts, contextChoices, contextCount, progress, caption, reviewDue, sectionsFor,
     // the outbox
     ops: outbox.ops, failed, paused, held,

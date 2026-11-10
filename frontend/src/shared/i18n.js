@@ -40,3 +40,6 @@ export function t(key, vars) {
   // arrays are always copied, so a caller can never change the table
   return vars || Array.isArray(value) ? fillDeep(value, vars || {}) : value
 }
+
+/** Whether the catalogue has `key` — for an optional text built from data (a context's hint). */
+export const hasText = (key) => Object.hasOwn(messages, key)
