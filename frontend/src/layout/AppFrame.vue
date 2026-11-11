@@ -11,7 +11,8 @@
  *
  * Slots: `head` (eyebrow, heading), default (the page), `chips` (head on wide screens, dock on the
  * phone), `notice` (rendered inside the one `aria-live` region: bottom of the page column, or the
- * dock), `capture` (bottom of the page column, or the dock), `margin` (the margin column), `panel`
+ * dock), `capture` (bottom of the page column, or the dock), `margin` (the margin column's panels,
+ * plan M12: the column on wide screens, the Mehr sheet on the phone, nowhere at 761-1180 px), `panel`
  * (a todo's detail, plan M7: it takes the margin column's place on wide screens, docks as a 360 px
  * column beside the page at 761-1180 px, and is a sheet from the bottom on the phone; a tap on the
  * sheet's scrim emits `closePanel`).
@@ -23,19 +24,28 @@
  * the palette offers like every other command. `searchEnter` asks the page to put the cursor on
  * the first hit. It holds the Tageslinse's bead overlay (plan M11, `lens/BeadFlight.vue`).
  */
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import CommandPalette from './CommandPalette.vue'
 import BeadFlight from './lens/BeadFlight.vue'
 import MarginColumn from './MarginColumn.vue'
 import PhoneDock from './PhoneDock.vue'
 import RailNav from './RailNav.vue'
-import ShortcutsSheet from './ShortcutsSheet.vue'
 import TopLine from './TopLine.vue'
 import { useKeymap } from '../composables/useKeymap.js'
 import { PHONE, WIDE, useMedia, useVisualViewport } from '../composables/useMedia.js'
 import { paletteKeyAction } from '../shared/commands.js'
 import { LISTS, PLACES } from '../shared/navigation.js'
+
+// The `?` sheet is a chunk of its own (brief 0059: the entry's 130 kB budget while both UIs ship,
+// after M12 added the margin column), fetched in idle time once the frame is up, so `?` still opens
+// it after the connection drops or a redeploy replaced the chunk. An index blind spot (BLIND-FE-002).
+const loadShortcutsSheet = () => import('./ShortcutsSheet.vue')
+const ShortcutsSheet = defineAsyncComponent(loadShortcutsSheet)
+onMounted(() => {
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200))
+  idle(() => loadShortcutsSheet().catch(() => {}))
+})
 
 const props = defineProps({
   /** the route's view (`meta.view`): marks the current rail entry and dock tab */
@@ -150,6 +160,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPaletteKey))
         </template>
         <template v-if="$slots.chips" #chips><div class="dock-chips"><slot name="chips" /></div></template>
         <template v-if="$slots.capture" #capture><slot name="capture" /></template>
+        <template v-if="$slots.margin" #more><slot name="margin" /></template>
       </PhoneDock>
     </div>
     <MarginColumn v-if="wide || (!phone && $slots.panel)">

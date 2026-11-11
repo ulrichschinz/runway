@@ -1,8 +1,9 @@
 <script setup>
 /**
- * The margin column ("Randspalte") beside the page on wide screens (06). A container only: its
- * panels (Heute, Nachhaken, Projekte, Rückblick, the detail, the clarify panel) come with their
- * milestones and are passed in through the frame's `margin` slot.
+ * The margin column ("Randspalte") beside the page on wide screens (06). A container only: the
+ * frame puts into it the page's `margin` slot — the panels Heute, Nachhaken, Projekte, Rückblick
+ * (`tasks/panels/MarginPanels.vue`, plan M12) — or, while one is open, the `panel` slot (a todo's
+ * detail, the Inbox's clarify panel, Nächste's Heute).
  */
 import { t } from '../shared/i18n.js'
 </script>

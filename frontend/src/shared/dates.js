@@ -34,6 +34,7 @@ const minuteParts = new Intl.DateTimeFormat('en-CA', {
   hourCycle: 'h23',
 })
 const weekdayShort = new Intl.DateTimeFormat('de-DE', { timeZone: 'UTC', weekday: 'short' })
+const dayLong = new Intl.DateTimeFormat('de-DE', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' })
 const clock = new Intl.DateTimeFormat('de-DE', {
   timeZone: SERVER_TZ,
   hour: '2-digit',
@@ -135,6 +136,14 @@ export function formatDay(day) {
   const weekday = weekdayShort.format(noon(day)).replace('.', '')
   return `${weekday} ${date}.${month}.`
 }
+
+/**
+ * A day written out, as the margin's "Heute" heads it (06 `longDay`): `Dienstag, 10. November`.
+ *
+ * @param {string} day YYYY-MM-DD, the server's
+ * @returns {string}
+ */
+export const longDay = (day) => dayLong.format(noon(day))
 
 /**
  * The answers to "Wann fragst du nach?" for a todo going to Warten auf.

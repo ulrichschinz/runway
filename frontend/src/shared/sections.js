@@ -122,3 +122,20 @@ export function waitingSections(tasks, today) {
   }
   return out
 }
+
+/**
+ * The margin's "Nachhaken" (06 `todayPanel`): the first `n` waiting todos whose follow-up day has
+ * come (`due`, Warten auf's own Nachhaken section) or comes within the week, due ones first, in
+ * the input order inside each; a later or undated follow-up is never among them.
+ *
+ * @param {object[]} tasks the waiting todos, in Warten auf's order
+ * @param {string} today YYYY-MM-DD
+ * @param {number} [n] how many rows at most
+ * @returns {{due: number, rows: Array<{task: object, day: string, due: boolean}>}} `due` counts
+ *   every todo whose day has come, also beyond `n`
+ */
+export function followUps(tasks, today, n = 3) {
+  const s = waitingSections(tasks, today)
+  const rows = [...s.due.map((task) => ({ task, due: true })), ...s.soon.map((task) => ({ task, due: false }))]
+  return { due: s.due.length, rows: rows.slice(0, n).map((r) => ({ ...r, day: followUpOf(r.task) })) }
+}

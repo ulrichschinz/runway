@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { NO_CONTEXT } from '../src/shared/contexts.js'
-import { followUpOf, inContext, nextSections, ringOf, waitingSections } from '../src/shared/sections.js'
+import { followUpOf, followUps, inContext, nextSections, ringOf, waitingSections } from '../src/shared/sections.js'
 
 const TODAY = '2026-10-31'
 const next = (uuid, extra = {}) => ({ uuid, tags: ['next', '@a'], urgency: 1, ...extra })
@@ -105,5 +105,38 @@ describe('Warten auf sections', () => {
     expect(s.due.map((t) => t.uuid)).toEqual(['yesterday', 'today'])
     expect(s.soon.map((t) => t.uuid)).toEqual(['in7', 'tomorrow'])
     expect(s.later.map((t) => t.uuid)).toEqual(['none', 'in8'])
+  })
+})
+
+describe('the margin\'s Nachhaken', () => {
+  const w = (uuid, extra = {}) => ({ uuid, tags: ['waiting'], ...extra })
+  it('lists due follow-ups first, then this week, never later or undated ones', () => {
+    const tasks = [
+      w('none'), w('in8', { scheduled: '2026-11-08' }), w('tomorrow', { scheduled: '2026-11-01' }),
+      w('yesterday', { scheduled: '2026-10-30' }),
+    ]
+    const f = followUps(tasks, TODAY)
+    expect(f.rows.map((r) => [r.task.uuid, r.due, r.day])).toEqual([
+      ['yesterday', true, '2026-10-30'], ['tomorrow', false, '2026-11-01'],
+    ])
+    expect(f.due).toBe(1)
+  })
+
+  it('shows at most three rows and still counts every due one', () => {
+    const tasks = ['a', 'b', 'c', 'd'].map((id) => w(id, { scheduled: '2026-10-29' }))
+    const f = followUps(tasks, TODAY)
+    expect(f.rows.map((r) => r.task.uuid)).toEqual(['a', 'b', 'c'])
+    expect(f.due).toBe(4)
+    expect(followUps(tasks, TODAY, 1).rows).toHaveLength(1)
+  })
+
+  it('takes a hiding wait as the follow-up day, as Warten auf does', () => {
+    const f = followUps([w('hidden', { wait: '20261102T230000Z' })], TODAY)
+    expect(f.rows).toEqual([{ task: expect.objectContaining({ uuid: 'hidden' }), due: false, day: '2026-11-03' }])
+    expect(f.due).toBe(0)
+  })
+
+  it('is empty without waiting todos', () => {
+    expect(followUps([], TODAY)).toEqual({ due: 0, rows: [] })
   })
 })

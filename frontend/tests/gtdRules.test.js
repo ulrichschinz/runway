@@ -13,6 +13,8 @@ import {
   listOf,
   listPayload,
   planPayload,
+  reviewAge,
+  reviewAgoKey,
   reviewDue,
   tagPayload,
 } from '../src/shared/gtdRules.js'
@@ -289,5 +291,31 @@ describe('tagPayload: one tag on or off, as a delta', () => {
     const t = todo({ tags: ['next', '@unterwegs,@buero'] })
     expect(contextPayload(t, '@buero')).toEqual(tagPayload(t, '@buero'))
     expect(contextPayload(t, '@home')).toEqual(tagPayload(t, '@home'))
+  })
+})
+
+describe('reviewAge', () => {
+  it('has no day without a recorded weekly review, and is due', () => {
+    expect(reviewAge(null, '2026-11-10')).toEqual({ day: null, days: null, due: true })
+  })
+  it('counts calendar days in server time, today as 0', () => {
+    expect(reviewAge('20261110T080000Z', '2026-11-10')).toEqual({ day: '2026-11-10', days: 0, due: false })
+    // 23:30 UTC on 9 Nov is 00:30 on 10 Nov in Berlin
+    expect(reviewAge('20261109T233000Z', '2026-11-10').days).toBe(0)
+    expect(reviewAge('20261104T100000Z', '2026-11-10')).toEqual({ day: '2026-11-04', days: 6, due: false })
+  })
+  it('crosses a DST night by whole days and is due from seven on', () => {
+    // 25 Oct 2026 is the night the clocks go back
+    expect(reviewAge('20261024T100000Z', '2026-10-31')).toEqual({ day: '2026-10-24', days: 7, due: true })
+  })
+})
+
+describe('reviewAgoKey', () => {
+  it('says heute, gestern (one day ago, not "vor 1 Tagen"), then vor n Tagen', () => {
+    expect(reviewAgoKey(0)).toBe('m.reviewToday')
+    expect(reviewAge('20261109T100000Z', '2026-11-10').days).toBe(1)
+    expect(reviewAgoKey(1)).toBe('m.reviewAgo1')
+    expect(reviewAgoKey(2)).toBe('m.reviewAgo')
+    expect(reviewAgoKey(7)).toBe('m.reviewAgo')
   })
 })

@@ -42,7 +42,7 @@ export default {
   'ctxhint.computer': 'am Rechner', 'ctxhint.anrufe': 'Telefon', 'ctxhint.zuhause': 'daheim', 'ctxhint.unterwegs': 'unterwegs', 'ctxhint.buero': 'im Büro',
   // the Tageslinse
   'lens.cap': '{done} von {total} heute', 'lens.short': '{done} von {total}', 'lens.extra': ' · {n} zusätzlich',
-  'lens.of': '{done} von {total}', 'lens.sub': 'geplant und erledigt', 'lens.aria': 'Heute {done} von {total} geplanten Todos erledigt. Tagesübersicht öffnen',
+  'lens.of': '{done} von {total}', 'lens.sub': 'geplant und erledigt', 'lens.aria': 'Heute {done} von {total} geplanten Todos erledigt. Tagesübersicht öffnen', 'lens.open': 'Tagesübersicht öffnen',
   // sections and empty states
   'sec.due': 'Fällig', 'sec.dueOther': 'Fällig · andere Kontexte', 'sec.otherCtx': 'andere Kontexte', 'ctx.plusNone': '+{n} ohne Kontext', 'sec.jetzt': 'Jetzt', 'sec.bald': 'Bald', 'sec.spaeter': 'Später',
   'sec.nextActions': 'Nächste Aktionen', 'sec.wdue': 'Heute nachhaken', 'sec.wsoon': 'Diese Woche', 'sec.wlater': 'Später oder ohne Datum',
@@ -93,8 +93,9 @@ export default {
   'notice.proj.active': '{p} wieder aktiv', 'notice.proj.on_hold': '{p} ruht', 'notice.proj.done': '{p} abgeschlossen',
   // margin
   'm.today': 'Heute', 'm.follow': 'Nachhaken', 'm.followToday': '{n} heute', 'm.since': 'seit {d}', 'm.followNone': 'Diese Woche ist niemand fällig.',
-  'm.projOk': 'Alle {n} aktiven Projekte haben eine nächste Aktion.', 'm.reviewLast': ['Zuletzt ', '{d}', ''], 'm.reviewAgo': ', vor {n} Tagen.',
-  'm.reviewToday': ', heute.', 'm.reviewStart': 'Rückblick beginnen', 'm.filed': 'Geklärt', 'm.filedNone': 'Noch nichts geklärt. Neues landet hier, sobald du es einsortierst.',
+  'm.projOk': 'Alle {n} aktiven Projekte haben eine nächste Aktion.', 'm.reviewLast': ['Zuletzt ', '{d}', ''], 'm.reviewAgo': ', vor {n} Tagen.', 'm.reviewAgo1': ', gestern.',
+  'm.reviewToday': ', heute.', 'm.reviewNever': 'Noch kein Rückblick festgehalten.',
+  'm.followDay': '{day}', 'm.doneToday': 'Heute erledigt', 'm.sinceDay': 'seit {day}', 'm.reviewStart': 'Rückblick beginnen', 'm.filed': 'Geklärt', 'm.filedNone': 'Noch nichts geklärt. Neues landet hier, sobald du es einsortierst.',
   // detail
   'd.title': 'Todo', 'd.runningSince': 'läuft seit {t}', 'd.notStarted': 'nicht gestartet', 'd.start': 'Starten', 'd.pause': 'Pausieren',
   'd.list': 'Liste', 'd.context': 'Kontext', 'd.project': 'Projekt', 'd.noProject': 'keins', 'd.today': 'Heute', 'd.plannedOn': 'für heute geplant',
