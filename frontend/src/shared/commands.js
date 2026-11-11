@@ -39,7 +39,8 @@ const tray = (to, keys, label) => ({
 
 export const COMMANDS = [
   { id: 'palette', keys: [], sheetKeys: [['Mod', 'K']], scope: 'global', group: 'keys.g.all', label: 'keys.palette' },
-  { id: 'capture', keys: [['n']], scope: 'global', group: 'keys.g.all', label: 'capture.new', pal: { group: 'act' } },
+  // `n` is "neu, hier" (03): a todo; on Projekte a project, on a project's page its next action (plan M13)
+  { id: 'capture', keys: [['n']], scope: 'global', group: 'keys.g.all', label: 'keys.new', pal: { group: 'act', label: 'capture.new' } },
   { id: 'search', keys: [['/']], scope: 'global', group: 'keys.g.all', label: 'keys.search' },
   { id: 'undo', keys: [['z']], scope: 'global', group: 'keys.g.all', label: 'keys.undo', pal: { group: 'act', offered: true } },
   { id: 'shortcuts', keys: [['?']], scope: 'global', group: 'keys.g.all', label: 'keys.title', pal: { group: 'look' } },

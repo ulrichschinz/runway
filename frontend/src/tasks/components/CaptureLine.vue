@@ -21,6 +21,8 @@ import { useGtdStore } from '../stores/gtd.js'
 const props = defineProps({
   /** focus the field when the page opens on the phone (the Inbox) */
   focusOnOpen: { type: Boolean, default: false },
+  /** show `n` as its key: false where the page gives `n` to something else (a project's next action) */
+  keyHint: { type: Boolean, default: true },
 })
 
 const gtd = useGtdStore()
@@ -68,7 +70,7 @@ defineExpose({ focus: () => input.value?.focus() })
       @input="saveDraft(text)" @keydown.esc="input.blur()"
     >
     <template v-if="!phone">
-      <span class="hint">{{ t('capture.hint') }}</span><kbd aria-hidden="true">n</kbd>
+      <span class="hint">{{ t('capture.hint') }}</span><kbd v-if="keyHint" aria-hidden="true">n</kbd>
     </template>
   </form>
 </template>

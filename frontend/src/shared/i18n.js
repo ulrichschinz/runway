@@ -8,10 +8,24 @@
  * A missing key renders as the key itself, so a gap is visible rather than blank, and
  * logs an error in development builds. `frontend/tests/strings.test.js` scans the source
  * for `t('…')` literals so a missing key fails the suite before it reaches anyone.
+ *
+ * A page that is a chunk of its own may bring a table of its own (`addMessages`, plan M13: the
+ * projects pages' `messages.projects.de.js`), so its texts do not weigh on the entry. Its keys never
+ * repeat the main table's; the main table is looked up first.
  */
 
 import { formatDay } from './dates.js'
 import messages from './messages.de.js'
+
+/** The main table, then the tables lazy pages added. */
+const tables = [messages]
+
+/** Add a lazy page's table to `t()`; adding the same table again changes nothing. */
+export function addMessages(table) {
+  if (!tables.includes(table)) tables.push(table)
+}
+
+const tableOf = (key) => tables.find((table) => Object.hasOwn(table, key))
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -32,14 +46,15 @@ const fillDeep = (value, vars) =>
  * @returns {string|Array} the German text; an array for structured values
  */
 export function t(key, vars) {
-  if (!Object.hasOwn(messages, key)) {
+  const table = tableOf(key)
+  if (!table) {
     if (import.meta.env?.DEV) console.error(`i18n: missing key ${key}`)
     return key
   }
-  const value = messages[key]
+  const value = table[key]
   // arrays are always copied, so a caller can never change the table
   return vars || Array.isArray(value) ? fillDeep(value, vars || {}) : value
 }
 
 /** Whether the catalogue has `key` — for an optional text built from data (a context's hint). */
-export const hasText = (key) => Object.hasOwn(messages, key)
+export const hasText = (key) => !!tableOf(key)
