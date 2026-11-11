@@ -4,9 +4,11 @@
  * sections, the notice, and the row behaviour of `useListPage` (cursor, tick off, delete, plan,
  * keys), the capture line (`n` focuses it) and the open todo's detail (`?task=<uuid>`, plan M7:
  * a click on a row, `Enter`/`o`, `e` to edit its text; `Esc` closes it and the focus goes back to
- * the row). A page only says what its head shows and which sections it has. Slots: `aside`
- * (right of the heading: Nächste's caption), `head` (under it), `chips`, default (above the list),
- * and `panel` (the page's own panel while no detail is open: the Inbox's clarify panel).
+ * the row). A page only says what its head shows and which sections it has. Slots: `top` (above
+ * the eyebrow: a project's way back), `aside` (right of the heading: Nächste's caption), `byline`
+ * (under the heading), `head` (under it), `chips`, default (above the list), `after` (under the list:
+ * a project's plan where there is no margin column), and `panel` (the page's own panel while no
+ * detail is open: the Inbox's clarify panel, a project's plan).
  *
  * While the `/` search has a query (plan M9, 06 `sectionsFor('search')`), the page steps aside: the
  * head says "Gefunden in allen Listen" with the hits by list, rows work as rows, and the page's own
@@ -247,6 +249,7 @@ defineExpose({
       </div>
     </template>
     <template v-else #head>
+      <slot name="top" />
       <div class="head" :class="{ aside: $slots.aside }">
         <div class="text">
           <EyebrowLine :parts="eyebrow" />
@@ -264,8 +267,9 @@ defineExpose({
       v-if="gtd.today" :sections="shown" :today="gtd.today" :cursor="page.cursor.value" :leaving="page.leaving"
       @check="page.check" @select="onSelect" @retry="page.retry"
     />
+    <slot v-if="!searching" name="after" />
     <template #capture>
-      <CaptureLine ref="captureLine" :focus-on-open="captureFocus && frame.props.value.view === 'inbox'" />
+      <CaptureLine ref="captureLine" :focus-on-open="captureFocus && frame.props.value.view === 'inbox'" :key-hint="!keys.capture" />
     </template>
     <template v-if="openId" #panel>
       <TaskDetail

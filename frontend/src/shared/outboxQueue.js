@@ -49,9 +49,18 @@ const QUERY_MAX = 200
 
 const STATES = ['held', 'queued', 'sending', 'failed', 'auth']
 
-/** Each kind's request. `fields` are what the caller knows; a body is JSON or null. */
+/**
+ * Each kind's request. `fields` are what the caller knows; a body is JSON or null.
+ *
+ * A capture goes to the Inbox; one that names a project (a project's next action, plan M13,
+ * brief 0060) is created there directly, with its tags: `POST /tasks`. Both answer with the
+ * task's uuid, and everything else about a capture — its row, its undo, its duplicate check —
+ * is the same.
+ */
 const REQUESTS = {
-  capture: ({ description, note }) => ['POST', '/inbox', note ? { description, note } : { description }],
+  capture: ({ description, note, project, tags }) => (project
+    ? ['POST', '/tasks', { description, project, tags: [...(tags || [])] }]
+    : ['POST', '/inbox', note ? { description, note } : { description }]),
   put: ({ uuid, body }) => ['PUT', `/tasks/${uuid}`, body],
   done: ({ uuid }) => ['POST', `/tasks/${uuid}/done`, null],
   delete: ({ uuid }) => ['DELETE', `/tasks/${uuid}`, null],
@@ -344,13 +353,14 @@ export function alreadyApplied(op, answer) {
 }
 
 /**
- * The Inbox row of a capture the server has not confirmed (or has, until its task is read):
- * the text and note as typed, entered when the op was made.
+ * The row of a capture the server has not confirmed (or has, until its task is read): the text
+ * and note as typed, the project and tags of a project's next action, entered when the op was made.
  */
 export function captureRow(op) {
   const entry = stampOf(op.at)
   return {
-    uuid: op.uuid, description: op.body.description, status: 'pending', project: null, tags: [],
+    uuid: op.uuid, description: op.body.description, status: 'pending', project: op.body.project ?? null,
+    tags: [...(op.body.tags || [])],
     annotations: op.body.note ? [{ entry, description: op.body.note }] : [], entry, urgency: 0,
   }
 }

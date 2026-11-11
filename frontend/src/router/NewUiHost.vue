@@ -11,7 +11,8 @@
  * It registers the task search the command palette offers (`useTaskSearch`, plan M9), so the
  * layout's palette finds todos and projects without importing a feature. It hands every page the
  * margin column's panels (plan M12, `frame.margin`), a chunk of their own, fetched in idle time
- * after mount (the entry budget; an index blind spot, BLIND-FE-002).
+ * after mount (the entry budget; an index blind spot, BLIND-FE-002), and in the same idle time the
+ * pages that are chunks of their own (`lazyPages.js`, plan M13).
  */
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -23,6 +24,7 @@ import { taskParam } from '../shared/returnPath.js'
 import { useAuthStore } from '../stores/auth.js'
 import { useGtdStore } from '../tasks/stores/gtd.js'
 import { useTaskSearch } from '../tasks/useTaskSearch.js'
+import { prefetchPages } from './lazyPages.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -120,15 +122,19 @@ const margin = defineAsyncComponent(loadMargin)
 // The phone shows the panels only in the Mehr sheet: fetched in idle time, so they are there offline too.
 onMounted(() => {
   const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200))
-  idle(() => loadMargin().catch(() => {}))
+  idle(() => {
+    loadMargin().catch(() => {})
+    prefetchPages()
+  })
 })
 
 provideFrame({ props, on, taskId, task, openTask, closeTask, margin })
 
-// The tab says where you are; the old UI keeps the page's own title.
+// The tab says where you are (a project's page: its name, 06 `render`); the old UI keeps the page's own title.
 const oldTitle = document.title
-watch(view, (v) => {
-  document.title = v ? `${t(`title.${v === 'project' ? 'projects' : v}`)} · ${t('brand.product')}` : oldTitle
+watch([view, () => route.params.name], ([v, name]) => {
+  const where = v === 'project' && name ? String(name) : v && t(`title.${v === 'project' ? 'projects' : v}`)
+  document.title = v ? `${where} · ${t('brand.product')}` : oldTitle
 }, { immediate: true })
 onBeforeUnmount(() => {
   document.title = oldTitle

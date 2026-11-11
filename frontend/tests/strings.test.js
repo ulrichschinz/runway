@@ -11,6 +11,10 @@ import { describe, expect, it } from 'vitest'
 import { followUpOptions } from '../src/shared/dates.js'
 import { projectNameError } from '../src/shared/gtdRules.js'
 import messages from '../src/shared/messages.de.js'
+import projectMessages from '../src/shared/messages.projects.de.js'
+
+// A lazy page's own table (brief 0060) is part of the catalogue; `t()` reads both.
+const catalogue = { ...messages, ...projectMessages }
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url))
 const vectors = JSON.parse(readFileSync(new URL('./vectors/gtd-rules.v1.json', import.meta.url), 'utf8'))
@@ -62,12 +66,17 @@ describe('the strings Android pins', () => {
 describe('the message table', () => {
   it('holds only text: strings, or arrays of strings and string pairs, never markup', () => {
     const texts = (value) => (Array.isArray(value) ? value.flatMap(texts) : [value])
-    for (const [key, value] of Object.entries(messages)) {
+    for (const [key, value] of Object.entries(catalogue)) {
       for (const text of texts(value)) {
         expect(typeof text, key).toBe('string')
         expect(text, key).not.toMatch(/<[a-z/]/i)
       }
     }
+  })
+
+  it('keeps the projects pages’ table apart: no key in both, no heading in it', () => {
+    expect(Object.keys(projectMessages).filter((key) => Object.hasOwn(messages, key))).toEqual([])
+    expect(Object.keys(projectMessages).filter((key) => key.startsWith('h.'))).toEqual([])
   })
 
   it('has headings with exactly one emphasised word', () => {
@@ -94,7 +103,7 @@ describe('every t() call in frontend/src', () => {
   })
 
   it('names a key the table has', () => {
-    const missing = calls.filter((c) => !Object.hasOwn(messages, c.key))
+    const missing = calls.filter((c) => !Object.hasOwn(catalogue, c.key))
     expect(missing.map((c) => `${c.file.slice(SRC.length + 1)}: ${c.key}`)).toEqual([])
   })
 })

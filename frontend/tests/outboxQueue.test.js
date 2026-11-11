@@ -48,6 +48,45 @@ describe('createOp', () => {
     expect(createOp('review', {}, meta())).toMatchObject({ method: 'POST', path: '/gtd/review', body: { kind: 'weekly' } })
     expect(() => createOp('rename', {}, meta())).toThrow(/unknown outbox kind/)
   })
+
+  // A project's next action (plan M13, brief 0060): created in the project, not in the Inbox.
+  it('sends a capture that names a project to POST /tasks, with its tags', () => {
+    const m = meta()
+    const tags = ['next', '@home']
+    const op = createOp('capture', { description: 'Fotos sichten', project: 'Website-Relaunch', tags, label: 'Fotos sichten' }, m)
+    expect(op).toMatchObject({
+      method: 'POST', path: '/tasks', uuid: `local:${m.id}`,
+      body: { description: 'Fotos sichten', project: 'Website-Relaunch', tags: ['next', '@home'] },
+    })
+    expect(op.body.tags).not.toBe(tags)
+  })
+})
+
+describe('a capture into a project', () => {
+  const projectOp = () => createOp('capture', {
+    description: 'Fotos sichten', project: 'Website-Relaunch', tags: ['next', '@home'], label: 'Fotos sichten',
+  }, meta())
+
+  it('shows its row in the project with its tags before the server answers', () => {
+    const op = projectOp()
+    const { tasks } = applyOutbox({ tasks: [], done: [], projects: [] }, enqueue([], op))
+    expect(tasks).toEqual([expect.objectContaining({
+      uuid: op.uuid, description: 'Fotos sichten', project: 'Website-Relaunch', tags: ['next', '@home'], sync: 'queued',
+    })])
+  })
+
+  it('is taken back with a DELETE once the server has named it, as any capture', () => {
+    const op = projectOp()
+    const { ops, settled } = sendOk(enqueue([], op), op.id, { uuid: 'u-foto', description: 'Fotos sichten', project: 'Website-Relaunch' })
+    expect(settled.uuid).toBe('u-foto')
+    expect(undo(ops, settled, next()).ops).toEqual([expect.objectContaining({ kind: 'delete', path: '/tasks/u-foto' })])
+  })
+
+  it('is checked for a twin before it is sent again', () => {
+    const op = projectOp()
+    const failed = fail(begin(enqueue([], op), op.id), op.id, { reason: 'network' })[0]
+    expect(verifyRequest(failed)).toEqual({ path: '/tasks', params: { status: 'all', q: 'Fotos sichten' } })
+  })
 })
 
 describe('send now or hold', () => {

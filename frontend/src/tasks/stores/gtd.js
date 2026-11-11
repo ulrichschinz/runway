@@ -36,6 +36,7 @@ import {
 import { cap } from '../../shared/capping.js'
 import { isDeferred } from '../../shared/detailFields.js'
 import { applyOutbox, captureRow, localUuid, withSettled } from '../../shared/outboxQueue.js'
+import { withSnapshot } from '../../shared/projectStalled.js'
 import { byWeight, followUpOf, followUps as followUpsRule, nextSections } from '../../shared/sections.js'
 
 /**
@@ -223,7 +224,11 @@ export const useGtdStore = defineStore('gtd', () => {
     const since = today.value && plusDays(today.value, -6)
     return done.value.filter((t) => !t.end || dayOf(t.end) >= since).sort((a, b) => byEndAsc(b, a))
   })
-  const projects = computed(() => view.value.projects)
+  /**
+   * The projects overview with the snapshot's reading (plan M13): `stalled` as the server reads
+   * it, but from the todos on screen now, and `counts` by list (`withSnapshot`).
+   */
+  const projects = computed(() => withSnapshot(view.value.projects, open.value))
   const contexts = computed(() => orderContexts(presentContexts(open.value)))
   /** The contexts the clarify panel offers for Nächste (D1, or the preset for a user without any). */
   const contextChoices = computed(() => clarifyContexts(contexts.value))
@@ -373,6 +378,20 @@ export const useGtdStore = defineStore('gtd', () => {
     return { name: n }
   }
 
+  /**
+   * A project's next action (plan M13, 06 `addToProject`): a capture into the project with
+   * `next` and its context, sent at once (`POST /tasks`), Rückgängig a DELETE. It needs a context
+   * (06 open question 6), so without one nothing is sent.
+   * @returns the op, or null when there is no text, no project or no context
+   */
+  function addNextAction(project, text, ctx) {
+    const capped = cap(text)
+    if (!capped || !project || !ctx) return null
+    return remember(outbox.add('capture', {
+      description: capped.description, project, tags: ['next', ctx], label: capped.description,
+    }))
+  }
+
   function setProjectStatus(name, status) {
     const p = projects.value.find((x) => x.name === name)
     return p && p.status !== status ? outbox.add('projectStatus', { name, status, label: name }) : null
@@ -396,6 +415,6 @@ export const useGtdStore = defineStore('gtd', () => {
     // actions
     refresh: freshness.refresh,
     capture, captureOnLeave, seeInbox, complete, remove, undo, clarify, setList, setContext, toggleTag, togglePlanned, update,
-    start, stop, annotate, createProject, setProjectStatus, recordReview, retry,
+    start, stop, annotate, addNextAction, createProject, setProjectStatus, recordReview, retry,
   }
 })
