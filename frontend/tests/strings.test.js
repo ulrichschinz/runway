@@ -8,13 +8,19 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
+import { connectClaudeSteps } from '../src/shared/claudeConnect.js'
 import { followUpOptions } from '../src/shared/dates.js'
 import { projectNameError } from '../src/shared/gtdRules.js'
 import messages from '../src/shared/messages.de.js'
 import projectMessages from '../src/shared/messages.projects.de.js'
+import reviewMessages from '../src/shared/messages.review.de.js'
+import settingsMessages from '../src/shared/messages.settings.de.js'
+import { copyFailedKey, passwordError, roleError } from '../src/shared/settingsRules.js'
+import { reviewHead, reviewSteps } from '../src/shared/weeklyReview.js'
 
-// A lazy page's own table (brief 0060) is part of the catalogue; `t()` reads both.
-const catalogue = { ...messages, ...projectMessages }
+// A lazy page's own table (briefs 0060, 0061) is part of the catalogue; `t()` reads them all.
+const LAZY_TABLES = { projects: projectMessages, review: reviewMessages, settings: settingsMessages }
+const catalogue = Object.assign({}, messages, ...Object.values(LAZY_TABLES))
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url))
 const vectors = JSON.parse(readFileSync(new URL('./vectors/gtd-rules.v1.json', import.meta.url), 'utf8'))
@@ -74,9 +80,14 @@ describe('the message table', () => {
     }
   })
 
-  it('keeps the projects pages’ table apart: no key in both, no heading in it', () => {
-    expect(Object.keys(projectMessages).filter((key) => Object.hasOwn(messages, key))).toEqual([])
-    expect(Object.keys(projectMessages).filter((key) => key.startsWith('h.'))).toEqual([])
+  it('keeps each lazy page’s table apart: no key in two tables, no heading in it', () => {
+    const tables = [['main', messages], ...Object.entries(LAZY_TABLES)]
+    for (const [name, table] of Object.entries(LAZY_TABLES)) {
+      for (const [other, otherTable] of tables.filter(([n]) => n !== name)) {
+        expect(Object.keys(table).filter((key) => Object.hasOwn(otherTable, key)), `${name} / ${other}`).toEqual([])
+      }
+      expect(Object.keys(table).filter((key) => key.startsWith('h.')), name).toEqual([])
+    }
   })
 
   it('has headings with exactly one emphasised word', () => {
@@ -134,5 +145,33 @@ describe('the keys the rules return instead of calling t()', () => {
 
   it('both lens caption keys exist (lensCaption picks one in a ternary)', () => {
     expect(['lens.short', 'lens.cap', 'lens.extra'].filter((key) => !has(key))).toEqual([])
+  })
+
+  // Rückblick and Einstellungen (brief 0061): their keys live in the pages' own tables.
+  const known = (key) => Object.hasOwn(catalogue, key)
+
+  it('every key the review steps and head return exists', () => {
+    const counts = { inbox: 0, next: 1, due: 0, waitingDue: 0, waitingSoon: 0, someday: 1 }
+    const keys = [
+      ...reviewSteps({ ...counts, stalled: [] }), ...reviewSteps({ ...counts, inbox: 2, someday: 3, stalled: ['Podcast'] }),
+    ].flatMap((step) => [step.what, step.why.key, step.status.key])
+    const heads = [null, { day: null }, { day: '2026-11-03', days: 8 }, { day: '2026-11-10', days: 1 }, { day: '2026-11-11', days: 0 }]
+    keys.push(...heads.flatMap((age) => reviewHead(age).map((part) => part.key)))
+    expect(keys).toContain('rs.5s1')
+    expect(keys).toContain('review.never')
+    expect(keys.filter((key) => !known(key))).toEqual([])
+  })
+
+  it('every key the settings rules return exists, and every Claude step has a German title', () => {
+    const keys = [
+      passwordError({ current: '', next: '', confirm: '' }),
+      passwordError({ current: 'a', next: '', confirm: '' }),
+      passwordError({ current: 'a', next: 'b', confirm: 'c' }),
+      ...[409, 404, undefined, 500].map(roleError),
+      copyFailedKey('x', null), copyFailedKey('••••5a69', 'rw_key5a69'),
+      'set.pw.wrong', 'set.role.admin', 'set.role.user', 'set.saved', 'set.pw.done', 'set.regenDone',
+      ...connectClaudeSteps('https://runway.example', null).map((step) => `set.step.${step.id}`),
+    ]
+    expect(keys.filter((key) => !known(key))).toEqual([])
   })
 })

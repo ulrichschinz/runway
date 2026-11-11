@@ -2,6 +2,8 @@
 /**
  * Every button of the new UI is a pill (brand kit). `action` is the one coral primary action of
  * a view, `quiet` a borderless secondary one; `pressed` makes it a toggle (`aria-pressed`).
+ * A button busy with its own request takes `aria-disabled="true"` rather than `disabled`, and its
+ * handler ignores the click: a focused button that disables itself drops the focus to the page.
  */
 defineProps({
   action: { type: Boolean, default: false },
@@ -25,9 +27,9 @@ defineProps({
   transition: background var(--rw-dur-fast), border-color var(--rw-dur-fast);
 }
 .pill:hover { background: var(--rw-hover); }
-.pill:disabled { opacity: 0.55; cursor: default; }
+.pill:disabled, .pill[aria-disabled='true'] { opacity: 0.55; cursor: default; }
 .pill.action { background: var(--rw-action); color: var(--rw-on-action); border-color: transparent; }
-.pill.action:hover:not(:disabled) { box-shadow: var(--ar-shadow-md); }
+.pill.action:hover:not(:disabled, [aria-disabled='true']) { box-shadow: var(--ar-shadow-md); }
 .pill.quiet { border-color: transparent; color: var(--rw-mute); padding: 0 12px; }
 .pill.quiet:hover { color: var(--rw-text); }
 .pill[aria-pressed='true'] { background: var(--rw-inverse); color: var(--rw-on-inverse); border-color: var(--rw-inverse); }

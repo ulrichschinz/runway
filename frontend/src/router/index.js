@@ -15,11 +15,12 @@ import InboxPage from '../tasks/views/InboxPage.vue'
 import NextPage from '../tasks/views/NextPage.vue'
 import SomedayPage from '../tasks/views/SomedayPage.vue'
 import WaitingPage from '../tasks/views/WaitingPage.vue'
-import { ComingPage, LoginPage, ProjectPage, ProjectsPage } from './lazyPages.js'
+import { LoginPage, ProjectPage, ProjectsPage, ReviewPage, SettingsPage } from './lazyPages.js'
 
-// Every route has an old and a new side (ADR 0042). The new side is the placeholder page until
-// the milestone that builds the view lands (brief 0050); the five lists landed with brief 0051, the
-// projects with brief 0060 (lazily, `lazyPages.js`). `meta.view` names the view for the new shell's rail and dock.
+// Every route has an old and a new side (ADR 0042). The new side was the placeholder page until
+// the milestone that built the view landed (brief 0050); the five lists landed with brief 0051, the
+// projects with brief 0060, Rückblick and Einstellungen with brief 0061 (those lazily, `lazyPages.js`).
+// `meta.view` names the view for the new shell's rail and dock.
 const routes = [
   { path: '/login', ...pick(LoginView, LoginPage), meta: { public: true } },
   { path: '/', redirect: '/inbox' },
@@ -30,9 +31,9 @@ const routes = [
   { path: '/projects', ...pick(ProjectsView, ProjectsPage), meta: { view: 'projects' } },
   { path: '/projects/:name', ...pick(ProjectsView, ProjectPage), meta: { view: 'project' } },
   { path: '/all', ...pick(AllTasksView, AllPage), meta: { view: 'all' } },
-  { path: '/settings', ...pick(SettingsView, ComingPage), meta: { view: 'settings' } },
+  { path: '/settings', ...pick(SettingsView, SettingsPage), meta: { view: 'settings' } },
   // New UI only: the old UI has no Rückblick, and the guard sends it to the Inbox.
-  { path: '/review', ...pick(InboxView, ComingPage), meta: { view: 'review', newOnly: true } },
+  { path: '/review', ...pick(InboxView, ReviewPage), meta: { view: 'review', newOnly: true } },
 ]
 
 const router = createRouter({
