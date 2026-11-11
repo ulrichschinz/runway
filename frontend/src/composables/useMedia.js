@@ -1,4 +1,5 @@
 import { onScopeDispose, ref } from 'vue'
+import { isTextEntry, keyboardOpen } from '../shared/phoneKeyboard.js'
 
 /** The new UI's widths (06 `web.css`): phone at or below 760 px, the margin column above 1180 px. */
 export const PHONE = '(max-width: 760px)'
@@ -45,4 +46,34 @@ export function useVisualViewport() {
     vv.removeEventListener('scroll', update)
   })
   return box
+}
+
+/**
+ * Whether the on-screen keyboard is up (`shared/phoneKeyboard.js`), kept current while the calling
+ * component lives: the phone frame folds its head and puts the chips aside then (m3, brief 0062).
+ *
+ * @returns {import('vue').Ref<boolean>}
+ */
+export function useKeyboardOpen() {
+  const open = ref(false)
+  const vv = window.visualViewport
+  const update = () => {
+    open.value = keyboardOpen({
+      layoutHeight: document.documentElement.clientHeight,
+      visualHeight: vv ? vv.height : null,
+      entry: isTextEntry(document.activeElement),
+    })
+  }
+  // focusout fires before the focus lands elsewhere: decide once it has
+  const later = () => setTimeout(update, 0)
+  update()
+  vv?.addEventListener('resize', update)
+  document.addEventListener('focusin', update)
+  document.addEventListener('focusout', later)
+  onScopeDispose(() => {
+    vv?.removeEventListener('resize', update)
+    document.removeEventListener('focusin', update)
+    document.removeEventListener('focusout', later)
+  })
+  return open
 }

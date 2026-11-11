@@ -80,7 +80,7 @@ function finish() {
       <div class="text">
         <EyebrowLine :parts="eyebrow" />
         <PageHeading :parts="t('h.review')" />
-        <p class="lead">{{ t('review.lead') }}</p>
+        <p class="lead" data-fold>{{ t('review.lead') }}</p>
       </div>
     </template>
     <template v-if="gtd.loaded">
@@ -133,11 +133,11 @@ function finish() {
 /* 06 web.css .step */
 .steps { list-style: none; margin: 18px 0 0; padding: 0; }
 .step {
-  display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; column-gap: 14px; align-items: center;
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; column-gap: 14px; align-items: center;
   min-height: 64px; padding: 10px 4px; border-bottom: 1px solid var(--rw-rule);
 }
 .num {
-  min-height: 44px; min-width: 38px; text-align: left;
+  min-height: 44px; min-width: 44px; text-align: left;
   font-family: var(--rw-font-mono); font-size: 11px; letter-spacing: 0.08em; color: var(--rw-mute);
 }
 .num:hover:not([aria-disabled]) { color: var(--rw-text); }
@@ -176,7 +176,7 @@ function finish() {
 .hint { font-family: var(--rw-font-mono); font-size: 11.5px; color: var(--rw-mute); }
 @media (max-width: 760px) {
   .text { row-gap: 8px; }
-  .step { grid-template-columns: 34px minmax(0, 1fr); row-gap: 2px; }
+  .step { grid-template-columns: 44px minmax(0, 1fr); column-gap: 8px; row-gap: 2px; }
   .num { grid-row: span 2; align-self: start; }
   .step .go { grid-column: 2; justify-self: start; padding: 0; min-height: 44px; }
   .meta { display: none; }

@@ -264,7 +264,7 @@ textarea:focus, .add:focus { border-bottom-color: var(--rw-marker); }
 textarea:focus-visible, .add:focus-visible { outline: 0; }
 textarea::placeholder, .add::placeholder { color: var(--rw-soft); }
 .vision { font-family: var(--rw-font-serif); font-style: italic; font-weight: 300; font-size: 16px; color: var(--rw-accent); }
-.add { min-height: 40px; margin-top: 4px; }
+.add { min-height: 44px; margin-top: 4px; }
 .ideas { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
 .ideas li {
   display: inline-flex; align-items: center; gap: 2px; padding-left: 10px; font-size: 12.5px; color: var(--rw-text);

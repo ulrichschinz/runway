@@ -79,7 +79,23 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
   /** This page's mark on the ops it puts in flight, so another tab's `recover` leaves them be. */
   const tab = newId()
 
+  /**
+   * A write was refused (a full quota, a private window that keeps no site data): until a write
+   * goes through again, the copy in memory is the queue. Re-reading storage would put the last
+   * queue it kept (or none) over it before every change, and nothing queued since would ever be
+   * sent (brief 0062). Every change still tries to write, so a later, smaller queue reaches
+   * storage and the next start and the other tabs see it.
+   */
+  let memoryOnly = false
+  /**
+   * Ops this page settled or took back since storage last took the whole queue. While writes are
+   * refused they are struck from what storage still holds, so neither the next start nor another
+   * tab sends a done the user took back or a capture that was already posted (review of brief 0062).
+   */
+  const gone = new Set()
+
   function load() {
+    if (memoryOnly) return
     try {
       all = restore(localStorage.getItem('outbox'))
     } catch {
@@ -87,11 +103,31 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
     }
   }
 
+  /**
+   * The whole queue was refused: strike `gone` from the queue storage still holds. That write is
+   * smaller than the one storage already took, so a full quota lets it through; every other op
+   * there (another tab's among them) stays as it is.
+   */
+  function pruneStored() {
+    if (!gone.size) return
+    try {
+      const stored = restore(localStorage.getItem('outbox'))
+      const kept = stored.filter((op) => !gone.has(op.id))
+      if (kept.length < stored.length) localStorage.setItem('outbox', serialize(kept))
+    } catch {
+      // Storage keeps nothing at all: there is no stale queue to replay.
+    }
+  }
+
   function save() {
     try {
       localStorage.setItem('outbox', serialize(all))
+      memoryOnly = false
+      gone.clear()
     } catch {
       // Storage refused or full: the queue lives in memory for this page.
+      memoryOnly = true
+      pruneStored()
     }
   }
 
@@ -99,8 +135,11 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
   function mutate(fn) {
     load()
     const me = currentUser()
+    const before = all
     const mine = fn(opsOf(all, me))
     all = withOpsOf(all, me, mine)
+    const now = new Set(all.map((op) => op.id))
+    for (const op of before) if (!now.has(op.id)) gone.add(op.id)
     save()
     ops.value = mine
     schedule()

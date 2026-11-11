@@ -6,6 +6,7 @@
  * covering a row. "···" opens the Mehr sheet upward from the tabs, with the search and the command
  * palette (plan M9); `openSearch()` opens it with the focus in the search field (the `/` key).
  * Slot `more`: the margin column's panels, which the sheet shows under its entries (plan M12).
+ * The frame leaves the chips out while the on-screen keyboard is up (m3, brief 0062).
  */
 import { computed, defineAsyncComponent, nextTick, onMounted, ref } from 'vue'
 import { DOCK_TABS, dockKeyOf } from '../shared/navigation.js'
@@ -73,7 +74,8 @@ async function closeMore({ refocus = true } = {}) {
 <template>
   <div class="dock">
     <slot name="notice" />
-    <slot name="chips" />
+    <!-- a landmark, so nothing in the dock sits outside one (axe `region`); named apart from the chips' own "Kontext" group -->
+    <div v-if="$slots.chips" role="region" :aria-label="t('ctx.region')"><slot name="chips" /></div>
     <nav class="tabs" :aria-label="t('nav.lists')">
       <RouterLink
         v-for="tab in DOCK_TABS" :key="tab.key" :to="tab.to" class="tab"

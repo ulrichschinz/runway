@@ -164,16 +164,16 @@ watch(name, () => {
     :panel-label="`${t('plan.title')}: ${name}`"
   >
     <template #top>
-      <RouterLink to="/projects" class="back">← {{ t('list.projects') }}</RouterLink>
+      <RouterLink to="/projects" class="back" data-fold>← {{ t('list.projects') }}</RouterLink>
     </template>
     <template #byline>
       <template v-if="project">
-        <p v-if="outcome" class="outcome">{{ outcome }}</p>
-        <p v-else-if="plan.state === 'ready'" class="lead">{{ wide ? t('proj.noOutcome') : t('proj.noOutcomeBelow') }}</p>
+        <p v-if="outcome" class="outcome" data-fold>{{ outcome }}</p>
+        <p v-else-if="plan.state === 'ready'" class="lead" data-fold>{{ wide ? t('proj.noOutcome') : t('proj.noOutcomeBelow') }}</p>
       </template>
     </template>
     <template v-if="project" #head>
-      <div v-if="state === 'stalled'" class="callout">
+      <div v-if="state === 'stalled'" class="callout" data-fold>
         <span class="ring-mark" aria-hidden="true" />
         <p><b>{{ t('proj.stalledB') }}</b> {{ t('proj.stalledP') }}</p>
         <div class="acts" role="group" :aria-label="t('proj.statusOf', { p: name })">
@@ -205,7 +205,7 @@ watch(name, () => {
 
 <style scoped>
 .back {
-  display: inline-flex; align-items: center; min-height: 32px; margin: -6px 0 10px; font-family: var(--rw-font-mono);
+  display: inline-flex; align-items: center; min-height: 44px; margin: -12px 0 4px; font-family: var(--rw-font-mono);
   font-size: 11px; color: var(--rw-mute); text-decoration: none;
 }
 .back:hover { color: var(--rw-text); }

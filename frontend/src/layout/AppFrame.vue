@@ -23,8 +23,12 @@
  * palette, which finds todos too), and a keymap layer with Gehe zu, Darstellung and Erneut senden, which
  * the palette offers like every other command. `searchEnter` asks the page to put the cursor on
  * the first hit. It holds the Tageslinse's bead overlay (plan M11, `lens/BeadFlight.vue`).
+ *
+ * On the phone, while the on-screen keyboard is up (`useKeyboardOpen`, plan M15, m3), the frame
+ * carries `kbd`: the head folds to its eyebrow (the `h1` stays for screen readers, whatever a page
+ * marks `data-fold` goes) and the dock shows no chips, so the list keeps its rows.
  */
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import CommandPalette from './CommandPalette.vue'
 import BeadFlight from './lens/BeadFlight.vue'
@@ -33,7 +37,8 @@ import PhoneDock from './PhoneDock.vue'
 import RailNav from './RailNav.vue'
 import TopLine from './TopLine.vue'
 import { useKeymap } from '../composables/useKeymap.js'
-import { PHONE, WIDE, useMedia, useVisualViewport } from '../composables/useMedia.js'
+import { useModalLayers } from '../composables/useModalLayers.js'
+import { PHONE, WIDE, useKeyboardOpen, useMedia, useVisualViewport } from '../composables/useMedia.js'
 import { paletteKeyAction } from '../shared/commands.js'
 import { LISTS, PLACES } from '../shared/navigation.js'
 
@@ -73,25 +78,26 @@ const router = useRouter()
 const phone = useMedia(PHONE)
 const wide = useMedia(WIDE)
 const viewport = useVisualViewport()
+// The phone's on-screen keyboard is up (m3, brief 0062): the head folds to its eyebrow, the chips step aside.
+const keyboard = useKeyboardOpen()
+const kbd = computed(() => phone.value && keyboard.value)
 
 // On the phone the frame is exactly the visual viewport, so the dock sits above the keyboard.
 const phoneBox = computed(() =>
   phone.value && viewport.value ? { top: `${viewport.value.top}px`, height: `${viewport.value.height}px` } : null,
 )
 
-const palette = ref(false)
-const sheet = ref(false)
-/** Where the focus goes back to when the palette or the sheet closes: captured as the first opens. */
-const returnTo = shallowRef(null)
-
-/** Open the palette or the `?` sheet in place of the other; the focus target stays the first one's. */
-function open(which) {
-  if (!palette.value && !sheet.value) returnTo.value = document.activeElement
-  palette.value = which === 'palette'
-  sheet.value = which === 'sheet'
-}
 const topLine = ref(null)
 const dock = ref(null)
+const root = ref(null)
+
+/** Everything in the frame but the palette and the `?` sheet themselves (`data-modal`). */
+function behindInert(on) {
+  for (const el of root.value?.children ?? []) if (!el.hasAttribute('data-modal')) el.inert = on
+}
+const layers = useModalLayers(behindInert)
+const { palette, sheet, returnTo, close } = layers
+const open = (which) => layers.open(which, document.activeElement)
 
 /** `/`: the search field where this page has one, else the palette (it finds todos too). */
 function search() {
@@ -121,7 +127,7 @@ function onPaletteKey(event) {
   if (!action) return
   event.preventDefault()
   if (action !== 'toggle') return
-  if (palette.value) palette.value = false
+  if (palette.value) close('palette')
   else open('palette')
 }
 onMounted(() => window.addEventListener('keydown', onPaletteKey))
@@ -130,7 +136,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPaletteKey))
 
 <template>
   <!-- 761-1180 px with a panel: it docks beside the page -->
-  <div class="rw frame" :class="{ phone, wide, docked: !phone && !wide && !!$slots.panel }" :style="phoneBox">
+  <div ref="root" class="rw frame" :class="{ phone, wide, kbd, docked: !phone && !wide && !!$slots.panel }" :style="phoneBox">
     <RailNav
       v-if="!phone" :view="view" :counts="counts" :flags="flags" :stand="stand" :offline="offline"
       :failed-count="failedCount" :user="user" @retry="emit('retry')" @palette="open('palette')" @shortcuts="open('sheet')"
@@ -158,7 +164,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPaletteKey))
         <template #notice>
           <div class="notice-region" role="status" aria-live="polite"><slot name="notice" /></div>
         </template>
-        <template v-if="$slots.chips" #chips><div class="dock-chips"><slot name="chips" /></div></template>
+        <template v-if="$slots.chips && !kbd" #chips><div class="dock-chips"><slot name="chips" /></div></template>
         <template v-if="$slots.capture" #capture><slot name="capture" /></template>
         <template v-if="$slots.margin" #more><slot name="margin" /></template>
       </PhoneDock>
@@ -171,8 +177,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPaletteKey))
       <div class="scrim" aria-hidden="true" @click="emit('closePanel')" />
       <section class="sheet" role="dialog" :aria-label="panelLabel"><slot name="panel" /></section>
     </template>
-    <CommandPalette v-if="palette" :return-to="returnTo" @close="palette = false" />
-    <ShortcutsSheet v-if="sheet" :return-to="returnTo" @close="sheet = false" />
+    <CommandPalette v-if="palette" data-modal :return-to="returnTo" @close="close('palette')" />
+    <ShortcutsSheet v-if="sheet" data-modal :return-to="returnTo" @close="close('sheet')" />
     <BeadFlight />
   </div>
 </template>
@@ -192,6 +198,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPaletteKey))
 .chips { margin-top: 22px; }
 .phone .scroll { padding: 18px 16px 24px; }
 .phone .head { margin-bottom: 8px; }
+/* the keyboard is up (m3): the eyebrow names the list; the heading stays for screen readers, what a page marks data-fold goes */
+.kbd .scroll { padding-top: 12px; }
+.kbd .head :deep(h1) {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.kbd .head :deep([data-fold]) { display: none; }
 .dock-chips { padding: 10px 14px 2px; }
 .frame.docked { grid-template-columns: 208px minmax(0, 1fr) 360px; }
 .docked .scroll { padding-left: 32px; padding-right: 32px; }
