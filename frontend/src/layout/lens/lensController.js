@@ -118,7 +118,28 @@ export function sync() {
   }
   if (h && lensState.value === 'idle' && allowed()) {
     const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200))
-    idle(load, { timeout: 2000 })
+    afterFirstPaint(() => idle(load, { timeout: 2000 }))
+  }
+}
+
+/**
+ * Run `fn` once the page has painted its first content (plan §5: `three` is requested after the
+ * first paint). An idle callback alone came before it on a cold start, where the first paint
+ * waited for the GPU (brief 0062: lens chunk at 452 ms, first contentful paint at 856 ms).
+ */
+function afterFirstPaint(fn) {
+  const painted = () => performance.getEntriesByType('paint').some((e) => e.name === 'first-contentful-paint')
+  if (painted() || typeof PerformanceObserver === 'undefined') return fn()
+  const observer = new PerformanceObserver(() => {
+    if (!painted()) return
+    observer.disconnect()
+    fn()
+  })
+  try {
+    observer.observe({ type: 'paint', buffered: true })
+  } catch {
+    observer.disconnect()
+    fn()
   }
 }
 

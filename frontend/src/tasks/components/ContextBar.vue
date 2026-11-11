@@ -52,10 +52,10 @@ const chips = computed(() => [
 .dashed .pill { border-style: dashed; border-color: var(--rw-rule-strong); }
 .ctx[aria-pressed='true'] .pill { background: var(--rw-inverse); color: var(--rw-on-inverse); border: 1px solid var(--rw-inverse); }
 .ctx[aria-pressed='true'] .n { color: color-mix(in srgb, var(--rw-on-inverse) 60%, transparent); }
-/* the phone dock: the visible pill stays 32 px, the button around it is the 44 px touch target */
+/* the phone dock: the visible pill stays 32 px, the button around it is the dock's 48 px touch target (plan §5) */
 @media (max-width: 760px) {
   .ctxbar { column-gap: 6px; row-gap: 0; }
-  .ctx { min-height: 44px; }
+  .ctx { min-height: 48px; }
   .pill { min-height: 32px; padding: 0 11px; }
 }
 </style>

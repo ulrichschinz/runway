@@ -38,7 +38,7 @@ const toggleDone = () => {
 <template>
   <ListFrame :eyebrow="eyebrow" :heading="t('h.all')" :sections="sections" :scopes="['all']" :keys="{ toggleDone }">
     <template #head>
-      <div class="bar">
+      <div class="bar" data-fold>
         <button type="button" class="toggle" :aria-pressed="showDone" aria-keyshortcuts="d" @click="toggleDone">
           <span class="pill">{{ t('all.showDone') }} <kbd aria-hidden="true">d</kbd></span>
         </button>

@@ -38,7 +38,7 @@ export default {
   'capture.new': 'Neues Todo', 'capture.hint': '⏎ in die Inbox', 'search.ph': 'Suchen', 'search.all': 'Suchen in allen Listen',
   'search.title': 'Suche', 'search.hits': '{n} Treffer', 'search.end': 'Suche beenden',
   // contexts
-  'ctx.all': 'Alle', 'ctx.allLong': 'alle Kontexte', 'ctx.none': 'ohne Kontext', 'ctx.label': 'Kontext', 'key.n': 'Taste {k}',
+  'ctx.all': 'Alle', 'ctx.allLong': 'alle Kontexte', 'ctx.none': 'ohne Kontext', 'ctx.label': 'Kontext', 'ctx.region': 'Kontextfilter', 'key.n': 'Taste {k}',
   'ctxhint.computer': 'am Rechner', 'ctxhint.anrufe': 'Telefon', 'ctxhint.zuhause': 'daheim', 'ctxhint.unterwegs': 'unterwegs', 'ctxhint.buero': 'im Büro',
   // the Tageslinse
   'lens.cap': '{done} von {total} heute', 'lens.short': '{done} von {total}', 'lens.extra': ' · {n} zusätzlich',

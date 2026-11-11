@@ -62,7 +62,7 @@ defineExpose({ focus: () => input.value?.focus() })
 </script>
 
 <template>
-  <form class="capture" :class="{ phone }" autocomplete="off" @submit.prevent="submit">
+  <form class="capture" :class="{ phone }" :aria-label="t('capture.new')" autocomplete="off" @submit.prevent="submit">
     <span class="plus" aria-hidden="true">+</span>
     <input
       ref="input" v-model="text" type="text" enterkeyhint="done"

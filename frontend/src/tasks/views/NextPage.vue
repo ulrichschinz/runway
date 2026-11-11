@@ -98,13 +98,13 @@ const keys = Object.fromEntries(
     :keys="keys" :offers="offers" @close-panel="closedPanel"
   >
     <template v-if="phone && caption" #byline>
-      <p :key="roll" class="caption" :class="{ roll: roll > 0 }">
+      <p :key="roll" data-fold class="caption" :class="{ roll: roll > 0 }">
         <span>{{ caption[0] }}</span><template v-if="caption[1]">{{ ' ' }}<span>{{ caption[1].trim() }}</span></template>
       </p>
     </template>
     <template #aside>
       <button
-        v-if="caption" ref="lensButton" type="button" class="lensbox" :aria-expanded="todayOpen"
+        v-if="caption" ref="lensButton" data-fold type="button" class="lensbox" :aria-expanded="todayOpen"
         @click="frame?.toggleToday()"
       >
         <span v-if="!phone" :key="roll" class="caption" :class="{ roll: roll > 0 }">

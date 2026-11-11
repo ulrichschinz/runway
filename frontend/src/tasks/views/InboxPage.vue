@@ -200,7 +200,7 @@ const offers = () => {
       </div>
     </template>
     <template v-else-if="hasItems" #head>
-      <div class="modes phone" role="group" :aria-label="t('inbox.mode')">
+      <div class="modes phone" data-fold role="group" :aria-label="t('inbox.mode')">
         <OptToggle :pressed="mode === 'list'" @click="setMode('list')">{{ t('inbox.list') }}</OptToggle>
         <OptToggle :pressed="mode === 'stack'" @click="setMode('stack')">{{ t('inbox.stack') }}</OptToggle>
       </div>
