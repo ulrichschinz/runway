@@ -36,9 +36,17 @@ afterEach(() => {
 })
 
 describe('resolveUi', () => {
-  it('renders the old UI when nothing was chosen', () => {
-    expect(UI_DEFAULT).toBe('alt')
-    expect(resolveUi(undefined, null)).toBe('alt')
+  // Since M16 (brief 0063) the new UI is the default; the old one stays reachable until M17.
+  it('renders the new UI when nothing was chosen', () => {
+    expect(UI_DEFAULT).toBe('neu')
+    expect(resolveUi(undefined, null)).toBe('neu')
+    expect(resolveUi(undefined, undefined)).toBe('neu')
+  })
+
+  it('still reaches the old UI through ?ui=alt or a stored alt', () => {
+    expect(resolveUi('alt', null)).toBe('alt')
+    expect(resolveUi(undefined, 'alt')).toBe('alt')
+    expect(resolveUi('alt', 'neu')).toBe('alt')
   })
 
   it('uses the stored choice when the query names none', () => {
@@ -55,14 +63,15 @@ describe('resolveUi', () => {
   it('ignores a query value that names no UI', () => {
     for (const value of NOISE) {
       expect(resolveUi(value, 'neu')).toBe('neu')
-      expect(resolveUi(value, null)).toBe('alt')
+      expect(resolveUi(value, 'alt')).toBe('alt')
+      expect(resolveUi(value, null)).toBe('neu')
     }
   })
 
   it('ignores a stored value that names no UI', () => {
     for (const value of NOISE) {
-      expect(resolveUi(undefined, value)).toBe('alt')
-      expect(resolveUi('neu', value)).toBe('neu')
+      expect(resolveUi(undefined, value)).toBe('neu')
+      expect(resolveUi('alt', value)).toBe('alt')
     }
   })
 })
@@ -82,16 +91,22 @@ describe('currentUi', () => {
     expect(currentUi('alt')).toBe('alt')
   })
 
+  it('renders the new UI in a browser that never chose', () => {
+    vi.stubGlobal('localStorage', memoryStorage())
+    expect(currentUi(undefined)).toBe('neu')
+    expect(currentUi('alt')).toBe('alt')
+  })
+
   it('falls back to the query or the default when storage refuses', () => {
     vi.stubGlobal('localStorage', refusingStorage)
-    expect(currentUi(undefined)).toBe('alt')
-    expect(currentUi('neu')).toBe('neu')
+    expect(currentUi(undefined)).toBe('neu')
+    expect(currentUi('alt')).toBe('alt')
   })
 
   it('falls back when there is no storage at all', () => {
     vi.stubGlobal('localStorage', undefined)
-    expect(currentUi(undefined)).toBe('alt')
-    expect(currentUi('neu')).toBe('neu')
+    expect(currentUi(undefined)).toBe('neu')
+    expect(currentUi('alt')).toBe('alt')
   })
 })
 
@@ -121,9 +136,18 @@ describe('rememberUi', () => {
 
   it('makes the next page load render the stored choice', () => {
     vi.stubGlobal('localStorage', memoryStorage())
-    rememberUi('neu')
-    expect(currentUi(undefined)).toBe('neu')
     rememberUi('alt')
     expect(currentUi(undefined)).toBe('alt')
+    rememberUi('neu')
+    expect(currentUi(undefined)).toBe('neu')
+  })
+
+  it('keeps a browser that went back to the old UI there, until it asks for the new one', () => {
+    vi.stubGlobal('localStorage', memoryStorage())
+    rememberUi('alt')
+    for (const value of NOISE) rememberUi(value)
+    expect(currentUi(undefined)).toBe('alt')
+    rememberUi('neu')
+    expect(currentUi(undefined)).toBe('neu')
   })
 })

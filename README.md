@@ -19,11 +19,11 @@ Multi-user, mobile-friendly, dark mode. Built by [Agentic Reach](https://agentic
 - **Agent-ready** — REST API + MCP server for LLM and automation integration
 - Swipe gestures, search/filter, dark mode, per-user data isolation
 
-**A new interface is being built** behind a switch ([ADR 0042](docs/adr/0042-the-new-ui-coexists-behind-a-switch.md)).
-Open any page with `?ui=neu` (for example `/next?ui=neu`) to use it, and with `?ui=alt` to go
-back. The choice is remembered per browser, in the `localStorage` key `ui`. Pages the new
-interface does not have yet show the old one, which stays the default for everyone who has not
-opted in.
+**The new interface is the default** (06-kombination, [ADR 0042](docs/adr/0042-the-new-ui-coexists-behind-a-switch.md)):
+every page opens in it unless the browser chose otherwise. Until the old interface is removed,
+open any page with `?ui=alt` (for example `/next?ui=alt`) to use the old one, and with `?ui=neu`
+to come back. The choice is remembered per browser, in the `localStorage` key `ui`; a browser
+that chose the old interface earlier keeps it until it asks for `?ui=neu`.
 
 ## Stack
 

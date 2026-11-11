@@ -1,10 +1,11 @@
 /**
  * Which of the two UIs this browser renders: the old one (`alt`) or the new one (`neu`).
  *
- * WHY THIS EXISTS. The new UI is built milestone by milestone and every merge deploys, so it
- * lives behind a switch until it is complete (ADR 0042): any URL with `?ui=neu` or `?ui=alt`
- * stores the choice in this browser, and every route renders the side the choice names. With
- * no valid choice the old UI is rendered, so nobody who has not opted in sees anything new.
+ * WHY THIS EXISTS. The new UI was built milestone by milestone behind this switch, because every
+ * merge deploys (ADR 0042): any URL with `?ui=neu` or `?ui=alt` stores the choice in this browser,
+ * and every route renders the side the choice names. Since M16 (brief 0063) a browser with no
+ * valid choice renders the new UI; `?ui=alt` still reaches the old one, and a browser that stored
+ * `alt` keeps it, until M17 removes the old UI and this switch with it.
  *
  * The key is written as a literal on purpose: `tools/surfaces.py` snapshots localStorage keys
  * only in that form, and `ui` is a public surface until the switch is removed. Storage access
@@ -15,8 +16,8 @@
 const UI_OLD = 'alt'
 export const UI_NEW = 'neu'
 
-/** What a browser that never chose renders. */
-export const UI_DEFAULT = UI_OLD
+/** What a browser that never chose renders: the new UI since M16 (brief 0063). */
+export const UI_DEFAULT = UI_NEW
 
 /**
  * The UI a raw value names, or null when it names none. Only the exact words count: a

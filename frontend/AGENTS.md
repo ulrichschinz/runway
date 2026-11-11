@@ -18,9 +18,10 @@ both. A *new* cycle always fails the gate.
 
 ## Two UIs until the contract step
 
-A new UI is being built behind a per-browser switch (ADR 0042, plan
+The new UI was built behind a per-browser switch (ADR 0042, plan
 `docs/plan/unified-ui-web.md`): `?ui=neu` / `?ui=alt`, stored in `localStorage['ui']`, default
-the old UI. Every route renders through `src/router/pick.js`, which takes both sides.
+the new UI since M16 (brief 0063); the old UI stays reachable with `?ui=alt` until M17 deletes it.
+Every route renders through `src/router/pick.js`, which takes both sides.
 
 - New files go into the unit's folder, never beside the old ones: `src/layout/` (`fe/layout`),
   `src/tasks/` (`fe/tasks`), `src/projects/` (`fe/projects`), `src/identity/` (`fe/identity`),
