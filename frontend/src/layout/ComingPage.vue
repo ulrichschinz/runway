@@ -2,7 +2,8 @@
 /**
  * What every route of the new UI shows until its own page lands (plan M4): the frame, the view's
  * eyebrow and heading, and "kommt". A todo opened by a `?task=` link (Android's Custom Tab) is
- * shown by its description until M7's detail replaces this.
+ * shown by its description until M7's detail replaces this. The margin column's panels (plan M12,
+ * `frame.margin`) stand beside it as on every page.
  */
 import { computed } from 'vue'
 import AppFrame from './AppFrame.vue'
@@ -34,6 +35,7 @@ const stand = computed(() => frame.props.value.stand)
       <PillButton quiet @click="frame.closeTask">{{ t('close') }}</PillButton>
     </section>
     <EmptyState :text="t('shell.coming')" />
+    <template #margin><component :is="frame.margin" :view="view" /></template>
   </AppFrame>
 </template>
 

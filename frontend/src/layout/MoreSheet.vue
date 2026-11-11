@@ -5,6 +5,9 @@
  * the colour scheme and Abmelden. Typing searches at once; `⏎` closes the sheet over the hits and asks the page to put the cursor on
  * the first (`enter`). Esc, a tap outside, focus leaving it or Tab past its last entry closes it; focus starts
  * on the first entry and goes back to "···" (PhoneDock), so the keyboard is never trapped.
+ *
+ * Slot `panels` (plan M12): the margin column's panels — Heute, Nachhaken, Projekte, Rückblick —
+ * under the entries, before the colour scheme. A link or button in them closes the sheet.
  */
 import { computed, onMounted, ref } from 'vue'
 import { searchQuery } from '../composables/useCommands.js'
@@ -53,6 +56,11 @@ function onTab(event) {
   }
 }
 
+/** A follow-up, a stuck project or "Rückblick beginnen" was chosen in the panels: the sheet makes way. */
+function onPanelClick(event) {
+  if (event.target.closest('a, button')) emit('close', { refocus: false })
+}
+
 function note(key) {
   if (key === 'projects') return [props.counts.projects, props.flags.stalled ? t('proj.stalled') : ''].filter((x) => x !== '' && x != null).join(' · ')
   if (key === 'someday') return props.counts.someday
@@ -64,7 +72,7 @@ function note(key) {
 <template>
   <div class="scrim" aria-hidden="true" @click="emit('close')" />
   <div
-    ref="sheet" class="sheet" role="dialog" :aria-label="t('nav.more')"
+    ref="sheet" class="sheet" :class="{ wide: !!$slots.panels }" role="dialog" :aria-label="t('nav.more')"
     @keydown.esc.stop="emit('close')" @keydown.tab.exact="onTab" @focusout="onFocusOut"
   >
     <label v-if="searchable" class="search">
@@ -86,6 +94,10 @@ function note(key) {
     <button v-if="failedCount" type="button" class="item unsent" @click="emit('retry')">
       {{ t('sync.n', { n: failedCount }) }} · {{ t('sync.retry') }}
     </button>
+    <template v-if="$slots.panels">
+      <hr>
+      <div class="panels" @click="onPanelClick"><slot name="panels" /></div>
+    </template>
     <hr>
     <div class="themes" role="group" :aria-label="t('set.look')">
       <span class="lab" aria-hidden="true">{{ t('set.look') }}</span>
@@ -126,6 +138,8 @@ function note(key) {
 .item[aria-current='page'] { font-weight: 500; }
 .m { font-family: var(--rw-font-mono); font-size: 11.5px; color: var(--rw-mute); font-weight: 400; }
 .unsent { color: var(--rw-overdue); }
+.sheet.wide { width: min(380px, calc(100vw - 20px)); }
+.panels { padding: 18px 18px 14px; }
 hr { border: 0; border-top: 1px solid var(--rw-rule); margin: 4px 0; }
 .themes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 18px; }
 .lab { width: 100%; font-family: var(--rw-font-mono); font-size: 11px; color: var(--rw-mute); }

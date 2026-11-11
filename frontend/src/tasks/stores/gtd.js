@@ -31,12 +31,12 @@ import { dayOf, plusDays, timeOf } from '../../shared/dates.js'
 import { countsAsPlanned, dayProgress, lensCaption } from '../../shared/dayProgress.js'
 import {
   beforeOf, clarifyPayload, contextPayload, inversePayload, listOf, listPayload, planPayload, projectNameError, tagPayload,
-  reviewDue as reviewDueRule,
+  reviewAge as reviewAgeRule, reviewDue as reviewDueRule,
 } from '../../shared/gtdRules.js'
 import { cap } from '../../shared/capping.js'
 import { isDeferred } from '../../shared/detailFields.js'
 import { applyOutbox, captureRow, localUuid, withSettled } from '../../shared/outboxQueue.js'
-import { byWeight, followUpOf, nextSections } from '../../shared/sections.js'
+import { byWeight, followUpOf, followUps as followUpsRule, nextSections } from '../../shared/sections.js'
 
 /**
  * Newest first; Taskwarrior stamps sort in time order. Captures of the same second keep one order
@@ -232,6 +232,10 @@ export const useGtdStore = defineStore('gtd', () => {
   const caption = computed(() => (progress.value ? lensCaption(progress.value) : ''))
   /** The weekly review is due: never done, or last done seven or more days ago (06 rail). */
   const reviewDue = computed(() => reviewDueRule(summary.value?.last_review?.weekly, today.value))
+  /** The margin's Rückblick (plan M12): the last weekly review's day and the days since. */
+  const reviewAge = computed(() => (today.value ? reviewAgeRule(summary.value?.last_review?.weekly, today.value) : null))
+  /** The margin's Nachhaken (plan M12): Warten auf's due and this week's follow-ups, three at most. */
+  const followUps = computed(() => (today.value ? followUpsRule(waiting.value, today.value) : { due: 0, rows: [] }))
   /** Nächste in sections under a context filter (`null`, `'@x'` or `NO_CONTEXT`). */
   const sectionsFor = (ctx = null) => nextSections({ tasks: open.value, today: today.value }, ctx)
 
@@ -386,7 +390,7 @@ export const useGtdStore = defineStore('gtd', () => {
     summary, today, loaded, stand, offline, lastAction, inboxDot, recurred,
     // lists
     open, taskOf, uuidNow, keepAside, inbox, next, waiting, someday, unlisted, doneToday, doneWeek, projects,
-    contexts, contextChoices, contextCount, progress, caption, reviewDue, sectionsFor,
+    contexts, contextChoices, contextCount, progress, caption, reviewDue, reviewAge, followUps, sectionsFor,
     // the outbox
     ops: outbox.ops, failed, paused, held,
     // actions

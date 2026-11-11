@@ -5,11 +5,21 @@
  * ···` and the capture field. Because it is in the flow, a notice pushes the list up instead of
  * covering a row. "···" opens the Mehr sheet upward from the tabs, with the search and the command
  * palette (plan M9); `openSearch()` opens it with the focus in the search field (the `/` key).
+ * Slot `more`: the margin column's panels, which the sheet shows under its entries (plan M12).
  */
-import { computed, nextTick, ref } from 'vue'
-import MoreSheet from './MoreSheet.vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, ref } from 'vue'
 import { DOCK_TABS, dockKeyOf } from '../shared/navigation.js'
 import { t } from '../shared/i18n.js'
+
+// The Mehr sheet is a chunk of its own (brief 0059: the entry's 130 kB budget while both UIs ship),
+// fetched in idle time once the dock is up, so "···" still opens it after the connection drops or a
+// redeploy replaced the chunk. An index blind spot (BLIND-FE-002).
+const loadMoreSheet = () => import('./MoreSheet.vue')
+const MoreSheet = defineAsyncComponent(loadMoreSheet)
+onMounted(() => {
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200))
+  idle(() => loadMoreSheet().catch(() => {}))
+})
 
 const props = defineProps({
   view: { type: String, default: null },
@@ -77,7 +87,7 @@ async function closeMore({ refocus = true } = {}) {
         </span>
       </RouterLink>
       <button
-        ref="moreButton" type="button" class="tab more"
+        ref="moreButton" type="button" class="tab more" data-more
         :aria-label="failedCount ? `${t('nav.more')} · ${t('sync.n', { n: failedCount })}` : t('nav.more')"
         :aria-expanded="moreOpen" aria-haspopup="dialog"
         :aria-current="current === 'more' ? 'page' : undefined"
@@ -92,7 +102,9 @@ async function closeMore({ refocus = true } = {}) {
       :searchable="searchable" :focus-search="searchFirst"
       @close="closeMore" @theme="emit('theme', $event)" @signout="emit('signout')" @retry="emit('retry')" @palette="openPalette"
       @enter="toHits"
-    />
+    >
+      <template v-if="$slots.more" #panels><slot name="more" /></template>
+    </MoreSheet>
   </div>
 </template>
 

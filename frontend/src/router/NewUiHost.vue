@@ -9,9 +9,11 @@
  * a `?task=<uuid>` link names (Android's Custom Tab; the list pages open their detail from the same
  * query) — a deferred one the lists leave out is held for the detail — and keeps the document title.
  * It registers the task search the command palette offers (`useTaskSearch`, plan M9), so the
- * layout's palette finds todos and projects without importing a feature.
+ * layout's palette finds todos and projects without importing a feature. It hands every page the
+ * margin column's panels (plan M12, `frame.margin`), a chunk of their own, fetched in idle time
+ * after mount (the entry budget; an index blind spot, BLIND-FE-002).
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import client from '../api/client.js'
 import { provideFrame } from '../composables/useFrame.js'
@@ -113,7 +115,15 @@ function closeTask() {
   router.replace({ query })
 }
 
-provideFrame({ props, on, taskId, task, openTask, closeTask })
+const loadMargin = () => import('../tasks/panels/MarginPanels.vue')
+const margin = defineAsyncComponent(loadMargin)
+// The phone shows the panels only in the Mehr sheet: fetched in idle time, so they are there offline too.
+onMounted(() => {
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200))
+  idle(() => loadMargin().catch(() => {}))
+})
+
+provideFrame({ props, on, taskId, task, openTask, closeTask, margin })
 
 // The tab says where you are; the old UI keeps the page's own title.
 const oldTitle = document.title

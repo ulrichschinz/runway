@@ -63,7 +63,11 @@ allowlist = [
 # Raised from 6 on 2026-11-01 (brief 0054, approved by the owner, RISK-GOV-001): the clarify rules
 # (`shared/clarify.js`) name the follow-up days "morgen", "Freitag", "nächste Woche" and the day
 # in the notice. An eighth importer is a new place that reads days and is worth a look.
-"frontend/src/shared/dates.js" = 7
+# Raised from 7 on 2026-11-10 (brief 0059, approved by the owner, RISK-GOV-001: not an independent
+# approval): the margin's "Heute" (`tasks/panels/TodayPanel.vue`) heads itself with the day written
+# out (`longDay`) and gives each done todo the time it was done, both in the server's zone, which
+# only this module knows. A ninth importer is a new place that reads days and is worth a look.
+"frontend/src/shared/dates.js" = 8
 # Recorded on 2026-11-01 (brief 0051, approved by the owner, RISK-GOV-001): the frame of the
 # five list pages (Inbox, Nächste, Warten auf, Irgendwann, Alle). A sixth is a new list page.
 "frontend/src/tasks/components/ListFrame.vue" = 5
@@ -72,7 +76,11 @@ allowlist = [
 # placeholder page and the login page). A sixth is expected with M12's margin panels.
 # Raised from 5 on 2026-11-01 (brief 0054, approved by the owner, RISK-GOV-001): the clarify panel's
 # `// Klären · noch n` is the sixth user. M12's margin panels are expected to be the seventh.
-"frontend/src/layout/ui/EyebrowLine.vue" = 6
+# Raised from 6 on 2026-11-10 (brief 0059, approved by the owner, RISK-GOV-001: not an independent
+# approval): the margin panels are the seventh, as expected — through one `tasks/panels/PanelSection.vue`
+# that all four (Heute, Nachhaken, Projekte, Rückblick) share, not four imports. An eighth is a new
+# kind of page or panel and worth a look.
+"frontend/src/layout/ui/EyebrowLine.vue" = 7
 # Recorded on 2026-11-10 (brief 0055, approved by the owner, RISK-GOV-001: not an independent
 # approval): the command state of the new UI — the palette's items (`paletteItems`), the `/` search
 # query, the modifier name and the runtime search registry `fe/tasks` fills (so `fe/layout` imports

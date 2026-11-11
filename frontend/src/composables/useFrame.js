@@ -15,8 +15,12 @@ import { inject, provide } from 'vue'
  * @property {import('vue').ComputedRef<string|null>} taskId  the uuid `?task=` names (validated)
  * @property {import('vue').Ref<null|{uuid: string, description?: string, missing?: boolean}>} task
  *   the todo a `?task=` link asked for, once read
- * @property {(uuid: string) => void} openTask  puts `?task=<uuid>` into the address (the detail opens)
+ * @property {(uuid: string) => void} openTask  puts `?task=<uuid>` into the address (the detail opens);
+ *   inside a list page it is ListFrame's, which also moves the focus into the detail and back
  * @property {() => void} closeTask  drops `?task=` from the address
+ * @property {object} margin  the margin column's panels (plan M12, `tasks/panels/MarginPanels.vue`,
+ *   a lazy component with the prop `view`): a page puts it into AppFrame's `margin` slot, so pages
+ *   outside `fe/tasks` show it without importing that unit
  */
 
 const FRAME = Symbol('frame')

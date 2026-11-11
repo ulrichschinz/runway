@@ -5,6 +5,7 @@ import {
   followUpDay,
   followUpOptions,
   formatDay,
+  longDay,
   minuteOf,
   parseStamp,
   plusDays,
@@ -54,6 +55,14 @@ describe('showing a day', () => {
   it('a due date stored as Berlin midnight shows on its own day, not the day before', () => {
     // the old UI's "one day early" (inventory 1.8): local midnight is 23:00 UTC the day before
     expect(formatDay(dayOf('20261102T230000Z'))).toBe('Di 03.11.')
+  })
+})
+
+describe('a day written out', () => {
+  it('names weekday and month: Dienstag, 10. November', () => {
+    expect(longDay('2026-11-10')).toBe('Dienstag, 10. November')
+    expect(longDay('2026-10-31')).toBe('Samstag, 31. Oktober')
+    expect(longDay('2027-03-28')).toBe('Sonntag, 28. März')
   })
 })
 

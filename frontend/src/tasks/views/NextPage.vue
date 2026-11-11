@@ -8,6 +8,10 @@
  * its one line), the context chips, then Fällig · Jetzt · Bald · Später. With a
  * context filter, todos due in other contexts stay visible: in their own section, or — when
  * the filtered context has nothing due — under the one Fällig heading with "andere Kontexte".
+ * The lens box is a button (plan M12, 06 `data-act="today"`): it opens the margin's panels as
+ * the page's panel — useful where no margin column shows them (761–1180 px, the phone); closing
+ * Heute brings the focus back to the box (any other `Esc` leaves it where it is). Where the head is
+ * narrow (Heute docked), the caption sits under the lens.
  */
 import { computed, ref, watch } from 'vue'
 import LensSlot from '../../layout/lens/LensSlot.vue'
@@ -54,6 +58,14 @@ const sections = computed(() => {
   ].filter((x) => x.tasks.length || x.empty)
 })
 
+const frame = ref(null)
+const lensButton = ref(null)
+const todayOpen = computed(() => !!frame.value?.todayOpen)
+/** Heute closed (`Esc`, "schließen", the scrim): the focus back on the lens box; any other `Esc` leaves it. */
+function closedPanel({ today } = {}) {
+  if (today) lensButton.value?.focus()
+}
+
 const select = (ctx) => {
   contextFilter.value = ctx
 }
@@ -81,19 +93,26 @@ const keys = Object.fromEntries(
 </script>
 
 <template>
-  <ListFrame :eyebrow="eyebrow" :heading="t('h.next')" :heading-hidden="phone" :sections="sections" :scopes="['next']" :keys="keys" :offers="offers">
+  <ListFrame
+    ref="frame" :eyebrow="eyebrow" :heading="t('h.next')" :heading-hidden="phone" :sections="sections" :scopes="['next']"
+    :keys="keys" :offers="offers" @close-panel="closedPanel"
+  >
     <template v-if="phone && caption" #byline>
       <p :key="roll" class="caption" :class="{ roll: roll > 0 }">
         <span>{{ caption[0] }}</span><template v-if="caption[1]">{{ ' ' }}<span>{{ caption[1].trim() }}</span></template>
       </p>
     </template>
     <template #aside>
-      <div v-if="caption" class="lensbox">
-        <p v-if="!phone" :key="roll" class="caption" :class="{ roll: roll > 0 }">
+      <button
+        v-if="caption" ref="lensButton" type="button" class="lensbox" :aria-expanded="todayOpen"
+        @click="frame?.toggleToday()"
+      >
+        <span v-if="!phone" :key="roll" class="caption" :class="{ roll: roll > 0 }">
           <span>{{ caption[0] }}</span><template v-if="caption[1]">{{ ' ' }}<span>{{ caption[1].trim() }}</span></template>
-        </p>
+        </span>
+        <span class="sr">{{ phone ? t('lens.open') : `. ${t('lens.open')}` }}</span>
         <LensSlot :size="phone ? 52 : 104" :level="shown.level" />
-      </div>
+      </button>
     </template>
     <template #chips>
       <ContextBar
@@ -105,7 +124,11 @@ const keys = Object.fromEntries(
 </template>
 
 <style scoped>
-.lensbox { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 14px; margin: -2px -6px -4px 0; }
+.lensbox {
+  display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 14px; margin: -2px -6px -4px 0;
+  padding: 0; border-radius: var(--rw-radius-md); text-align: inherit; color: inherit;
+}
+.lensbox .caption { display: block; }
 .caption {
   margin: 0; padding-top: 10px; text-align: right;
   font-family: var(--rw-font-mono); font-size: 11.5px; letter-spacing: 0.02em; color: var(--rw-text);
@@ -115,6 +138,12 @@ const keys = Object.fromEntries(
 .caption.roll { animation: rw-roll 420ms var(--rw-ease); }
 @keyframes rw-roll { from { transform: translateY(60%); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .caption.roll { animation: none; } }
+/* a narrow head (Heute docked beside Nächste at 761–1180 px): the caption goes under the lens, so the
+   eyebrow and "Was jetzt zählt" keep their lines */
+@container head (max-width: 560px) {
+  .lensbox { grid-template-columns: auto; justify-items: center; row-gap: 4px; }
+  .lensbox .caption { order: 2; padding-top: 0; max-width: 120px; text-align: center; }
+}
 @media (max-width: 760px) {
   .lensbox { margin: -4px -4px -4px 0; }
   .caption { padding-top: 0; font-size: 12px; text-align: left; }

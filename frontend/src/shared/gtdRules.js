@@ -314,3 +314,30 @@ export function reviewDue(lastWeekly, today) {
   const last = lastWeekly ? dayOf(lastWeekly) : null
   return !last || last <= plusDays(today, -7)
 }
+
+/**
+ * The margin's "Rückblick" (06 `todayPanel`): the server's day of the last weekly review and
+ * the calendar days since, with `due` as `reviewDue` decides it.
+ *
+ * @param {string|null|undefined} lastWeekly  the last weekly review stamp (`/gtd/summary`)
+ * @param {string} today  `YYYY-MM-DD`
+ * @returns {{day: string|null, days: number|null, due: boolean}} `day` and `days` are null when
+ *   no weekly review was ever recorded
+ */
+export function reviewAge(lastWeekly, today) {
+  const day = lastWeekly ? dayOf(lastWeekly) : null
+  const days = day ? Math.round((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${day}T12:00:00Z`)) / 86400000) : null
+  return { day, days, due: reviewDue(lastWeekly, today) }
+}
+
+/**
+ * How the margin's "Rückblick" says how long ago the last weekly review was: ", heute." (0 days),
+ * ", gestern." (1), ", vor {n} Tagen." (more). German has no "vor 1 Tagen".
+ *
+ * @param {number} days  `reviewAge(…).days`
+ * @returns {'m.reviewToday'|'m.reviewAgo1'|'m.reviewAgo'} the message key (`{n}` is the days)
+ */
+export function reviewAgoKey(days) {
+  if (!days) return 'm.reviewToday'
+  return days === 1 ? 'm.reviewAgo1' : 'm.reviewAgo'
+}
