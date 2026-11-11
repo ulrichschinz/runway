@@ -1,7 +1,8 @@
 <script setup>
 /**
- * Alle (06 `sectionsFor('all')`): every open todo by list, and on demand (`d`) what was done
- * in the last seven days, struck through.
+ * Alle (06 `sectionsFor('all')`, `renderHead('all')`): every open todo by list, and on demand (`d`)
+ * what was done in the last seven days, struck through. The toggle names its key as 06 does (plan
+ * M14); Rückblick's "in Alle zeigen" opens the page with it on.
  */
 import { computed } from 'vue'
 import { t } from '../../shared/i18n.js'
@@ -38,8 +39,8 @@ const toggleDone = () => {
   <ListFrame :eyebrow="eyebrow" :heading="t('h.all')" :sections="sections" :scopes="['all']" :keys="{ toggleDone }">
     <template #head>
       <div class="bar">
-        <button type="button" class="toggle" :aria-pressed="showDone" :title="t('key.n', { k: 'd' })" @click="toggleDone">
-          {{ t('all.showDone') }}
+        <button type="button" class="toggle" :aria-pressed="showDone" aria-keyshortcuts="d" @click="toggleDone">
+          <span class="pill">{{ t('all.showDone') }} <kbd aria-hidden="true">d</kbd></span>
         </button>
       </div>
     </template>
@@ -48,13 +49,20 @@ const toggleDone = () => {
 
 <style scoped>
 .bar { margin-top: 20px; }
-.toggle {
-  display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px; border-radius: var(--rw-radius-pill);
+/* 06 `.ctx` with its key (`ContextBar`'s chip): the pill is what shows, the button around it the touch target */
+.toggle { display: inline-flex; align-items: center; border-radius: var(--rw-radius-pill); }
+.pill {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 6px 0 12px; border-radius: var(--rw-radius-pill);
   border: 1px solid var(--rw-rule); font-family: var(--rw-font-mono); font-size: 11.5px; letter-spacing: 0.02em; color: var(--rw-mute);
 }
-.toggle:hover { color: var(--rw-text); border-color: var(--rw-rule-strong); }
-.toggle[aria-pressed='true'] { background: var(--rw-inverse); color: var(--rw-on-inverse); border-color: var(--rw-inverse); }
+.toggle:hover .pill { color: var(--rw-text); border-color: var(--rw-rule-strong); }
+.toggle[aria-pressed='true'] .pill { background: var(--rw-inverse); color: var(--rw-on-inverse); border-color: var(--rw-inverse); }
+.pill kbd { border-color: color-mix(in srgb, currentColor 30%, transparent); color: inherit; }
 @media (max-width: 760px) {
   .toggle { min-height: 44px; }
+  .pill { min-height: 32px; padding-right: 12px; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .pill { padding-right: 12px; }
 }
 </style>

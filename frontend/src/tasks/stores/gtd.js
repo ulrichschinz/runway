@@ -37,7 +37,7 @@ import { cap } from '../../shared/capping.js'
 import { isDeferred } from '../../shared/detailFields.js'
 import { applyOutbox, captureRow, localUuid, withSettled } from '../../shared/outboxQueue.js'
 import { withSnapshot } from '../../shared/projectStalled.js'
-import { byWeight, followUpOf, followUps as followUpsRule, nextSections } from '../../shared/sections.js'
+import { byWeight, followUpOf, followUps as followUpsRule, nextSections, waitingSections } from '../../shared/sections.js'
 
 /**
  * Newest first; Taskwarrior stamps sort in time order. Captures of the same second keep one order
@@ -241,6 +241,12 @@ export const useGtdStore = defineStore('gtd', () => {
   const reviewAge = computed(() => (today.value ? reviewAgeRule(summary.value?.last_review?.weekly, today.value) : null))
   /** The margin's Nachhaken (plan M12): Warten auf's due and this week's follow-ups, three at most. */
   const followUps = computed(() => (today.value ? followUpsRule(waiting.value, today.value) : { due: 0, rows: [] }))
+  /** The Rückblick's step 3 (plan M14): Warten auf's follow-ups that have come, and those of the coming week. */
+  const followUpCounts = computed(() => {
+    if (!today.value) return { due: 0, soon: 0 }
+    const s = waitingSections(waiting.value, today.value)
+    return { due: s.due.length, soon: s.soon.length }
+  })
   /** Nächste in sections under a context filter (`null`, `'@x'` or `NO_CONTEXT`). */
   const sectionsFor = (ctx = null) => nextSections({ tasks: open.value, today: today.value }, ctx)
 
@@ -409,7 +415,7 @@ export const useGtdStore = defineStore('gtd', () => {
     summary, today, loaded, stand, offline, lastAction, inboxDot, recurred,
     // lists
     open, taskOf, uuidNow, keepAside, inbox, next, waiting, someday, unlisted, doneToday, doneWeek, projects,
-    contexts, contextChoices, contextCount, progress, caption, reviewDue, reviewAge, followUps, sectionsFor,
+    contexts, contextChoices, contextCount, progress, caption, reviewDue, reviewAge, followUps, followUpCounts, sectionsFor,
     // the outbox
     ops: outbox.ops, failed, paused, held,
     // actions

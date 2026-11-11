@@ -1,7 +1,7 @@
 /**
- * The new UI's lazy pages stay lazy (plan M13, brief 0060): `router/lazyPages.js` is the one file
- * that loads `ProjectsPage`, `ProjectPage`, `ComingPage` and `LoginPage`, with `import()`, and no
- * file imports them statically. This departs from plan §6.2 (static imports) for the entry budget;
+ * The new UI's lazy pages stay lazy (plan M13, brief 0060; M14, brief 0061): `router/lazyPages.js`
+ * is the one file that loads `ProjectsPage`, `ProjectPage`, `ReviewPage`, `SettingsPage` and
+ * `LoginPage`, with `import()`, and no file imports them statically. This departs from plan §6.2 (static imports) for the entry budget;
  * the index records the dynamic edges as UNKNOWN (`BLIND-FE-002`), so this scan is what holds them,
  * as `threeIsolation.test.js` holds the lens chunk.
  */
@@ -15,7 +15,8 @@ const LAZY = 'router/lazyPages.js'
 const PAGES = {
   'projects/ProjectsPage.vue': 'ProjectsPage',
   'projects/ProjectPage.vue': 'ProjectPage',
-  'layout/ComingPage.vue': 'ComingPage',
+  'tasks/views/ReviewPage.vue': 'ReviewPage',
+  'identity/SettingsPage.vue': 'SettingsPage',
   'identity/LoginPage.vue': 'LoginPage',
 }
 
@@ -51,9 +52,16 @@ describe('lazy pages', () => {
     })
   }
 
-  it('the router takes the four pages from lazyPages.js', () => {
+  it('the router takes the five pages from lazyPages.js', () => {
     const router = sources.find((s) => s.file === 'router/index.js').text
-    expect(router).toMatch(/import\s*\{\s*ComingPage,\s*LoginPage,\s*ProjectPage,\s*ProjectsPage\s*\}\s*from\s*'\.\/lazyPages\.js'/)
+    expect(router).toMatch(
+      /import\s*\{\s*LoginPage,\s*ProjectPage,\s*ProjectsPage,\s*ReviewPage,\s*SettingsPage\s*\}\s*from\s*'\.\/lazyPages\.js'/,
+    )
+  })
+
+  it('the placeholder page is gone: every route of the new UI has its own page (M14)', () => {
+    expect(sources.some((s) => s.file === 'layout/ComingPage.vue')).toBe(false)
+    expect(sources.filter((s) => /\bComingPage\b/.test(s.text)).map((s) => s.file)).toEqual([])
   })
 
   it('the patterns catch both ways of importing a page', () => {

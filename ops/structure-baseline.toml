@@ -52,7 +52,12 @@ allowlist = [
 # Raised from 4 on 2026-11-01 (brief 0050, approved by the owner, RISK-GOV-001): the new UI's
 # host reads the user and signs out, and its login page logs in, while the old AppShell,
 # LoginView and SettingsView still import it. Falls back to 2 when M17 deletes those three.
-"frontend/src/stores/auth.js" = 5
+# Raised from 5 on 2026-11-11 (brief 0061, approved by the owner, RISK-GOV-001: not an independent
+# approval): the new Einstellungen reads and updates the user through one
+# module, `identity/useAccount.js` (the profile it saves is what the store keeps for the next load),
+# rather than from each of its sections. Falls back by three when M17 deletes the old AppShell,
+# LoginView and SettingsView.
+"frontend/src/stores/auth.js" = 6
 # Raised from 4 on 2026-11-01 (brief 0051, approved by the owner, RISK-GOV-001): the rows' meta
 # (`shared/rowMeta.js`) formats server days like the store, the sections, the day progress and
 # t() already do. The calendar is a shared kernel of the new UI; a sixth importer is a new
@@ -88,7 +93,12 @@ allowlist = [
 # approval): two new kinds of page, as the line above expects — Projekte (`projects/ProjectsPage.vue`,
 # its head) and a project's plan document (`projects/PlanDocument.vue`, "// Plan · Name · Natürliche
 # Planung"). A tenth is a new kind of page or panel and worth a look.
-"frontend/src/layout/ui/EyebrowLine.vue" = 9
+# Raised from 9 on 2026-11-11 (brief 0061, approved by the owner, RISK-GOV-001: not an independent
+# approval): the placeholder page is gone (M14), and two new kinds of page
+# head themselves with it, as the line above expects — Rückblick (`tasks/views/ReviewPage.vue`,
+# "// Rückblick · zuletzt Di 03.11. · vor 8 Tagen") and Einstellungen (`identity/SettingsPage.vue`,
+# "// Einstellungen · uli · Admin"). An eleventh is a new kind of page or panel and worth a look.
+"frontend/src/layout/ui/EyebrowLine.vue" = 10
 # Recorded on 2026-11-10 (brief 0055, approved by the owner, RISK-GOV-001: not an independent
 # approval): the command state of the new UI — the palette's items (`paletteItems`), the `/` search
 # query, the modifier name and the runtime search registry `fe/tasks` fills (so `fe/layout` imports
@@ -116,19 +126,36 @@ allowlist = [
 # approval): a project's page reports its own two actions on the same line — a status change
 # ("Podcast ruht · Rückgängig") and a next action ("Nächste Aktion angelegt · … · Rückgängig").
 # A seventh is a new action that reports itself and is expected (M14's Rückblick).
-"frontend/src/tasks/notice.js" = 6
+# Raised from 6 on 2026-11-11 (brief 0061, approved by the owner, RISK-GOV-001: not an independent
+# approval): M14's Rückblick, as the line above expects — "Rückblick
+# gespeichert" on the same line. An eighth is a new action that reports itself.
+"frontend/src/tasks/notice.js" = 7
 # Raised on 2026-11-11 (brief 0060, approved by the owner, RISK-GOV-001: not an independent
 # approval): every pill of the new UI is this one component (brand kit). The fifth to seventh
 # importers are a project's page (the callout's "Nächste Aktion festlegen"), its status pills
 # (`projects/ProjectStatus.vue`) and the plan document (Speichern, Verwerfen). Expected to grow with
 # M14's pages; a copy of the pill elsewhere would be the regression, not this number.
-"frontend/src/layout/ui/PillButton.vue" = 7
+# Raised from 7 on 2026-11-11 (brief 0061, approved by the owner, RISK-GOV-001: not an independent
+# approval): M14's pages, as the line above expects. The placeholder page
+# is gone; the new importers are Rückblick ("Rückblick abschließen"), Einstellungen (Profil, Passwort,
+# Anzeigen, Neuen Key erzeugen, Abmelden), its copy block ("Kopieren", on every key, step and
+# snippet) and its Verwaltung (the role buttons). An eleventh is a new page and worth a look.
+"frontend/src/layout/ui/PillButton.vue" = 10
 # Raised on 2026-11-11 (brief 0060, approved by the owner, RISK-GOV-001: not an independent
 # approval): what `NewUiHost.vue` provides to every page (`useFrame`). The fifth reader is Projekte
 # (`projects/ProjectsPage.vue`), a page on `AppFrame` like `ComingPage`. M14's Einstellungen and
 # Rückblick will read it the same way; a reader outside a page is worth a look.
-"frontend/src/composables/useFrame.js" = 5
+# Raised from 5 on 2026-11-11 (brief 0061, approved by the owner, RISK-GOV-001: not an independent
+# approval): Rückblick and Einstellungen read it as the line above
+# expects, and the placeholder page that read it is gone. Every reader is still a page or the
+# composition root; a reader outside a page is worth a look.
+"frontend/src/composables/useFrame.js" = 6
 # Raised on 2026-11-11 (brief 0060, approved by the owner, RISK-GOV-001: not an independent
 # approval): the breakpoints in one place. The fifth reader is a project's page, which puts its plan
 # in the margin column above 1180 px and under its todos below. A sixth is a new layout decision.
 "frontend/src/composables/useMedia.js" = 5
+# Recorded on 2026-11-11 (brief 0061, approved by the owner, RISK-GOV-001: not an independent
+# approval): the page's big heading with its one Fraunces word. The fifth
+# importer: the placeholder page is gone, and Rückblick and Einstellungen head themselves with it
+# beside the list frame, Projekte and the login page. A sixth is a new kind of page.
+"frontend/src/layout/ui/PageHeading.vue" = 5

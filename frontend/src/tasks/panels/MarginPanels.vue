@@ -7,7 +7,8 @@
  * without importing `fe/tasks`.
  *
  * `view` is the page's (`meta.view`), or `null` while the `/` search replaces the page: on Nächste
- * the head carries the lens and "3 von 7", on Warten auf the page lists the follow-ups.
+ * the head carries the lens and "3 von 7", on Warten auf the page lists the follow-ups, and the Rückblick
+ * page is the review its panel would offer to begin (plan M14).
  */
 import ProjectsPanel from './ProjectsPanel.vue'
 import ReviewPanel from './ReviewPanel.vue'
@@ -24,6 +25,6 @@ defineProps({
     <TodayPanel :lens="view !== 'next'" />
     <WaitingPanel v-if="view !== 'waiting'" />
     <ProjectsPanel />
-    <ReviewPanel />
+    <ReviewPanel v-if="view !== 'review'" />
   </div>
 </template>

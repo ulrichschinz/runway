@@ -20,7 +20,7 @@ export default {
   'title.review': 'Rückblick', 'title.all': 'Alle', 'title.settings': 'Einstellungen',
   stand: 'Stand {t}', close: 'schließen', undo: 'Rückgängig', 'shell.margin': 'Randspalte', 'shell.today': 'Heute',
   // the shell (brief 0050)
-  'brand.name': 'Agentic Reach', 'brand.product': 'runway', 'shell.offline': 'kein Netz', 'shell.coming': 'kommt',
+  'brand.name': 'Agentic Reach', 'brand.product': 'runway', 'shell.offline': 'kein Netz',
   'shell.taskMissing': 'Dieses Todo gibt es nicht mehr.', 'shell.taskDone': 'Dieses Todo ist erledigt.', 'shell.moreClose': 'Mehr schließen',
   // login (pinned on Android: Benutzername, Passwort, Anmelden)
   'h.login': ['Bei runway ', 'anmelden', ''], 'h.register': ['Ein Konto ', 'anlegen', ''],
@@ -128,23 +128,8 @@ export default {
   'plan.actionsP': '„→ Nächste“ legt den Schritt als nächste Aktion an; den Kontext wählst du dabei.', 'plan.up': 'nach oben', 'plan.toNext': '→ Nächste',
   // other views
   'waiting.sorted': 'nach Nachhak-Datum', 'someday.sub': 'im Rückblick durchsehen',
-  'review.last': 'zuletzt {d}', 'review.ago': 'vor {n} Tagen', 'review.today': 'heute', 'review.lead': 'Sechs Schritte, einmal pro Woche. Was runway prüfen kann, hakt es selbst ab.',
-  'rs.1': 'Inbox leeren', 'rs.1w': 'Jeder Eintrag hat einen Platz.', 'rs.1s': '{n} offen', 'rs.empty': 'leer',
-  'rs.2': 'Nächste Aktionen durchsehen', 'rs.2w': 'Erledigtes abhaken, Veraltetes löschen.', 'rs.2s': '{n} · {d} fällig',
-  'rs.3': 'Warten auf: nachhaken', 'rs.3w': 'Wer ist dran, wann fragst du nach?', 'rs.3s': '{n} heute · {s} diese Woche',
-  'rs.4': 'Projekte: jedes hat eine nächste Aktion', 'rs.4w': 'Alle aktiven Projekte sind in Bewegung.', 'rs.4stalled': 'Steckt fest: {p}',
-  'rs.5': 'Irgendwann durchsehen', 'rs.5w': 'Wird etwas davon jetzt wichtig?', 'rs.5s': '{n} Ideen',
-  'rs.6': 'Kalender: letzte und nächste Woche', 'rs.6w': 'Außerhalb von runway, im Kalender.', 'rs.6s': 'Kalender',
-  'rs.check': 'Schritt {n} abhaken', 'rs.finish': 'Rückblick abschließen', 'rs.finishHint': 'speichert den Zeitpunkt für dich und für Claude',
   'all.open': '{n} offen', 'all.doneN': '{n} erledigt in 7 Tagen', 'all.showDone': 'Erledigte zeigen',
-  'set.account': 'Konto', 'set.profile': 'Profil bearbeiten', 'set.password': 'Passwort', 'set.pwChange': 'Passwort ändern',
-  'set.apiKey': 'API-Key', 'set.apiKeyP': 'Für die Android-App („Key einfügen“) und für Claude.', 'set.show': 'Anzeigen', 'set.copy': 'Kopieren',
-  'set.claude': 'Claude verbinden', 'set.claudeP': 'Vier Schritte, jeder zum Kopieren: Umgebung, MCP-Server, Plugin, Regel für CLAUDE.md.',
-  'set.mcp': 'MCP-Server', 'set.mcpP': 'Endpunkt /api/mcp · Claude Code · Claude Desktop · curl',
-  'set.contexts': 'Kontexte', 'set.contextsP': 'Die Kontexte für Nächste, das Widget und die Android-Chips. Eine Liste für alle Geräte.', 'set.addCtx': '+ Kontext',
-  'set.look': 'Darstellung', 'set.system': 'System', 'set.light': 'Hell', 'set.dark': 'Dunkel',
-  'set.lang': 'Sprache', 'set.langP': 'Deutsch. Weitere Sprachen kommen als eigene Texttabelle dazu.',
-  'set.admin': 'Verwaltung', 'set.adminP': 'Registrierung erlauben · Benutzer und Rollen', 'set.signout': 'Abmelden',
+  'set.look': 'Darstellung', 'set.system': 'System', 'set.light': 'Hell', 'set.dark': 'Dunkel', 'set.signout': 'Abmelden',
   // command palette (graft from 04)
   'pal.title': 'Befehle', 'pal.ph': 'Befehl, Todo oder Projekt suchen', 'pal.goto': 'Gehe zu {v}', 'pal.check': 'Abhaken: {d}',
   'pal.plan': 'Für heute planen: {d}', 'pal.unplan': 'Nicht mehr für heute: {d}', 'pal.clarify': 'Inbox klären ({n})',
