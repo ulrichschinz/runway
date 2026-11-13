@@ -14,7 +14,7 @@ takes one; the calls that do not are named in the table, and they are not made w
 | Section | Counter | Call, only if the counter is above zero |
 |---|---|---|
 | 1 Overdue / due today | `overdue`, `due_today`, `scheduled_passed` | list tasks with `due_before=<tomorrow>`; if `scheduled_passed` is above zero also `scheduled_before=<tomorrow>`, and drop the `waiting` ones — they are section 3. `overdue` and `due_today` count parked tasks as well, which the list call does not return: a remainder is in the tickler, not missing |
-| 2 Inbox | `inbox`, `inbox_oldest_entry` | `gtd/inbox`, only if `inbox` is five or fewer and the repository is not scoped; otherwise report count and age and stop there |
+| 2 Inbox | `inbox`, `inbox_oldest_entry` | `gtd/inbox`, whatever the count, unless the repository is scoped; in a scoped repository report count and age and stop there |
 | 3 Waiting for | `waiting_followup_due` | `gtd/waiting`, keep those whose `scheduled` is today or earlier |
 | 4 In no list | `unclarified` | list tasks with `status=pending`, filtered locally (no project, none of `next`/`waiting`/`someday`). This is the one permitted full pending fetch, and only when the counter says there is something to find |
 | 5 Stalled projects | `stalled_projects` | none — the summary gives the names; `gtd/projects/overview` only if the user asks what is in them, and never in a scoped repository: it takes no `tag` and would list every area's projects |
@@ -30,7 +30,11 @@ visible — a count cannot be addressed by shorthand.
 
 1. **Overdue / due today** — each with its date. Include tasks whose `scheduled` date has
    passed and that are not waiting-fors.
-2. **Inbox** — count and age of the oldest item; list titles if there are five or fewer.
+2. **Inbox** — every item with its title, numbered, oldest first, plus the age of the
+   oldest. Never the count alone, however many there are: the inbox is where ideas turn
+   into tasks, and a review that hides its titles has not looked at it. Above twenty, show
+   the twenty oldest and say how many remain. Only a scoped repository shows count and age
+   instead, because it never fetches the inbox.
 3. **Waiting for — follow-up due**: `scheduled` today or earlier. Older data may carry the
    follow-up in `due` instead; treat a past date there the same way and suggest moving it
    to `scheduled`. A task whose `wait` has passed is shown normally again; suggest moving
@@ -83,5 +87,7 @@ Overdue items get exactly one of three outcomes: done, a new honest date, or no 
 - End with the focus list and nothing else. No task dump into journals or logs; at most
   counters ("Inbox 0, 2 überfällige geklärt, Fokus 3").
 
-If the inbox is large (more than about ten) do not try to clarify it inside the daily
-review. Say how many there are and offer `clarify` separately.
+The inbox is part of every daily review, whatever its size. The review is finished only
+when each item is clarified (`references/clarify.md`) or the user has said, for this
+review, that the rest waits — record the review after that, not before. A long inbox is a
+reason to start clarifying, never a reason to skip the titles.
