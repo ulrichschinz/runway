@@ -84,7 +84,12 @@ works, the route list is non-empty). The concurrency tests were run five times i
 - Whole unit tier **865 passed**; frontend **749 passed**; container suite against the host binary
   **94 passed**.
 - `make check`: **GREEN** (23 s), after `make fix` rebuilt the stale index.
-- `make verify`: see the commit's report; recorded below once run.
+- `make verify`: **GREEN** at `53ee9b3` in a clean, bootstrapped detached worktree (171 s): 57 fixture arms
+  passed, 0 failed; 47 of 50 executable rules proven able to fail (unchanged — no rule was added).
+  **`py-test-container` was skipped** (`the docker daemon is not running`, `RISK-TEST-001`); the 94
+  container results above come from the host's Taskwarrior 3.5.0, not from that gate, and have to be
+  observed in CI on amd64. The clean worktree was needed for the reason brief 0065 gives: the untracked
+  audit evidence in the main checkout is copied into the fixture sandbox and fails `RULE-RULE-003` there.
 - Closed by this change: **REV-001** against its plan criterion (an old JWT gets 401 on every protected
   REST route and on the MCP tools after a password change; a new one works; concurrent changes cannot
   write hash and version partially). REV-001 was never in the waiver or risk registers, so nothing is
