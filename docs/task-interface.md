@@ -560,8 +560,8 @@ changes in flight.
 It reports two numbers, and they are not the same number:
 
 ```
-  56 fixture arm(s) passed, 0 failed
-  46 of 49 executable rules proven able to fail; 3 declare no automated fixture (…)
+  57 fixture arm(s) passed, 0 failed
+  47 of 50 executable rules proven able to fail; 3 declare no automated fixture (…)
 ```
 
 Several rules have more than one arm — `RULE-OPS-001` is proven twice, once for the subprocess and once for

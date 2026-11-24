@@ -122,9 +122,14 @@ green in CI on amd64 before SEC-001 counts as closed and before registration is 
   type every Taskwarrior layer carries). The main checkout's index had not seen the then-untracked new
   module, so only the clean-worktree `verify` showed it.
 - REST/OpenAPI and MCP snapshots: **unchanged**. DB schema snapshot: additive change only. Env: one variable.
-- `make check`: GREEN on the final commit. `make verify`: see the commit message / hand-over — run in a clean
-  worktree, because the untracked audit evidence in the main checkout (`docs/security-audits/`, not part of
-  this change) is copied into the fixture sandbox and fails `RULE-RULE-003` there.
+- `make check`: **GREEN** on the final commit (main checkout).
+- `make verify`: **GREEN** at `7d38d95` in a clean worktree of this branch (133 s): gate conformance **57 fixture
+  arms passed, 0 failed; 47 of 50 executable rules proven able to fail** (was 56 / 46 of 49; the new arm is
+  `RULE-SEC-003`). **`py-test-container` was skipped** (`docker daemon is not running`; the image cannot run on
+  arm64 anyway, `RISK-TEST-001`) — the container results above come from the host binary, not from that gate.
+  The clean worktree was needed because the untracked audit evidence in the main checkout
+  (`docs/security-audits/`, not part of this change) is copied into the fixture sandbox and fails
+  `RULE-RULE-003` there.
 - Closed by this change: nothing is removed from the waiver or risk registers. SEC-001 was never registered;
   it is now tracked as `RISK-SEC-006` until migrate + switch + the amd64 container run.
 
