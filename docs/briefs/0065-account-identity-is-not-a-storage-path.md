@@ -125,6 +125,9 @@ flagged the first draft, which read `data_root` in the migration, and was right 
 reading an account and again before each `provision_store`.
 
 Results after this round: unit tier **792 passed**; container suite against the host's Taskwarrior 3.5.0 **94 passed**.
+`make check` **GREEN** at `089e287`; `make verify` **GREEN** at `089e287` in a clean, bootstrapped worktree (161 s):
+57 fixture arms passed, 0 failed; 47 of 50 executable rules proven able to fail. **`py-test-container` was skipped**
+(`the docker daemon is not running`, `RISK-TEST-001`); the 94 container results come from the host binary.
 
 | Finding | Verdict | Fix |
 |---|---|---|
