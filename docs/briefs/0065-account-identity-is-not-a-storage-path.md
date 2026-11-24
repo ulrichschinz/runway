@@ -152,6 +152,12 @@ green in CI on amd64 before SEC-001 counts as closed and before registration is 
   The clean worktree was needed because the untracked audit evidence in the main checkout
   (`docs/security-audits/`, not part of this change) is copied into the fixture sandbox and fails
   `RULE-RULE-003` there.
+- **After the review fixes (`4ae9ce5`)**: unit tier **783 passed**; container suite against the host's
+  Taskwarrior 3.5.0 **94 passed** (the two new case-variant tests ran, because this Mac's APFS folds case);
+  `make check` **GREEN**; `make verify` **GREEN** in a clean, bootstrapped worktree (157 s): 57 fixture arms
+  passed, 0 failed; 47 of 50 executable rules proven able to fail. **`py-test-container` was skipped again**
+  (`the docker daemon is not running`, `RISK-TEST-001`). On case-sensitive ext4 in CI the folding tests skip;
+  the inode-grouping test runs on every filesystem.
 - Closed by this change: nothing is removed from the waiver or risk registers. SEC-001 was never registered;
   it is now tracked as `RISK-SEC-006` until migrate + switch + the amd64 container run.
 
