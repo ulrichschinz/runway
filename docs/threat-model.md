@@ -179,9 +179,10 @@ any string field in that file. `RISK-SEC-004`.
 
 ### Headers, and the three credential shapes
 
-`get_current_user` at [`backend/app/dependencies.py:12-76`](../backend/app/dependencies.py) accepts
-`X-Api-Key` (line 33), `Authorization: Bearer <jwt>` (line 41), and — last, only after a JWT decode
-fails — an API key in the Bearer slot (line 68). The third is `SHIM-SEC-006`, kept because every
+`get_current_user` at [`backend/app/dependencies.py:14-80`](../backend/app/dependencies.py) accepts
+`X-Api-Key` (line 35), `Authorization: Bearer <jwt>` (line 43) — held to the account's current
+`auth_version`, so a password change ends it (ADR 0044) — and — last, only after a JWT decode
+fails — an API key in the Bearer slot (line 72). The third is `SHIM-SEC-006`, kept because every
 agent and MCP client sends it today, and it now leaves a distinguishable trace: each successful
 authentication records which shape let it in (`api-key-header`, `bearer-jwt`, `bearer-api-key`, at
 [`backend/app/audit.py:98-100`](../backend/app/audit.py)).
@@ -480,7 +481,7 @@ Everything that enters the running image is pinned by content, not by name.
 
 ## 8. Abuse cases
 
-Seven, each with what actually stops it and what does not.
+Eight, each with what actually stops it and what does not.
 
 ### Credential stuffing against `POST /auth/login`
 
@@ -497,6 +498,31 @@ row.
 directions — an attacker rotating source addresses is unaffected by an IP limiter, and someone who
 knows a username can deny it password login for the window. It is also in-process and per-worker, so
 it is the whole population only under one host and one worker (decision **F1**). `RISK-SEC-003`.
+
+### A stolen session token
+
+**The exposure:** a JWT in `localStorage` (§3) can be copied by a script on the origin, from an
+unlocked device, or out of a header a proxy kept. Until brief 0066 a password change did not end it:
+the token stayed valid for its full lifetime, up to 24 hours, on every REST route and MCP tool
+(finding REV-001).
+
+**Stopped by** a per-account `users.auth_version` carried in every token and compared on every
+request in `get_current_user`; `PUT /auth/password` raises it in the same statement that writes the
+new hash (a compare-and-swap, so two concurrent changes cannot both write). Every earlier token is
+then 401 everywhere; the changing session gets a fresh token. A trigger keeps the version from going
+down. The operator can end one account's sessions, or all, with one `UPDATE`
+([`docs/operations.md`](operations.md#ending-sessions)). Held by
+`backend/tests/unit/test_session_revocation.py`, which takes every protected route from the OpenAPI
+snapshot and three MCP tools over a real client session (ADR 0044).
+
+**Not stopped:** a request already authenticated when the password changes runs to completion
+(authorization is decided once, at the start of a request). For one JWT lifetime after the deploy a
+token from the previous image — without a version — is accepted as version 1 (`SHIM-SEC-008`); the
+first password change ends it too. The API key survives a password change by design and is
+`WAIVER-SEC-003`'s exposure; the settings page offers to rotate it after the change. A leaked
+`JWT_SECRET` mints tokens at any version — rotating the secret remains the only answer to that. A
+rollback to an image before brief 0066 disables the check for its duration; the runbook bumps every
+version after rolling forward.
 
 ### API key theft
 

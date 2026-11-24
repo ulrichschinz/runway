@@ -124,7 +124,7 @@ def _legacy_account(username: str) -> None:
 def _bearer(username: str) -> dict[str, str]:
     from app.auth import create_access_token
 
-    return {"Authorization": f"Bearer {create_access_token(username)}"}
+    return {"Authorization": f"Bearer {create_access_token(username, auth_version=1)}"}
 
 
 class TestAnExistingAccountAcrossTheMigration:

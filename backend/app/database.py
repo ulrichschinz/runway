@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
@@ -132,7 +133,23 @@ MIGRATIONS = (
     BEFORE UPDATE OF storage_id ON users
     WHEN OLD.storage_id IS NOT NULL AND NEW.storage_id IS NOT OLD.storage_id
     BEGIN SELECT RAISE(ABORT, 'storage_id is immutable'); END""",
+    # REV-001, ADR 0044 — expand. Every token carries the account's version; a password change
+    # raises it, and a token with any other version is refused. 1 is the default so every
+    # existing row, and a row the previous image inserts after a rollback, starts where the
+    # versionless tokens of that image are counted (dependencies.get_current_user).
+    "ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 1"
+    " CHECK (auth_version >= 1)",
+    # Monotone: a version that went down would make revoked tokens valid again.
+    """CREATE TRIGGER IF NOT EXISTS users_auth_version_monotone
+    BEFORE UPDATE OF auth_version ON users
+    WHEN NEW.auth_version < OLD.auth_version
+    BEGIN SELECT RAISE(ABORT, 'auth_version may only increase'); END""",
 )
+
+# The `site_settings` key holding the moment (UTC epoch seconds) this image first booted on this
+# database. A token without `auth_version` was issued by the previous image; it is accepted only
+# if it expires within one JWT lifetime of this moment (SHIM-SEC-008, ADR 0044). Written once.
+AUTH_VERSION_EXPAND_KEY = "auth_version_expand_at"
 
 # The migration's protocol (SEC-001, M1.2): one row per decision the operator CLI took about
 # one account. Ids, a path relative to DATA_ROOT, counts and a manifest digest — never a task's
@@ -253,6 +270,46 @@ async def backfill_storage_ids(db) -> int:
         )
     await db.commit()
     return len(rows)
+
+
+# --- sessions (REV-001, ADR 0044) -------------------------------------------------------------
+
+
+async def get_auth_version(db, username: str) -> int | None:
+    """The account's current `auth_version`, or None when there is no such account."""
+    async with db.execute("SELECT auth_version FROM users WHERE username=?", (username,)) as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else None
+
+
+async def get_auth_version_expand_at(db) -> int | None:
+    """When this image first booted here, or None — which refuses every versionless token."""
+    async with db.execute(
+        "SELECT value FROM site_settings WHERE key=?", (AUTH_VERSION_EXPAND_KEY,)
+    ) as cur:
+        row = await cur.fetchone()
+    try:
+        return int(row[0]) if row else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def replace_password(db, username: str, expected_hash: str, new_hash: str) -> int | None:
+    """Replace the hash and end every session, in ONE statement. Returns the new version, or
+    None when the stored hash is no longer `expected_hash` (another change won).
+
+    One statement is one transaction: there is no state with the new hash and the old version,
+    or the reverse. The `hashed_password=?` condition makes it a compare-and-swap, so of two
+    changes that both verified the old password exactly one writes.
+    """
+    async with db.execute(
+        "UPDATE users SET hashed_password=?, auth_version=auth_version+1"
+        " WHERE username=? AND hashed_password=? RETURNING auth_version",
+        (new_hash, username, expected_hash),
+    ) as cur:
+        row = await cur.fetchone()
+    await db.commit()
+    return int(row[0]) if row else None
 
 
 async def set_storage_layout(db, account_id: int, layout: str) -> None:
@@ -522,6 +579,11 @@ async def init_db() -> str:
         await db.execute(CREATE_PROJECT_PLANS)
         await db.execute(CREATE_PROJECTS)
         await db.execute(CREATE_SITE_SETTINGS)
+        # REV-001: the start of the versionless-token window, once and never moved.
+        await db.execute(
+            "INSERT OR IGNORE INTO site_settings (key, value) VALUES (?, ?)",
+            (AUTH_VERSION_EXPAND_KEY, str(int(time.time()))),
+        )
         await db.execute(CREATE_REVIEWS)
         await db.execute(CREATE_PROJECT_STATUS)
         await db.execute(CREATE_STORAGE_MIGRATIONS)

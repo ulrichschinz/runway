@@ -3,8 +3,9 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import audit, task_storage
-from app.auth import decode_token
-from app.database import get_account, get_db
+from app.auth import TokenClaims, decode_token
+from app.config import settings
+from app.database import get_account, get_auth_version, get_auth_version_expand_at, get_db
 from app.task_storage import StorageRefused, TaskStore
 
 bearer = HTTPBearer(auto_error=False)
@@ -40,20 +41,22 @@ async def get_current_user(
         return row["username"]
 
     if credentials:
-        username = decode_token(credentials.credentials)
-        if username:
-            # A JWT is signed, not looked up: it outlives the account it names. Both API-key
-            # shapes can only match an existing row, so this holds the token to the same
-            # precondition — a valid token for a deleted account is "not authenticated", 401,
-            # on every route alike (WAIVER-TYPE-001, resolved by brief 0056).
-            async with db.execute("SELECT 1 FROM users WHERE username=?", (username,)) as cur:
-                exists = await cur.fetchone()
-            if not exists:
+        claims = decode_token(credentials.credentials)
+        if claims:
+            # A JWT is signed, not looked up: it outlives the account it names, and it used to
+            # outlive every password change too (finding REV-001). So it is held to the row it
+            # names: the account must exist (brief 0056) AND the token must carry the account's
+            # current `auth_version`, which a password change raises (ADR 0044). One answer for
+            # every refusal — no such account, stale, outside the legacy window — so a caller
+            # cannot tell a revoked token from a forged one.
+            stored = await get_auth_version(db, claims.username)
+            presented = await _presented_version(db, claims)
+            if stored is None or presented != stored:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
                 )
-            _record(username, audit.SHAPE_BEARER_JWT, request)
-            return username
+            _record(claims.username, audit.SHAPE_BEARER_JWT, request)
+            return claims.username
 
         # SHIM-SEC-006 — an API key presented in the Bearer slot.
         #
@@ -75,6 +78,25 @@ async def get_current_user(
             return row["username"]
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+
+async def _presented_version(db: Connection, claims: TokenClaims) -> int:
+    """The version a token stands for; 0 matches no account.
+
+    SHIM-SEC-008: a token without `auth_version` was issued by the previous image. It counts as
+    version 1 — so the first password change after the deploy revokes it like any other — but
+    only while it expires within one JWT lifetime of this image's first boot here, i.e. only if
+    it can have been issued before that boot. After that window no such token can qualify and
+    the branch is dead (the switch, by date); a missing record refuses them all.
+    """
+    if claims.auth_version is not None:
+        return claims.auth_version
+    expand_at = await get_auth_version_expand_at(db)
+    if expand_at is None:
+        return 0
+    if claims.expires_at > expand_at + settings.jwt_expire_hours * 3600:
+        return 0
+    return 1
 
 
 def _record(username: str, shape: str, request: Request) -> None:

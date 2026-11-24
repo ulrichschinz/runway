@@ -8,7 +8,8 @@ vi.mock('../src/api/client.js', () => {
   const call = (method) => (url, body) => new Promise((resolve, reject) => calls.push({ method, url, body, resolve, reject }))
   return { default: { get: call('get'), put: call('put'), post: call('post') } }
 })
-vi.mock('../src/stores/auth.js', () => ({ useAuthStore: () => ({ fetchMe: async () => {} }) }))
+const adopted = []
+vi.mock('../src/stores/auth.js', () => ({ useAuthStore: () => ({ fetchMe: async () => {}, adoptToken: (t) => adopted.push(t) }) }))
 const { useAccount } = await import('../src/identity/useAccount.js')
 
 const flush = async () => {
@@ -29,6 +30,7 @@ const sent = (method, url) => calls.filter((c) => c.method === method && c.url =
 let account
 beforeEach(() => {
   calls.length = 0
+  adopted.length = 0
   account = useAccount()
 })
 
@@ -124,5 +126,21 @@ describe('the profile and the password', () => {
     expect(await account.changePassword({ current: 'alt', next: 'a', confirm: 'b' })).toEqual({ error: 'set.pw.mismatch' })
     expect(account.pending('password')).toBe(false)
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('a password change ends every earlier session (REV-001, ADR 0044)', () => {
+  it('keeps the token the answer carries, so this session survives its own revocation', async () => {
+    const pw = account.changePassword({ current: 'alt', next: 'neu', confirm: 'neu' })
+    await answer('put', '/auth/password', { detail: 'Password updated', access_token: 'eyJ.neu', token_type: 'bearer' })
+    expect(await pw).toEqual({ ok: true })
+    expect(adopted).toEqual(['eyJ.neu'])
+  })
+
+  it('a refused change keeps the session it has', async () => {
+    const pw = account.changePassword({ current: 'falsch', next: 'neu', confirm: 'neu' })
+    await answer('put', '/auth/password', httpError(400))
+    expect(await pw).toEqual({ error: 'set.pw.wrong' })
+    expect(adopted).toEqual([])
   })
 })

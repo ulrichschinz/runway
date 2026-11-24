@@ -529,7 +529,7 @@ class TestTheRedactionBackstop:
     """
 
     def test_a_jwt_handed_to_record_is_stored_redacted(self, client: TestClient):
-        token = create_access_token("alice")
+        token = create_access_token("alice", auth_version=1)
         audit.record(audit.AUTHENTICATED, outcome=audit.SUCCESS, detail=token)
         assert token not in every_value_written()
         assert REDACTION_MARKER in last(audit.AUTHENTICATED)["detail"]

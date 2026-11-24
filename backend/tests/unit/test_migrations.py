@@ -502,3 +502,100 @@ async def test_a_row_written_by_the_previous_image_is_backfilled_on_the_next_boo
     connection.close()
     assert layout == "legacy"
     assert len(sid) == 32
+
+
+# --- REV-001, ADR 0044: the session version --------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_an_upgraded_database_starts_every_account_at_version_one(isolated_storage: Path):
+    """Existing accounts start where the previous image's versionless tokens are counted (1),
+    so nobody is logged out by the deploy, and the expand moment is recorded once."""
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,"
+        " hashed_password TEXT NOT NULL, api_key TEXT UNIQUE,"
+        " created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    connection.executemany(
+        "INSERT INTO users (username, hashed_password) VALUES (?, 'x')", [("alice",), ("bob",)]
+    )
+    connection.commit()
+    connection.close()
+
+    with migration_lines() as buffer:
+        await init_db()
+        await init_db()
+    assert buffer.getvalue() == ""
+
+    from app.database import AUTH_VERSION_EXPAND_KEY
+
+    connection = sqlite3.connect(path)
+    versions = [v for (v,) in connection.execute("SELECT auth_version FROM users ORDER BY id")]
+    expand = connection.execute(
+        "SELECT COUNT(*) FROM site_settings WHERE key=?", (AUTH_VERSION_EXPAND_KEY,)
+    ).fetchone()[0]
+    connection.close()
+    assert versions == [1, 1]
+    assert expand == 1
+
+
+@pytest.mark.anyio
+async def test_fresh_and_upgraded_databases_end_with_the_same_session_objects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from app.config import settings
+
+    fresh = str(tmp_path / "fresh.db")
+    monkeypatch.setattr(settings, "db_path", fresh)
+    monkeypatch.setattr(settings, "data_root", tmp_path / "data")
+    await init_db()
+    upgraded = str(tmp_path / "upgraded.db")
+    connection = sqlite3.connect(upgraded)
+    connection.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,"
+        " hashed_password TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr(settings, "db_path", upgraded)
+    await init_db()
+
+    assert _schema(fresh) == _schema(upgraded)
+    assert ("trigger", "users_auth_version_monotone") in _schema(fresh)
+    assert "auth_version" in columns(fresh)
+
+
+@pytest.mark.anyio
+async def test_a_version_cannot_be_null_zero_or_lowered(isolated_storage: Path):
+    await init_db()
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    connection.execute("INSERT INTO users (username, hashed_password) VALUES ('alice', 'x')")
+    connection.commit()
+    for bad in (None, 0):
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("UPDATE users SET auth_version=? WHERE username='alice'", (bad,))
+    connection.execute("UPDATE users SET auth_version=3 WHERE username='alice'")
+    with pytest.raises(sqlite3.IntegrityError, match="only increase"):
+        connection.execute("UPDATE users SET auth_version=2 WHERE username='alice'")
+    connection.close()
+
+
+@pytest.mark.anyio
+async def test_a_row_written_by_the_previous_image_gets_version_one(isolated_storage: Path):
+    """Rollback compatibility: the old image's INSERT names no auth_version; the default holds."""
+    await init_db()
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO users (username, hashed_password, api_key) VALUES ('old', 'x', 'k')"
+    )
+    connection.execute("UPDATE users SET hashed_password='y' WHERE username='old'")
+    connection.commit()
+    (version,) = connection.execute(
+        "SELECT auth_version FROM users WHERE username='old'"
+    ).fetchone()
+    connection.close()
+    assert version == 1

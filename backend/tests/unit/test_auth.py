@@ -203,19 +203,18 @@ class TestPasswordChange:
         )
         assert new.status_code == 200
 
-    def test_existing_tokens_survive_a_password_change(self, client, auth, registered):
-        """DEFECT, pinned as-is.
-
-        JWTs are stateless and carry only `sub` and `exp`, so a token issued before the
-        change keeps working until it expires — up to 24 hours. Changing a password does
-        not end other sessions, which is what a user changing a password expects.
+    def test_existing_tokens_end_with_a_password_change(self, client, auth, registered):
+        """Was a DEFECT pinned as-is: a token issued before the change kept working until it
+        expired, up to 24 hours (finding REV-001). Every token now carries the account's
+        `auth_version`, which the change raises, so the old one is refused (ADR 0044). The
+        exhaustive version of this test is test_session_revocation.py.
         """
         client.put(
             "/auth/password",
             json={"current_password": registered["password"], "new_password": "brand new"},
             headers=auth,
         )
-        assert client.get("/auth/me", headers=auth).status_code == 200
+        assert client.get("/auth/me", headers=auth).status_code == 401
 
 
 class TestApiKey:

@@ -162,7 +162,7 @@ def _insert_account(username: str, layout: str, storage_id: str | None = None) -
 def _bearer(username: str) -> dict[str, str]:
     from app.auth import create_access_token
 
-    return {"Authorization": f"Bearer {create_access_token(username)}"}
+    return {"Authorization": f"Bearer {create_access_token(username, auth_version=1)}"}
 
 
 def _audit_rows(event: str) -> list[sqlite3.Row]:

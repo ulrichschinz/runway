@@ -64,7 +64,7 @@
               class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors">
               Update password
             </button>
-            <span v-if="pwSaved" class="text-xs text-green-500">Password updated!</span>
+            <span v-if="pwSaved" class="text-xs text-green-500">Password updated. Every other session was signed out; your API key still works.</span>
             <span v-if="pwError" class="text-xs text-red-500">{{ pwError }}</span>
           </div>
         </div>
@@ -278,7 +278,9 @@ async function changePassword() {
   if (!pwForm.next) { pwError.value = 'New password cannot be empty'; return }
   if (pwForm.next !== pwForm.confirm) { pwError.value = 'Passwords do not match'; return }
   try {
-    await client.put('/auth/password', { current_password: pwForm.current, new_password: pwForm.next })
+    const { data } = await client.put('/auth/password', { current_password: pwForm.current, new_password: pwForm.next })
+    // Every earlier session ended with the change, this one too; keep the token it returned.
+    if (data?.access_token) auth.adoptToken(data.access_token)
     pwForm.current = ''
     pwForm.next = ''
     pwForm.confirm = ''

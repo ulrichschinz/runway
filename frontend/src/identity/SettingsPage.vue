@@ -206,6 +206,7 @@ function escape(event, close) {
         <form v-if="changing" class="form" @submit.prevent="changePassword" @keydown="escape($event, closePassword)">
           <!-- the account name, for the browser's password manager -->
           <input class="hidden" type="text" autocomplete="username" :value="auth.username" readonly tabindex="-1" aria-hidden="true">
+          <p>{{ t('set.pw.hint') }}</p>
           <label class="field">
             <span>{{ t('set.pw.current') }}</span>
             <input ref="pwField" v-model="pw.current" type="password" autocomplete="current-password">

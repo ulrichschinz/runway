@@ -11,6 +11,7 @@ from app.database import (
     generate_api_key,
     get_allow_registration,
     get_db,
+    replace_password,
 )
 from app.dependencies import get_current_user
 from app.models import (
@@ -117,7 +118,7 @@ async def login(request: Request, body: UserLogin, db: Connection = Depends(get_
         )
 
     async with db.execute(
-        "SELECT hashed_password FROM users WHERE username = ?", (body.username,)
+        "SELECT hashed_password, auth_version FROM users WHERE username = ?", (body.username,)
     ) as cur:
         row = await cur.fetchone()
     if not row or not verify_password(body.password, row["hashed_password"]):
@@ -137,7 +138,9 @@ async def login(request: Request, body: UserLogin, db: Connection = Depends(get_
     rate_limit.clear(body.username)
     logger.info("login succeeded", extra={"username": body.username})
     audit.record(audit.LOGIN_SUCCEEDED, outcome=audit.SUCCESS, actor=body.username, route=route)
-    return Token(access_token=create_access_token(body.username))
+    # The version read with the hash: a password change between the read and now raised it, and
+    # this token is then refused on its first use — fail closed (ADR 0044).
+    return Token(access_token=create_access_token(body.username, auth_version=row["auth_version"]))
 
 
 @router.get("/me", response_model=UserInfo, summary="Get current user profile")
@@ -203,13 +206,34 @@ async def change_password(
             detail="the current password did not verify",
         )
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-    await db.execute(
-        "UPDATE users SET hashed_password=? WHERE username=?",
-        (hash_password(body.new_password), username),
+    # Hash and auth_version in one compare-and-swap statement (REV-001, ADR 0044): every token
+    # issued before this line is refused from now on, on every REST route and every MCP tool.
+    # None means another change replaced the hash after it was verified above — the password
+    # given as current is then no longer current, and the answer says exactly that.
+    version = await replace_password(
+        db, username, row["hashed_password"], hash_password(body.new_password)
     )
-    await db.commit()
-    audit.record(audit.PASSWORD_CHANGED, outcome=audit.SUCCESS, actor=username, route=route)
-    return {"detail": "Password updated"}
+    if version is None:
+        audit.record(
+            audit.PASSWORD_CHANGED,
+            outcome=audit.FAILURE,
+            actor=username,
+            route=route,
+            detail="the password was changed concurrently",
+        )
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    audit.record(
+        audit.PASSWORD_CHANGED,
+        outcome=audit.SUCCESS,
+        actor=username,
+        route=route,
+        detail=f"every earlier session ended (auth_version {version})",
+    )
+    # The session that made the change continues with a token at the new version; every other
+    # one gets 401 on its next request. The API key is untouched: it has its own rotation.
+    # The response stays untyped, so the OpenAPI document does not move.
+    fresh = Token(access_token=create_access_token(username, auth_version=version))
+    return {"detail": "Password updated", **fresh.model_dump()}
 
 
 @router.get("/apikey", response_model=ApiKeyInfo)

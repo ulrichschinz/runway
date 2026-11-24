@@ -77,7 +77,13 @@ CREATE TABLE users (
     hashed_password TEXT NOT NULL,
     api_key TEXT UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-, role TEXT DEFAULT 'user', full_name TEXT DEFAULT '', email TEXT DEFAULT '', storage_id TEXT CHECK (storage_id IS NULL OR (length(storage_id) = 32 AND storage_id NOT GLOB '*[^0-9a-f]*')), storage_layout TEXT NOT NULL DEFAULT 'legacy' CHECK (storage_layout IN ('legacy', 'storage_id')));
+, role TEXT DEFAULT 'user', full_name TEXT DEFAULT '', email TEXT DEFAULT '', storage_id TEXT CHECK (storage_id IS NULL OR (length(storage_id) = 32 AND storage_id NOT GLOB '*[^0-9a-f]*')), storage_layout TEXT NOT NULL DEFAULT 'legacy' CHECK (storage_layout IN ('legacy', 'storage_id')), auth_version INTEGER NOT NULL DEFAULT 1 CHECK (auth_version >= 1));
+
+-- trigger users_auth_version_monotone
+CREATE TRIGGER users_auth_version_monotone
+    BEFORE UPDATE OF auth_version ON users
+    WHEN NEW.auth_version < OLD.auth_version
+    BEGIN SELECT RAISE(ABORT, 'auth_version may only increase'); END;
 
 -- trigger users_storage_id_immutable
 CREATE TRIGGER users_storage_id_immutable
