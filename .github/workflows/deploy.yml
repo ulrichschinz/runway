@@ -245,3 +245,44 @@ jobs:
 
           printf 'Verified in production: commit %s, skill %s (%s).\n' \
             "$commit" "$got_version" "$got_sha" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      # The browser headers as the public origin sends them (finding SEC-004, ADR 0048). The
+      # gate holds what frontend/nginx.conf declares (RULE-OPS-005) and the container tier what
+      # the built image sends; neither sees Traefik, which terminates TLS in front of it and
+      # could strip or replace any of them (RISK-OPS-008). Only this step reads the real answer,
+      # and only after the deploy it cannot undo — so it fails loudly rather than silently.
+      #
+      # Three responses: the SPA, the proxied API, and a 404 the backend produces, because a
+      # header that is present on 200 and missing on an error is the regression `always` exists
+      # to prevent. HSTS is reported, not required: it is Traefik's to send, after every host is
+      # confirmed permanently HTTPS (docs/operations.md#container-hardening).
+      - name: The public edge sends the browser headers
+        shell: sh
+        run: |
+          set -eu
+          base=${RUNWAY_URL%/}
+          missing=0
+          for path in / /api/health /api/verify-deploy-header-probe; do
+            headers=$(curl -sS -m 10 -o /dev/null -D - "$base$path" | tr -d '\r' \
+              | tr '[:upper:]' '[:lower:]')
+            for want in \
+              "content-security-policy: frame-ancestors 'none'" \
+              "content-security-policy-report-only: default-src 'self'" \
+              "x-content-type-options: nosniff" \
+              "referrer-policy: no-referrer" \
+              "x-frame-options: deny" \
+              "permissions-policy: "; do
+              if ! printf '%s\n' "$headers" | grep -qF "$want"; then
+                printf 'verify-deploy: %s%s lacks "%s"\n' "$base" "$path" "$want" >&2
+                missing=1
+              fi
+            done
+          done
+          if curl -sS -m 10 -o /dev/null -D - "$base/" | grep -qi '^strict-transport-security:'; then
+            hsts="present"
+          else
+            hsts="absent (set on the TLS terminator once every host is confirmed HTTPS)"
+          fi
+          printf 'Edge headers checked on /, /api/health and a 404. HSTS: %s.\n' "$hsts" \
+            >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          [ "$missing" -eq 0 ] || exit 1

@@ -812,6 +812,140 @@ p.write_text(t.replace(anchor, anchor + "      - /var/run/docker.sock:/var/run/d
 HOSTMOUNT
 expect_red "OPS-003-hostmount" "tools/checks/deploy-compose.sh" "RULE-OPS-003"
 
+# --- RULE-OPS-004 — a service gets its writable root back ------------------------
+# One line in a long YAML block, and the frontend's whole filesystem is writable again to
+# whatever runs in it (finding SEC-003, ADR 0048).
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'WRITABLEROOT'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = '    user: "10002:10002"\n    read_only: true\n'
+assert anchor in t, "the frontend's hardening is not where the fixture expects it"
+p.write_text(t.replace(anchor, '    user: "10002:10002"\n', 1))
+WRITABLEROOT
+expect_red "OPS-004-writable" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — the compose overrides the image back to root ------------------
+# The quiet way to undo a USER line: the compose `user:` wins over the image, and "0:0" is a
+# perfectly well-formed value.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'ROOTUSER'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = '    user: "10002:10002"\n'
+assert anchor in t, "the frontend's user is not where the fixture expects it"
+p.write_text(t.replace(anchor, '    user: "0:0"\n', 1))
+ROOTUSER
+expect_red "OPS-004-root-user" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — the image loses its USER --------------------------------------
+# Without a USER in the final stage, any service whose compose line is later dropped runs as
+# root, and the image no longer says which uid owns /app/data.
+python3 - "$SANDBOX/backend/Dockerfile" <<'NOUSER'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "USER 10001:10001\n"
+assert anchor in t, "backend/Dockerfile has no USER line where the fixture expects it"
+p.write_text(t.replace(anchor, "", 1))
+NOUSER
+expect_red "OPS-004-no-user" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — the shim is removed and the root backend stays -----------------
+# The exception is only an exception while SHIM-OPS-001 is declared. Removing the shim and
+# forgetting the compose is the contract step done halfway, and must go red.
+python3 - "$SANDBOX/rules/shims.yaml" <<'NOSHIMOPS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+start = t.index("  - id: SHIM-OPS-001\n")
+end = t.find("\n  - id: ", start + 1)
+p.write_text(t[:start] + (t[end + 1 :] if end >= 0 else ""))
+NOSHIMOPS
+expect_red "OPS-004-shim-gone" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-005 — a header loses `always` ---------------------------------------
+# It still appears on every 200, so nothing looks wrong in a browser; it is gone from every
+# 404 and 502, which are the responses an attacker can provoke (finding SEC-004).
+python3 - "$SANDBOX/frontend/nginx.conf" <<'NOALWAYS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = 'add_header X-Content-Type-Options "nosniff" always;'
+assert anchor in t, "the nosniff header is not where the fixture expects it"
+p.write_text(t.replace(anchor, 'add_header X-Content-Type-Options "nosniff";', 1))
+NOALWAYS
+expect_red "OPS-005-no-always" "tools/checks/edge-headers.sh" "RULE-OPS-005"
+
+# --- RULE-OPS-005 — a location declares a header of its own ------------------------
+# The likeliest regression: a caching header for the SPA. nginx then inherits none of the
+# server's add_header lines into that location, and every security header vanishes from it.
+python3 - "$SANDBOX/frontend/nginx.conf" <<'LOCATIONHEADER'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    location / {\n"
+assert anchor in t, "the SPA location is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + '        add_header Cache-Control "no-cache";\n', 1))
+LOCATIONHEADER
+expect_red "OPS-005-location" "tools/checks/edge-headers.sh" "RULE-OPS-005"
+
+# --- RULE-OPS-005 — the strict policy allows inline script --------------------------
+# 'unsafe-inline' in script-src is the one word that turns a CSP back into decoration.
+python3 - "$SANDBOX/frontend/nginx.conf" <<'UNSAFEINLINE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "default-src 'self'; script-src 'self';"
+assert anchor in t, "the strict policy is not where the fixture expects it"
+p.write_text(t.replace(anchor, "default-src 'self'; script-src 'self' 'unsafe-inline';", 1))
+UNSAFEINLINE
+expect_red "OPS-005-unsafe" "tools/checks/edge-headers.sh" "RULE-OPS-005"
+
+# --- RULE-OPS-005 — HSTS from the inner HTTP server ---------------------------------
+# It looks like hardening and is a claim about hosts this server cannot see.
+python3 - "$SANDBOX/frontend/nginx.conf" <<'HSTS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    server_tokens off;\n"
+assert anchor in t, "server_tokens is not where the fixture expects it"
+hsts = '    add_header Strict-Transport-Security "max-age=63072000" always;\n'
+p.write_text(t.replace(anchor, anchor + hsts, 1))
+HSTS
+expect_red "OPS-005-hsts" "tools/checks/edge-headers.sh" "RULE-OPS-005"
+
+# --- RULE-OPS-005 — the report-only shim is removed and nothing is enforced ----------
+# Removing SHIM-WEB-001 without moving the strict policy into the enforced header is the
+# contract step done halfway: the gate must then ask for the enforced strict policy.
+python3 - "$SANDBOX/rules/shims.yaml" <<'NOSHIMWEB'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+start = t.index("  - id: SHIM-WEB-001\n")
+end = t.find("\n  - id: ", start + 1)
+p.write_text(t[:start] + (t[end + 1 :] if end >= 0 else ""))
+NOSHIMWEB
+expect_red "OPS-005-shim-gone" "tools/checks/edge-headers.sh" "RULE-OPS-005"
+
 # --- RULE-GOV-002 — the decay review silently stopped happening -------------
 #
 # The failure this rule exists for is not a bad review; it is no review. A scheduled

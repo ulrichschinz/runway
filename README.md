@@ -91,10 +91,20 @@ JWT_EXPIRE_HOURS=24
 # configurable — logs are always JSON and always pass through the redaction filter.
 LOG_LEVEL=INFO
 
-# Container paths. Change these only alongside the compose bind mounts.
+# Container paths. Change these only alongside the compose bind mounts. The application's
+# default for DB_PATH is shown; both compose files set /app/db/users.db, a directory mount the
+# database's journal can be written to on a read-only container root.
 DATA_ROOT=/app/data
 DB_PATH=/app/users.db
 ```
+
+**Deployment variables.** Read by the compose files, not by the application, so they belong in the `.env`
+beside the compose file and nowhere in `Settings`:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `RUNWAY_SHA` | `latest` | Image tag to run; pin a commit sha to roll back ([docs/operations.md](docs/operations.md#rolling-back)). |
+| `RUNWAY_BACKEND_USER` | `0:0` | The `uid:gid` the backend runs as. The image's user is `10001:10001`; set it to that once the volumes have been handed over with the migration tool ([docs/operations.md](docs/operations.md#container-hardening)). Temporary: the contract step removes it (`SHIM-OPS-001`). |
 
 > `PORT` used to be listed here and was read by nothing — the frontend's port is fixed in
 > `frontend/nginx.conf` and published by the compose file. Removed in Step 13, which is the
@@ -114,9 +124,11 @@ Register your first user at the login page (set `ALLOW_REGISTRATION=false` after
 | Path | Contents |
 |---|---|
 | `./data/<username>/` | Per-user Taskwarrior data (`taskchampion.sqlite3`) |
-| `./users.db` | Users, API keys, projects (SQLite) |
+| `./users.db` | Users, API keys, projects (SQLite) — mounted at `/app/db/users.db` |
+| `./db/` | The directory `users.db` is mounted into; holds its journal during a write |
 
-Both are bind-mounted and excluded from git. Back them up to retain all data.
+All are bind-mounted and excluded from git. Back up `./data` and `./users.db` to retain all data. The
+containers run on a read-only root filesystem; see [docs/operations.md](docs/operations.md#container-hardening).
 
 ---
 

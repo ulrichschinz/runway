@@ -23,7 +23,12 @@
 #
 # RULE-OPS-003 fails the gate if anything here asks the host for privilege, its network
 # namespace, or a bind mount outside the service directory. RULE-HYG-003 fails if a literal
-# secret ever replaces a ${...} reference.
+# secret ever replaces a ${...} reference. RULE-OPS-004 fails it if a service stops giving up
+# what it gives up below: a writable root, new privileges, its capabilities, or root itself.
+#
+# ROLLING BACK ACROSS 2026-11-24 (brief 0076): restore the compose of the commit you roll back
+# to, not only its image. The frontend image of an older commit writes its config into
+# /etc/nginx and cannot start under `read_only: true`. docs/operations.md#rolling-back.
 services:
   backend:
     # Parameterised so the documented rollback works. Unset resolves to :latest, which is
@@ -32,13 +37,55 @@ services:
     # would have re-pulled the broken build it was escaping.
     image: ghcr.io/ulrichschinz/runway-backend:${RUNWAY_SHA:-latest}
     restart: unless-stopped
+    # Container hardening (finding SEC-003, ADR 0048, docs/operations.md#container-hardening).
+    #
+    # The image runs as uid 10001; this line keeps the backend at uid 0 until the operator has
+    # handed the host's data to that user with /opt/runway/volume_ownership.py and then sets
+    # RUNWAY_BACKEND_USER=10001:10001 in the .env beside this file. Unset, nothing changes for
+    # the data on the deploy that ships this. SHIM-OPS-001 dates the step that removes the
+    # fallback.
+    user: "${RUNWAY_BACKEND_USER:-0:0}"
+    # Nothing in the image is writable: not the code, not /etc. The process writes three places
+    # only — the two bind mounts below and a capped /tmp, which neither executes nor honours
+    # setuid. SQLite's temp files and Taskwarrior's land there.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    security_opt:
+      - no-new-privileges:true
+    # Every default capability but DAC_OVERRIDE, while the backend may still be uid 0: a root
+    # process without it could not write a host file root does not own, and nobody has read who
+    # owns them. A uid-10001 process holds no effective capability either way. The contract step
+    # makes this `cap_drop: [ALL]`; RULE-OPS-004 accepts exactly this list until then.
+    cap_drop:
+      - AUDIT_WRITE
+      - CHOWN
+      - FOWNER
+      - FSETID
+      - KILL
+      - MKNOD
+      - NET_BIND_SERVICE
+      - NET_RAW
+      - SETFCAP
+      - SETGID
+      - SETPCAP
+      - SETUID
+      - SYS_CHROOT
     volumes:
       - ./data:/app/data
-      - ./users.db:/app/users.db
+      # users.db's rollback journal is created beside the database, so the database needs a
+      # directory the process can write. ./db is that directory, and the host's EXISTING
+      # ./users.db is mounted into it — the same file, not a copy, so no data moves and the
+      # previous compose, which mounts ./users.db at /app/users.db, still opens exactly this
+      # database. Docker creates ./db on the first start; the second mount covers the empty
+      # placeholder file it leaves there. The journal now outlives the container, where it used
+      # to sit in the image's layer and vanish with it.
+      - ./db:/app/db
+      - ./users.db:/app/db/users.db
     environment:
       - JWT_SECRET=${JWT_SECRET}
       - DATA_ROOT=/app/data
-      - DB_PATH=/app/users.db
+      - DB_PATH=/app/db/users.db
       # The zone the day logic runs in. Not application configuration — no Settings field
       # reads it, so it is not an env var in README's sense (RULE-SURF-002); libc reads it,
       # and both the backend and the `task` it spawns follow.
@@ -92,6 +139,18 @@ services:
   frontend:
     image: ghcr.io/ulrichschinz/runway-frontend:${RUNWAY_SHA:-latest}
     restart: unless-stopped
+    # Fully hardened from the first deploy: the frontend holds no data, so there is nothing to
+    # migrate (ADR 0048). It runs as the image's uid 10002 with no capability at all — it listens
+    # on 4000, not a privileged port — and writes only /tmp, where its command puts the generated
+    # server config, the pid file and nginx's temp files.
+    user: "10002:10002"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - BACKEND_HOST=backend
     depends_on:

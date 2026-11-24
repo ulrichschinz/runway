@@ -62,3 +62,62 @@ shims:
     expires: 2026-11-25
     re_open_trigger: "the expiry passes, or a caller is found still using the Bearer shape after Step 13"
     decision_record: docs/adr/0018-cors-startup-refusal-and-the-inbox-shim.md
+
+  - id: SHIM-OPS-001
+    what: >
+      The backend service in ops/deploy/docker-compose.yml runs as
+      `user: "${RUNWAY_BACKEND_USER:-0:0}"` — uid 0 unless the host's .env names the image's
+      user — and drops every default capability except DAC_OVERRIDE instead of `cap_drop: [ALL]`.
+      tools/checks/deploy_compose.py (RULE-OPS-004) accepts exactly this shape, and only while
+      this entry exists.
+    why: >
+      Everything under the host's data/ and users.db was written by a root container, and who
+      owns it has never been read (plan M0). An image that switched to uid 10001 on its own would
+      be unable to write any of it on the deploy that shipped it — every login, every task —
+      and a root process without DAC_OVERRIDE would fail the same way on any file root does not
+      own (finding SEC-003, ADR 0048).
+    removal: >
+      The contract step of brief 0076, its own change: the backend's compose user becomes
+      "10001:10001", `cap_drop: [ALL]`, and RUNWAY_BACKEND_USER and this entry go. First the
+      operator runs /opt/runway/volume_ownership.py in dry-run, then with --apply, then in
+      dry-run again with no change and no anomaly left, sets RUNWAY_BACKEND_USER=10001:10001 in
+      the host's .env, and the backend runs that way for 14 days without a write failure
+      (docs/operations.md#container-hardening).
+    evidence: >
+      On the host: `docker compose exec backend id -u` answers 10001, the dry-run exits 0, and
+      the backend's log shows no "unable to open database file", "readonly database" or
+      Taskwarrior "Error code" line over the soak. All three are reads on the host; nothing in
+      this repository or in CI can see them.
+    owner: maintainer
+    approved_on: 2026-11-24
+    expires: 2027-02-28
+    re_open_trigger: "the expiry passes, the dry-run reports an anomaly that cannot be resolved by hand, or a write fails as uid 10001"
+    decision_record: docs/adr/0048-container-hardening-and-the-browser-edge.md
+
+  - id: SHIM-WEB-001
+    what: >
+      frontend/nginx.conf sends the strict Content-Security-Policy as
+      `Content-Security-Policy-Report-Only`; the enforced `Content-Security-Policy` carries only
+      frame-ancestors, object-src, base-uri and form-action. tools/checks/edge_headers.py
+      (RULE-OPS-005) accepts the strict policy in the report-only header only while this entry
+      exists.
+    why: >
+      A policy that blocks something the SPA needs breaks the application for every user on the
+      deploy that ships it, and the only proof that every view runs under it is a browser using
+      every view. The build scan (frontend/tests/cspBuild.test.js) and one headless-browser pass
+      (brief 0076) say it should; report-only is how the remaining views get used under it
+      before it can break them (plan M7.4, finding SEC-004).
+    removal: >
+      Its own change: the strict policy moves into `Content-Security-Policy`, the report-only
+      header and this entry go, and RULE-OPS-005 then requires the strict policy enforced. First
+      the maintainer uses every view of both UIs in production with the browser console open
+      for at least 14 days of normal use and sees no "Content-Security-Policy-Report-Only"
+      violation.
+    evidence: >
+      No violation in the console over the soak, recorded with the date in the removing change's
+      brief. There is no reporting endpoint, deliberately, so the console is the only witness.
+    owner: maintainer
+    approved_on: 2026-11-24
+    expires: 2027-01-15
+    re_open_trigger: "the expiry passes, or a violation is seen in production that the build scan did not predict"
+    decision_record: docs/adr/0048-container-hardening-and-the-browser-edge.md

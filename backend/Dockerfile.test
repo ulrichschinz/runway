@@ -44,6 +44,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgnutls30 \
     && rm -rf /var/lib/apt/lists/*
 
+# The runtime image's user, created by the same instruction so the layer is shared (ADR 0048).
+# The suite runs as this user, on a read-only root with every capability dropped — see
+# tools/checks/py-test-container.sh — so the real binary is exercised under the privileges it
+# has in production rather than as root, which every file permission would have let through.
+RUN groupadd --system --gid 10001 runway \
+ && useradd --system --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent \
+      --shell /usr/sbin/nologin runway
+
 WORKDIR /app
 
 # The dev lock covers runtime and tooling together: a gate whose tools float is a gate whose
@@ -55,6 +63,12 @@ COPY pyproject.toml taskrc_template.txt ./
 COPY app/ ./app/
 COPY tests/ ./tests/
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/db \
+ && chown 10001:10001 /app/data /app/db \
+ && chmod 0700 /app/data /app/db
 
-CMD ["pytest", "tests/container", "--no-header", "--tb=short", "-p", "no:warnings"]
+# Every test writes under tmp_path, which is /tmp — a tmpfs when the tier runs. The cache
+# provider is off because it would write .pytest_cache into /app, which is read-only here.
+USER 10001:10001
+CMD ["pytest", "tests/container", "--no-header", "--tb=short", "-p", "no:warnings", \
+     "-p", "no:cacheprovider"]

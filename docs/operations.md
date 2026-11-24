@@ -120,7 +120,8 @@ from inside a container. Merging to `main` was container-scoped and is now host-
 
 `RULE-OPS-003` bounds that: it fails the gate on `privileged: true`, on `network_mode: host`, on `cap_add`,
 and on any bind mount whose source lies outside the service directory. `RULE-HYG-003` already fails on a
-literal secret where a `${...}` reference belongs.
+literal secret where a `${...}` reference belongs. `RULE-OPS-004` is the other direction: what every service
+must give up — see [Container hardening](#container-hardening).
 
 Neither is a sandbox, and neither is claimed to be. Whoever can merge to `main` can still change what the
 services run — they always could, through the application code. What these rules refuse is the narrow set of
@@ -177,6 +178,22 @@ Re-run that procedure whenever the check changes.
 Every deploy pushes two tags per image: `:latest` and an immutable `:<commit-sha>`. **Before 2026-08-04
 there was only `:latest`, which means there was no rollback target at all** — nothing named the previous
 build.
+
+> **Rolling back to a commit before 2026-11-24 (brief 0076) needs that commit's compose as well as its
+> images.** The on-disk compose is the one the newest image wrote, and since that date it runs the frontend
+> read-only as uid 10002 — an older frontend image writes its config into `/etc/nginx` and cannot start
+> that way. Take the compose out of the backend image you roll back to, then pin:
+>
+> ```sh
+> cd /opt/services/runway
+> sudo cp -a docker-compose.yml docker-compose.yml.bak-$(date +%F)
+> sudo docker create --name runway-compose ghcr.io/ulrichschinz/runway-backend:<sha>
+> sudo docker cp runway-compose:/opt/stack/docker-compose.yml docker-compose.yml
+> sudo docker rm runway-compose
+> ```
+>
+> The data needs nothing: the older compose mounts the same `./users.db`. If the backend stopped
+> uncleanly, check that `./db/users.db-journal` does not exist first — the older compose would not see it.
 
 To roll back, pin the last good SHA on the deploy host:
 
@@ -254,6 +271,87 @@ once per deploy, by the `verify-deploy` job — after it has established that th
 just pushed. That ordering is the whole point: a healthy container serving the *previous* image is what a
 silently failed deploy looks like, and a health probe alone cannot tell the two apart. See
 [*What says the deploy actually happened*](#what-says-the-deploy-actually-happened).
+
+## Container hardening
+
+Since 2026-11-24 ([ADR 0048](adr/0048-container-hardening-and-the-browser-edge.md), brief 0076, finding
+SEC-003) both services run on a **read-only root filesystem** with one capped `noexec,nosuid,nodev` tmpfs on
+`/tmp`, **`no-new-privileges`**, and an explicit `user:`. `RULE-OPS-004` fails the gate if a deploy service
+loses any of that, or if its `user:` and its image's final-stage `USER` stop agreeing.
+
+| | Frontend | Backend |
+|---|---|---|
+| Image user | `10002:10002` (`runway-web`) | `10001:10001` (`runway`) |
+| Runs as | `10002:10002` | **uid 0 until the switch below**, then `10001:10001` |
+| Capabilities | none | every default except `DAC_OVERRIDE` until the contract step, then none |
+| Writable | `/tmp` | `/tmp`, `/app/data` (`./data`), `/app/db` (`./db`) |
+
+**`users.db` is mounted into `./db`.** SQLite writes its rollback journal beside the database, so the database
+needs a directory the process can write; the image's `/app` is neither writable nor persistent. The compose
+mounts `./db` at `/app/db` and the existing `./users.db` at `/app/db/users.db` inside it — the same file, so
+nothing moves and backups stay as they are. Docker creates `./db` on the first start and leaves an empty
+placeholder `users.db` in it, under the mount. **Do not delete `./users.db` or move it into `./db` by hand**;
+that is a later contract step.
+
+### Handing the backend's volumes to uid 10001
+
+The backend's data was written by a root container. Until it belongs to uid 10001 the backend cannot run as
+that user, so the switch is three operator steps behind a dry-run. Stop the backend first, so nothing writes
+while ownership changes, and take a backup.
+
+```sh
+# on the deploy host, in /opt/services/runway, after a backup
+sudo docker compose stop backend
+IMAGE=$(sudo docker compose config --images | grep runway-backend)
+migrate() {
+  sudo docker run --rm --network none --read-only --security-opt no-new-privileges:true \
+    --user 0:0 --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add DAC_READ_SEARCH \
+    -v "$PWD/data:/app/data" -v "$PWD/db:/app/db" -v "$PWD/users.db:/app/db/users.db" \
+    "$IMAGE" python /opt/runway/volume_ownership.py "$@"
+}
+migrate            # 1. dry-run: every change it would make, and every anomaly. Changes nothing.
+migrate --apply    # 2. only after reading step 1; refuses everything if any anomaly is listed
+migrate            # 3. must exit 0: no change and no anomaly left
+```
+
+The tool is deliberately **not** `chown -R`. It walks `data/` two levels deep (account directories, their
+files, `audit.db*`) and `db/` (the database and its journals), and lists as an **anomaly** — never touching it —
+every symlink, hard-linked file, FIFO, socket or device, anything on another filesystem, anything deeper than
+an account directory, and anything unexpected beside the database. One anomaly refuses the whole `--apply`;
+resolve it by hand and run the dry-run again. Each change re-checks the file's inode against the plan, so a
+file replaced in between is refused rather than changed. Modes become owner-only (`0700`, `0600`): `users.db`
+holds API keys in cleartext (`WAIVER-SEC-003`). Exit codes: 0 clean, 1 changes pending, 2 anomalies, 3 a root
+is unusable. `--json` prints one document.
+
+Then switch:
+
+```sh
+echo 'RUNWAY_BACKEND_USER=10001:10001' | sudo tee -a .env
+sudo docker compose up -d
+sudo docker compose exec backend id -u      # 10001
+```
+
+and run the post-deploy checks of the remediation plan by hand: `/api/health`, a login, reading and writing a
+task. **Undo** is deleting that line and `up -d` again: uid 0 still holds `DAC_OVERRIDE` and writes the migrated
+files. After 14 days on uid 10001 without a write failure, the contract step removes the fallback, the
+variable and `SHIM-OPS-001`, which expires on **2027-02-28** — `RULE-SEC-002` fails the gate on that date.
+
+### HSTS belongs on the TLS terminator
+
+The frontend's nginx sends the browser headers (see
+[docs/security.md](security.md#browser-headers)) but **not** `Strict-Transport-Security`, and `RULE-OPS-005`
+fails the gate if it ever does. That nginx speaks plain HTTP behind Traefik and cannot know whether every host
+under the name is permanently HTTPS — and a wrong HSTS is not undone by a rollback, because browsers remember
+it for `max-age`. When that is confirmed for `runway.agentic-reach.com` (and every subdomain, if
+`includeSubDomains` is wanted), set it on Traefik, for example as labels on the frontend service:
+
+```yaml
+- "traefik.http.middlewares.runway-hsts.headers.stsSeconds=31536000"
+- "traefik.http.routers.runway.middlewares=runway-hsts"
+```
+
+Start with a short `stsSeconds` and raise it once nothing broke. `verify-deploy` reports in its summary whether
+HSTS is present and does not fail on it (`RISK-OPS-008`).
 
 ## The container clock
 

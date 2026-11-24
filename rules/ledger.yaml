@@ -130,7 +130,11 @@ rules:
   - id: RULE-TEST-002
     statement: >
       The backend suite MUST pass against the real Taskwarrior binary, including the
-      cross-tenant isolation tests.
+      cross-tenant isolation tests, running as uid 10001 on a read-only root with every
+      capability dropped; and the runtime images built from backend/Dockerfile and
+      frontend/Dockerfile MUST hold under the deploy compose's hardening — non-root, write
+      refusal outside the mounts, the volume-ownership migration, the healthcheck, and the
+      browser headers on success, error and fallback responses.
     class: executable
     check: tools/checks/py-test-container.sh
     fixture: >
@@ -144,6 +148,11 @@ rules:
       The only boundary between two users' tasks is three environment variables handed to
       a subprocess. There is no ownership column and no second gate. That property cannot
       be tested against a fake, because the fake is the thing that would have to enforce it.
+      Since brief 0076 (ADR 0048) the same reasoning covers the container hardening: a
+      static rule (RULE-OPS-004, RULE-OPS-005) can say what the compose and nginx.conf
+      declare, but only a running image says whether Taskwarrior, SQLite and nginx actually
+      work as an unprivileged user on a read-only root, and whether the headers survive a
+      404 and a 502. Run as root, the suite answered yes to every file-permission question.
 
   - id: RULE-TEST-003
     statement: "Backend line coverage MUST NOT fall below the checked-in floor."
@@ -908,6 +917,62 @@ rules:
       specific edits that turn a container-scoped change into a host-scoped one, in a file that
       is easy to skim past in review because it is mostly YAML nobody reads twice.
 
+  - id: RULE-OPS-004
+    statement: >
+      Every service in the deploy compose file MUST run with `read_only: true`,
+      `security_opt: [no-new-privileges:true]`, `cap_drop: [ALL]` and an explicit numeric
+      non-root `user:` equal to the numeric non-root `USER` that ends its image's Dockerfile —
+      except for the exact transitional shape a declared shim names in
+      tools/checks/deploy_compose.py.
+    class: executable
+    check: tools/checks/deploy-compose.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/operations.md#container-hardening
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Finding SEC-003 (ADR 0048): the backend image declared no USER and the compose no
+      hardening, so any write primitive or command inside the container ran as root on a
+      writable root filesystem with Docker's default capabilities — SEC-001's directory escape
+      could reach the whole container, application code included. RULE-OPS-003 bounds what a
+      service may ask the host for; this is the other direction, what each one must give up.
+      The image and the compose are checked together because each can silently undo the other:
+      a compose `user:` overrides the image, and an image without USER makes an omitted compose
+      line mean root. The one exception — the backend at uid 0 with DAC_OVERRIDE until the
+      host's volumes are migrated — is tied to SHIM-OPS-001, so the gate refuses it the day the
+      shim is removed and RULE-SEC-002 refuses the shim the day it expires. It is a
+      declaration check: what the runtime images actually do under these flags is proven by
+      the RULE-TEST-002 tier, and non-root is not tenant isolation.
+
+  - id: RULE-OPS-005
+    statement: >
+      frontend/nginx.conf MUST declare Content-Security-Policy, X-Content-Type-Options nosniff,
+      Referrer-Policy, X-Frame-Options DENY and Permissions-Policy at server level with
+      `always`; MUST NOT declare add_header in any nested block; every policy MUST allow only
+      'self' and 'none' (data: for images and fonts), carry frame-ancestors, object-src and
+      base-uri 'none', and report nowhere; the strict policy MUST be enforced unless a declared
+      shim allows it report-only; and it MUST NOT set Strict-Transport-Security.
+    class: executable
+    check: tools/checks/edge-headers.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/security.md#browser-headers
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      Finding SEC-004 (ADR 0048): nginx sent no browser security header, so nothing stopped the
+      SPA being framed and nothing bounded what an injected script could load or where it could
+      send the JWT that lives in localStorage. Each property here is lost by a one-line edit that
+      reads as harmless: an add_header without `always` disappears from every 4xx and 5xx, which
+      are the responses an attacker can provoke at will; one add_header in a location strips
+      every inherited header from it, which is nginx's documented behaviour and nobody's
+      expectation. HSTS is refused here because this nginx is plain HTTP behind the TLS
+      terminator and cannot know which hosts are permanently HTTPS. The check reads the
+      declaration; the RULE-TEST-002 tier proves what the built image sends, and only the
+      post-deploy check in deploy.yml reads what the public origin sends — Traefik could still
+      change it, which no gate here can see.
+
 # Residual risks — properties that matter but cannot currently be made executable.
 # Each carries the trigger that should re-open it.
 residual_risks:
@@ -1511,3 +1576,18 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "the blocking test in ADR 0031 is performed and its result recorded, a merge is observed completing over a red verify, or bypass_actors becomes non-empty"
     decision_record: docs/adr/0031-the-phase-4-audit.md
+
+  - id: RISK-OPS-008
+    statement: >
+      What a browser receives from the public origin is not what frontend/nginx.conf declares
+      or what the built image sends, because Traefik terminates TLS in front of it and is
+      shared host infrastructure outside this repository. RULE-OPS-005 holds the declaration
+      and the RULE-TEST-002 tier holds the image's responses on success, error and fallback
+      paths; the public answer is read only after a deploy, by the verify-deploy job, which
+      fails when a header is missing on /, /api/health or a 404 but cannot stop the deploy that
+      caused it. HSTS is not set by this repository at all: it belongs on Traefik and only after
+      every affected host is confirmed permanently HTTPS (docs/operations.md), and verify-deploy
+      reports whether it is present without failing on it (ADR 0048).
+    owner: maintainer
+    re_open_trigger: "verify-deploy reports a missing header, Traefik's configuration becomes part of this repository, or HSTS is enabled on the terminator"
+    decision_record: docs/adr/0048-container-hardening-and-the-browser-edge.md

@@ -94,7 +94,7 @@ paths = [
   "backend/requirements-dev.txt", "backend/requirements.lock",
   "backend/requirements-dev.lock", "policy/**", "backend/pyproject.toml", "backend/taskrc_template.txt",
   "backend/log_config.json",
-  "frontend/Dockerfile", "frontend/nginx.conf", "frontend/package.json",
+  "frontend/Dockerfile", "frontend/nginx.conf", "frontend/nginx-main.conf", "frontend/package.json",
   "frontend/package-lock.json", "frontend/vite.config.js", "frontend/eslint.config.js",
   "frontend/postcss.config.js", "frontend/tailwind.config.js", "frontend/index.html",
   "frontend/public/**",

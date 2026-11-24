@@ -7,14 +7,40 @@ services:
       context: .
       dockerfile: backend/Dockerfile
       network: host
+    # The same hardening and the same mounts as ops/deploy/docker-compose.yml (ADR 0048), so a
+    # change that only works with a writable root or as root fails here first. The user
+    # defaults to 0:0 because on Linux ./data and ./users.db belong to whoever ran
+    # `make bootstrap`; RUNWAY_BACKEND_USER=10001:10001 runs it as the image's user once
+    # those are handed over (docs/operations.md#container-hardening).
+    user: "${RUNWAY_BACKEND_USER:-0:0}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - AUDIT_WRITE
+      - CHOWN
+      - FOWNER
+      - FSETID
+      - KILL
+      - MKNOD
+      - NET_BIND_SERVICE
+      - NET_RAW
+      - SETFCAP
+      - SETGID
+      - SETPCAP
+      - SETUID
+      - SYS_CHROOT
     volumes:
       - ./data:/app/data
-      - ./users.db:/app/users.db
+      - ./db:/app/db
+      - ./users.db:/app/db/users.db
     environment:
       - JWT_SECRET=${JWT_SECRET:-changeme-set-in-.env}
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
       - DATA_ROOT=/app/data
-      - DB_PATH=/app/users.db
+      - DB_PATH=/app/db/users.db
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     network_mode: host
     restart: unless-stopped
@@ -47,6 +73,14 @@ services:
       context: ./frontend
       network: host
     network_mode: host
+    user: "10002:10002"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       backend:
         condition: service_healthy

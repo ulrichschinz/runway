@@ -252,6 +252,38 @@ required free text, and the override consumed it, so writes failed. That is a pr
 third-party argument parser, and it could change in any release — as the theme-file break of
 2026-08-25 showed, that binary does change under us.
 
+## Browser headers
+
+Since 2026-11-24 ([ADR 0048](adr/0048-container-hardening-and-the-browser-edge.md), finding SEC-004) the
+frontend's nginx sends six headers on **every** response — the SPA, its assets, the `index.html` fallback, the
+proxied API and MCP, and the 4xx/5xx nginx generates itself:
+
+| Header | Value | Why |
+|---|---|---|
+| `Content-Security-Policy` | `frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'` | Enforced now: nothing may frame the app, no plugin content, no `<base>` rewriting, forms post only here |
+| `Content-Security-Policy-Report-Only` | same origin for everything, no inline script or style, no `eval`, `data:` images only | The strict policy, **report-only** until `SHIM-WEB-001` (expires 2027-01-15) |
+| `X-Content-Type-Options` | `nosniff` | A response is never sniffed into script |
+| `Referrer-Policy` | `no-referrer` | No URL of this app leaves in a `Referer` |
+| `X-Frame-Options` | `DENY` | Framing blocked for browsers that predate `frame-ancestors` |
+| `Permissions-Policy` | every powerful feature denied; `clipboard-write=(self)` | Settings copies the API key and the MCP snippets; nothing else is used |
+
+`RULE-OPS-005` fails the gate if a header goes missing, loses `always` (it would then vanish from every error
+page), is overridden by an `add_header` in a `location` (which strips all of them there), allows anything but
+`'self'`/`'none'`, names a reporting endpoint, or if HSTS appears — that belongs on the TLS terminator
+([docs/operations.md](operations.md#hsts-belongs-on-the-tls-terminator)).
+
+**Why the strict policy is report-only.** The JWT lives in `localStorage`, readable by any script on the origin,
+so the strict policy is the one that bounds an injection. `frontend/tests/cspBuild.test.js` builds the SPA
+and refuses anything the policy would block; one headless-browser pass under the **enforced** strict policy
+over every route of both UIs saw no violation (brief 0076). Report-only is how the rest of real use gets
+checked before the policy can break it. There is no reporting endpoint: violations show in the browser
+console as `[Report Only] Refused to …`. To move it to enforced, use every view with the console open for 14
+days of normal use, then change the header and remove `SHIM-WEB-001` in the same commit.
+
+**What this does not establish.** No script-injection sink is known; this adds the missing layer, it fixes no
+exploit. The headers the public origin sends are read only after a deploy, by `verify-deploy`, because Traefik
+sits in front (`RISK-OPS-008`).
+
 ## What is not enforced here
 
 - **Frontend role checks are cosmetic.** `auth.role` in the Vue store is read from

@@ -28,6 +28,10 @@ if [ -d users.db ]; then
 fi
 
 [ -d data ] || { mkdir -p data; note "created data/ (per-user Taskwarrior storage)"; }
+# The directory users.db is mounted into, so SQLite can create its journal beside it on a
+# read-only container root (ADR 0048). Created here so it belongs to the developer rather than
+# to whatever Docker creates it as.
+[ -d db ] || { mkdir -p db; note "created db/ (the directory users.db is mounted into)"; }
 
 # --- .env -------------------------------------------------------------------
 #
