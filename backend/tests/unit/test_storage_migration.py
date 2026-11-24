@@ -334,3 +334,191 @@ class TestTheCommandLine:
 
     def test_a_missing_database_is_a_tooling_error(self, isolated_storage, capsys):
         assert storage_migration.main(["plan"]) == storage_migration.EX_TOOLING
+
+
+# --- review findings on brief 0065 ---------------------------------------------------------
+
+
+def _folds(root: Path, stored: str, other: str) -> bool:
+    """Whether this filesystem opens `stored` under the different spelling `other`."""
+    probe = root / f"probe-{stored}"
+    probe.mkdir()
+    try:
+        return os.path.exists(root / f"probe-{other}")
+    finally:
+        probe.rmdir()
+
+
+NFC_NAME = "alicé"
+NFD_NAME = "alicé"
+
+
+class TestAFoldingFilesystem:
+    """Two spellings that a case- or normalisation-insensitive filesystem (APFS, a Docker
+    Desktop bind mount of ./data on macOS) opens as one directory are an alias, not two
+    accounts. Skipped where the temp filesystem does not fold; the identity test below covers
+    the same grouping on every filesystem."""
+
+    def test_a_case_variant_blocks_both_accounts(self, root, capsys):
+        if not _folds(root, "alice", "ALICE"):
+            pytest.skip("this filesystem is case-sensitive")
+        victim = _add("alice")
+        _store(root / "alice")
+        attacker = _add("ALICE")
+
+        code, entries = _run(capsys, "apply")
+
+        assert code == EX_BLOCKED
+        by_user = _by_user(entries)
+        assert by_user[victim]["reason"] == "alias of another account's directory"
+        assert by_user[attacker]["reason"] == "alias of another account's directory"
+        assert _row(attacker)["storage_layout"] == "legacy"
+        assert not (root / _row(attacker)["storage_id"]).exists()
+
+    def test_an_nfd_spelling_of_an_nfc_directory_blocks_both_accounts(self, root, capsys):
+        if not _folds(root, NFC_NAME, NFD_NAME):
+            pytest.skip("this filesystem is normalisation-sensitive")
+        victim = _add(NFC_NAME)
+        _store(root / NFC_NAME)
+        attacker = _add(NFD_NAME)
+
+        code, entries = _run(capsys, "apply")
+
+        assert code == EX_BLOCKED
+        assert {e["status"] for e in entries} == {"blocked"}
+        assert not (root / _row(attacker)["storage_id"]).exists()
+        assert not (root / _row(victim)["storage_id"]).exists()
+
+    def test_a_variant_spelling_without_its_owner_is_blocked(self, root, capsys):
+        """`ALICE` alone, landing in a directory spelled `alice` on disk: no other account
+        shares it, but the directory is not the one this name created."""
+        if not _folds(root, "alice", "ALICE"):
+            pytest.skip("this filesystem is case-sensitive")
+        _store(root / "alice")
+        stray = _add("ALICE")
+        code, entries = _run(capsys, "apply")
+        assert code == EX_BLOCKED
+        assert _by_user(entries)[stray]["reason"] == "store is spelled differently on disk"
+
+    def test_aliases_are_grouped_by_directory_identity_not_by_spelling(
+        self, root, capsys, monkeypatch
+    ):
+        """The same grouping on a filesystem that does not fold: two names whose directories
+        are one inode are an alias however differently their paths read."""
+        first = _add("first")
+        _store(root / "first")
+        second = _add("second")
+        _store(root / "second")
+        real_stat = os.stat
+
+        def same_inode(path, *args, **kwargs):
+            if Path(path).name == "second":
+                path = Path(path).with_name("first")
+            return real_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(storage_migration.os, "stat", same_inode)
+        code, entries = _run(capsys, "plan")
+        assert code == EX_BLOCKED
+        assert _by_user(entries)[first]["reason"] == "alias of another account's directory"
+        assert _by_user(entries)[second]["reason"] == "alias of another account's directory"
+
+
+class TestNamesThatAreTheirOwnDirectory:
+    """Legacy names that were valid single components under the previous image and alias
+    nothing: the migration moves them instead of blocking them for good."""
+
+    @pytest.mark.parametrize("name", [".hidden", "back\\slash", "0123456789abcdef" * 2])
+    def test_it_is_migrated(self, root, capsys, name):
+        user = _add(name)
+        _store(root / name)
+        code, entries = _run(capsys, "apply")
+        assert code == EX_OK, entries
+        assert _by_user(entries)[user]["status"] == "migrated"
+
+    def test_a_legacy_name_equal_to_another_accounts_storage_id_is_an_alias(self, root, capsys):
+        owner = _add("owner", layout="storage_id")
+        sid = _row(owner)["storage_id"]
+        _store(root / sid)
+        squatter = _add(sid)
+        code, entries = _run(capsys, "plan")
+        assert code == EX_BLOCKED
+        assert _by_user(entries)[squatter]["reason"] == "alias of another account's directory"
+
+    def test_a_staging_name_is_never_a_legacy_store(self, root, capsys):
+        sid = task_storage.new_storage_id()
+        user = _add(f".{sid}.partial")
+        _store(root / f".{sid}.partial")
+        code, entries = _run(capsys, "plan")
+        assert code == EX_BLOCKED
+        assert _by_user(entries)[user]["reason"] == "legacy name collides with a reserved entry"
+
+
+class TestMigratingAgainAfterARollback:
+    def test_apply_rollback_write_apply_reaches_done(self, root, capsys):
+        alice = _add("alice")
+        _store(root / "alice")
+        assert _run(capsys, "apply")[0] == EX_OK
+        assert _run(capsys, "rollback", "--user-id", str(alice))[0] == EX_OK
+        # served from the legacy directory again, and written to there
+        (root / "alice" / "taskchampion.sqlite3").write_bytes(b"written after the rollback")
+
+        code, entries = _run(capsys, "apply")
+
+        assert code == EX_OK, entries
+        assert _by_user(entries)[alice]["status"] == "migrated"
+        sid = _row(alice)["storage_id"]
+        assert (root / sid / "taskchampion.sqlite3").read_bytes() == b"written after the rollback"
+        assert _run(capsys, "plan")[1][0]["status"] == "done"
+
+    def test_rollback_sets_the_stale_copy_aside(self, root, capsys):
+        alice = _add("alice")
+        _store(root / "alice")
+        _run(capsys, "apply")
+        sid = _row(alice)["storage_id"]
+        _run(capsys, "rollback", "--user-id", str(alice))
+        assert not (root / sid).exists()
+        assert [p.name for p in root.iterdir() if p.name.startswith(f".{sid}.rolled-back")]
+
+    def test_a_stale_copy_left_by_an_older_rollback_is_replaced(self, root, capsys):
+        """A rollback that flipped the account but could not set the copy aside: the next
+        apply recognises the copy as its own by the recorded manifest."""
+        alice = _add("alice")
+        _store(root / "alice")
+        _run(capsys, "apply")
+        sid = _row(alice)["storage_id"]
+        con = sqlite3.connect(settings.db_path)
+        con.execute("UPDATE users SET storage_layout='legacy' WHERE id=?", (alice,))
+        con.execute(
+            "INSERT INTO storage_migrations (user_id, storage_id, legacy_path, action)"
+            " VALUES (?, ?, 'alice', 'rolled_back')",
+            (alice, sid),
+        )
+        con.commit()
+        con.close()
+        (root / "alice" / "taskchampion.sqlite3").write_bytes(b"newer")
+
+        code, entries = _run(capsys, "apply")
+
+        assert code == EX_OK, entries
+        assert (root / sid / "taskchampion.sqlite3").read_bytes() == b"newer"
+
+    def test_a_foreign_target_after_a_rollback_still_blocks(self, root, capsys):
+        alice = _add("alice")
+        _store(root / "alice")
+        _run(capsys, "apply")
+        sid = _row(alice)["storage_id"]
+        _run(capsys, "rollback", "--user-id", str(alice))
+        _store(root / sid, text=b"not the copy this tool made")
+        code, entries = _run(capsys, "apply")
+        assert code == EX_BLOCKED
+        assert _by_user(entries)[alice]["reason"] == "target exists with different content"
+
+    def test_rollback_is_refused_in_strict_mode(self, root, capsys, monkeypatch):
+        alice = _add("alice")
+        _store(root / "alice")
+        _run(capsys, "apply")
+        monkeypatch.setattr(settings, "task_storage_mode", "strict")
+        code, (entry,) = _run(capsys, "rollback", "--user-id", str(alice))
+        assert code == EX_BLOCKED
+        assert "compat" in entry["reason"]
+        assert _row(alice)["storage_layout"] == "storage_id"

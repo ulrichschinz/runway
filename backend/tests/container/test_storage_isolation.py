@@ -192,3 +192,35 @@ class TestAnExistingAccountAcrossTheMigration:
         assert storage_migration.main(["apply"]) == storage_migration.EX_BLOCKED
         # alice is blocked too: the alias may have written into her store, a human decides
         assert client.get("/tasks", headers=alice).json()[0]["description"] == "alice private"
+
+    @pytest.mark.parametrize("variant", ["ALICE", "Alice"])
+    def test_a_case_variant_on_a_folding_filesystem_is_refused_and_blocked(self, client, variant):
+        """APFS or a Docker Desktop bind mount opens `ALICE` as `alice`. Skipped where the
+        data root is case-sensitive, as ext4 in production is (review of brief 0065)."""
+        from app.services import storage_migration
+
+        _legacy_account("alice")
+        alice = _bearer("alice")
+        assert (
+            client.post("/tasks", json={"description": "alice private"}, headers=alice).status_code
+            == 201
+        )
+        if not (settings.data_root.resolve() / variant).exists():
+            pytest.skip("the data root is case-sensitive")
+        import sqlite3
+
+        con = sqlite3.connect(settings.db_path)
+        con.execute(
+            "INSERT INTO users (username, hashed_password, storage_id, storage_layout)"
+            " VALUES (?, 'x', ?, 'legacy')",
+            (variant, "e" * 32),
+        )
+        con.commit()
+        con.close()
+
+        r = client.get("/tasks", headers=_bearer(variant))
+        assert r.status_code == 500
+        assert "alice private" not in r.text
+        assert storage_migration.main(["apply"]) == storage_migration.EX_BLOCKED
+        assert not (settings.data_root.resolve() / ("e" * 32)).exists()
+        assert client.get("/tasks", headers=alice).json()[0]["description"] == "alice private"

@@ -303,3 +303,32 @@ class TestRegistration:
         )
         assert r.status_code == 500
         assert _users(settings.db_path) == []
+
+
+class TestTheEffectiveModeIsVisible:
+    """After the switch the operator checks that the running container reports `strict`.
+    The startup line carries the mode as resolved — so a typo shows as `strict`, which is
+    what the resolver does with it (review of brief 0065)."""
+
+    @pytest.mark.parametrize(
+        ("configured", "reported"),
+        [("compat", "compat"), ("Strict ", "strict"), ("bogus", "strict")],
+    )
+    def test_the_startup_line_names_the_storage_mode(
+        self, isolated_storage, monkeypatch, configured, reported
+    ):
+        from app import main
+
+        seen: list[dict] = []
+        real_info = main.logger.info
+
+        def capture(message, *args, **kwargs):
+            if message == "startup complete":
+                seen.append(kwargs.get("extra") or {})
+            return real_info(message, *args, **kwargs)
+
+        monkeypatch.setattr(settings, "task_storage_mode", configured)
+        monkeypatch.setattr(main.logger, "info", capture)
+        with TestClient(main.app):
+            pass
+        assert [extra.get("task_storage_mode") for extra in seen] == [reported]

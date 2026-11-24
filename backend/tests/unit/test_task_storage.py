@@ -139,6 +139,37 @@ class TestTheLegacyLayout:
             task_storage.resolve(_account(layout=LAYOUT_LEGACY), MODE_COMPAT)
         assert refused.value.reason == "store is a symlink"
 
+    @pytest.mark.parametrize(
+        ("on_disk", "asked"),
+        [("alice", "ALICE"), ("alicé", "alicé"), ("alicé", "alicé")],
+    )
+    def test_compat_mode_refuses_a_spelling_the_filesystem_folds_onto_another(
+        self, root, on_disk, asked
+    ):
+        """On APFS or a Docker Desktop bind mount `ALICE` opens `alice`. Only the exact
+        spelling the directory was created under is served (review of brief 0065)."""
+        (root / on_disk).mkdir()
+        (root / on_disk / "taskchampion.sqlite3").write_bytes(b"victim")
+        if not os.path.exists(root / asked):
+            pytest.skip("this filesystem does not fold these two spellings")
+        with pytest.raises(StorageRefused) as refused:
+            task_storage.resolve(_account(asked, layout=LAYOUT_LEGACY), MODE_COMPAT)
+        assert refused.value.reason == "store is spelled differently on disk"
+
+    @pytest.mark.parametrize("name", [".hidden", "back\\slash", "alicé"])
+    def test_compat_mode_serves_a_name_that_is_its_own_directory(self, root, name):
+        """Valid single components under the previous image, each its own directory."""
+        (root / name).mkdir()
+        store = task_storage.resolve(_account(name, layout=LAYOUT_LEGACY), MODE_COMPAT)
+        assert store.path == root / name
+
+    @pytest.mark.parametrize("name", [SID, f".{SID}.partial", f".{SID}.rolled-back.1", "audit.db"])
+    def test_compat_mode_never_serves_a_store_id_or_a_tool_directory(self, root, name):
+        (root / name).mkdir()
+        with pytest.raises(StorageRefused) as refused:
+            task_storage.resolve(_account(name, layout=LAYOUT_LEGACY), MODE_COMPAT)
+        assert refused.value.reason == "legacy name collides with a reserved entry"
+
 
 class TestTheMode:
     @pytest.mark.parametrize(
@@ -188,3 +219,40 @@ class TestTheUsernameRule:
     )
     def test_anything_else_is_refused_with_a_reason(self, name):
         assert task_storage.username_problem(name)
+
+
+REPO = Path(__file__).resolve().parents[3]
+
+
+def _backend_environment(compose: Path) -> list[str]:
+    """The backend service's `environment:` list entries, read without a YAML parser."""
+    entries: list[str] = []
+    in_backend = in_env = False
+    for line in compose.read_text(encoding="utf-8").splitlines():
+        body = line.strip()
+        if not body or body.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= 2:
+            in_backend = indent == 2 and body == "backend:"
+            in_env = False
+        elif in_backend and indent == 4:
+            in_env = body == "environment:"
+        elif in_backend and in_env and body.startswith("- "):
+            entries.append(body[2:].strip())
+    return entries
+
+
+class TestTheSwitchReachesTheContainer:
+    """The documented switch is `TASK_STORAGE_MODE=strict` in the host `.env`. The compose
+    `environment:` lists are explicit and there is no `env_file`, so a variable the compose
+    does not pass never reaches the backend — the switch would silently do nothing (review
+    of brief 0065)."""
+
+    @pytest.mark.parametrize("compose", ["ops/deploy/docker-compose.yml", "docker-compose.yml"])
+    def test_the_compose_passes_the_mode_through(self, compose):
+        entries = _backend_environment(REPO / compose)
+        assert "TASK_STORAGE_MODE=${TASK_STORAGE_MODE:-compat}" in entries, (
+            f"{compose} does not pass TASK_STORAGE_MODE to the backend, so setting it in the "
+            "host .env leaves the container in compat"
+        )

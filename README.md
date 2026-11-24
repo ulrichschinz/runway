@@ -93,7 +93,8 @@ LOG_LEVEL=INFO
 
 # Which Taskwarrior directory layout is served (ADR 0043). `compat` (the default) still
 # serves an account created before the storage-id switch from data/<username>/, if that name
-# is one plain path component; `strict` serves only data/<storage_id>/. Set `strict` after
+# is, in exactly that spelling, a directory directly under data/; `strict` serves only
+# data/<storage_id>/. Both compose files pass it through to the backend. Set `strict` after
 # the storage migration reports every account `done` — see docs/operations.md. An
 # unrecognised value is treated as `strict`.
 TASK_STORAGE_MODE=compat

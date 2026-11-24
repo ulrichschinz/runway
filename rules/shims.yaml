@@ -66,8 +66,8 @@ shims:
   - id: SHIM-SEC-007
     what: >
       `task_storage.resolve` in `compat` mode (TASK_STORAGE_MODE, the default) serves an account
-      with users.storage_layout='legacy' from DATA_ROOT/<username>/, when that name is one plain
-      path component resolving to a real directory directly under the root.
+      with users.storage_layout='legacy' from DATA_ROOT/<username>/, when that name is one path
+      component that is, in exactly that spelling, a real directory directly under the root.
     why: >
       Every account created before brief 0065 still has its tasks there. Refusing the layout in
       the same change would take every existing user's task list away on the deploy, before the
@@ -83,6 +83,9 @@ shims:
       the audit log shows no `storage.refused` row with reason "legacy layout refused in strict
       mode" over the soak. Both are queries on the host, not something this repository can see.
     owner: maintainer
+    # Written by the implementing agent on the owner's order of 2026-11-24 to carry out M1;
+    # the owner has not yet reviewed this entry itself (RISK-GOV-001: no independent review).
+    # Explicit owner sign-off before merge is a deferred step of brief 0065.
     approved_on: 2026-11-24
     expires: 2027-02-28
     re_open_trigger: "the expiry passes, the plan reports a blocked account that cannot be migrated, or an alias account is found"

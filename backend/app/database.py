@@ -291,6 +291,18 @@ async def last_migration_manifest(db, account_id: int) -> str | None:
     return row["manifest"] if row else None
 
 
+async def last_storage_action(db, account_id: int) -> str | None:
+    """The latest action that changed this account's layout — `migrated`, `provisioned` or
+    `rolled_back` — ignoring `blocked` rows, which change nothing."""
+    async with db.execute(
+        "SELECT action FROM storage_migrations WHERE user_id=?"
+        " AND action IN ('migrated', 'provisioned', 'rolled_back') ORDER BY id DESC LIMIT 1",
+        (account_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    return row["action"] if row else None
+
+
 # --- the audit database -------------------------------------------------------------------
 #
 # A SECOND file, deliberately, and the reasoning is in docs/adr/0026-the-audit-log.md. The

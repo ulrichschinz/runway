@@ -138,8 +138,9 @@ data root (finding SEC-001, reproduced in both test tiers on `5d85f6e`). **Enfor
 named by a random `storage_id` and resolved in one module (`RULE-SEC-003`); the HTTP path is pinned
 by `tests/unit/test_storage_identity.py` and, against the real binary, by
 `tests/container/test_storage_isolation.py`. **Asserted only:** that production holds no alias
-account created before the change, and that no legacy account is served once the switch is made —
-both depend on the operator running the migration and setting `TASK_STORAGE_MODE=strict`
+account created before the change, that the production data volume does not fold case or Unicode
+normalisation, and that no legacy account is served once the switch is made — all depend on the
+operator (M0 checks, the migration, `TASK_STORAGE_MODE=strict`, which the startup line confirms)
 (`RISK-SEC-006`).
 
 ### Values that must stay parseable: filters and modifiers
@@ -399,7 +400,8 @@ and a `.taskrc`, created by `provision_store` in
 through `TASKDATA` in [`backend/app/services/task_runner.py`](../backend/app/services/task_runner.py).
 **This is the tenancy boundary**, which is why §2 is as long as it is. Accounts created before
 brief 0065 still live in `DATA_ROOT/<username>/` until the operator migrates them, served in
-`compat` mode only for a plain single-component name; that residual is `RISK-SEC-006`.
+`compat` mode only for a single-component name that is, in exactly that spelling, a directory under
+the root (so a case- or normalisation-folded alias is refused too); that residual is `RISK-SEC-006`.
 
 **The browser** — `localStorage` holds `token`, `role`, `username`, `email`, `fullName`, `theme`
 and `ui` ([`ops/surfaces/spa.json`](../ops/surfaces/spa.json)); `ui` is the non-secret choice

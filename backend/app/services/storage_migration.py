@@ -17,13 +17,17 @@ Three commands:
               account already ``done`` is skipped, and a run interrupted between the rename and
               the database update is completed by the next one.
 ``rollback``  ``--user-id N``: returns one migrated account to its legacy directory, but only
-              while the new store is byte-for-byte what was copied. After a write it refuses;
-              the way back is then the backup or a forward fix.
+              while the new store is byte-for-byte what was copied, and only in ``compat``
+              mode. After a write it refuses; the way back is then the backup or a forward
+              fix. The copy it no longer serves is renamed to ``.<id>.rolled-back.<stamp>``,
+              so a later ``apply`` copies the legacy store afresh.
 
 **What a copy must survive before it counts.** Source, target, owner, type and collisions are
 checked first, and each of these stops that account, visibly, with nothing moved: a name that
-is not one path component; two accounts whose directories are the same directory (an alias —
-treat as a possible incident); a symlink, a hard-linked file, a device, FIFO or socket anywhere
+is not one path component; two accounts whose directories are the same directory — the same
+inode, however the names are spelled, so `Alice` and `alice` on a case-insensitive filesystem
+count (an alias: treat as a possible incident); a name the filesystem only reaches by folding it
+onto a differently spelled directory; a symlink, a hard-linked file, a device, FIFO or socket anywhere
 in the tree; an entry not owned by the service user; a target that already exists with
 different content. The copy is assembled in a staging directory, verified against a manifest
 of every file's size and SHA-256, and renamed into place on the same filesystem. **The source is
@@ -46,6 +50,7 @@ import sqlite3
 import stat
 import sys
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app import audit, database, task_storage
@@ -150,101 +155,151 @@ def manifest(root: Path) -> Manifest:
 
 
 def _aliases(accounts: list[Account]) -> set[int]:
-    """Ids of legacy accounts whose raw `DATA_ROOT/<name>` lands where another's does.
+    """Ids of legacy accounts whose raw `DATA_ROOT/<name>` is a directory another account uses.
 
-    Computed from the name as the old code used it — joined verbatim — because that is the
-    directory the account has actually been writing to. `alice/../alice` and `alice` land in
-    the same place, and so may `Alice` and `alice` on a case-insensitive filesystem. Every
-    member of such a group is blocked, the legitimate owner included: an alias account may
-    already have written into that store, and deciding whose it is needs a human.
+    Computed from the name as the old code used it — joined verbatim and opened by the OS —
+    because that is the directory the account has actually been writing to, and compared by
+    **inode**, not by spelling: `alice/../alice` lands in `alice`, and on a case- or
+    normalisation-insensitive filesystem (APFS, a Docker Desktop bind mount) so do `ALICE` and
+    the NFD spelling of an NFC name, although every one of those strings differs. A legacy name
+    that is another account's storage id, or whose directory is one, counts too.
+
+    Every legacy member of such a group is blocked, the legitimate owner included: an alias
+    account may already have written into that store, and deciding whose it is needs a human.
     """
-    landed: dict[str, list[int]] = {}
+    legacy = {a.id for a in accounts if a.storage_layout == LAYOUT_LEGACY}
+    storage_ids = {a.storage_id: a.id for a in accounts}
+    groups: dict[tuple[int, int], set[int]] = {}
+    flagged: set[int] = set()
     for account in accounts:
-        if account.storage_layout != LAYOUT_LEGACY:
-            continue
-        real = task_storage.legacy_landing(account.username)
-        if real is not None:
-            landed.setdefault(real, []).append(account.id)
-    return {i for ids in landed.values() if len(ids) > 1 for i in ids}
+        if account.id in legacy:
+            owner = storage_ids.get(account.username)
+            if owner is not None and owner != account.id:
+                flagged.add(account.id)
+            landed = task_storage.legacy_identity(account.username)
+            if landed is not None:
+                groups.setdefault(landed, set()).add(account.id)
+        store = task_storage.store_identity(account.storage_id)
+        if store is not None:
+            groups.setdefault(store, set()).add(account.id)
+    for ids in groups.values():
+        if len(ids) > 1:
+            flagged |= ids
+    return flagged & legacy
 
 
 def _legacy_text(account: Account) -> str:
     """The legacy path relative to DATA_ROOT, escaped so a control character cannot reach a
     terminal; for a name that is not one component, a placeholder instead of the name."""
     try:
-        task_storage.legacy_dir(account.username, require_nfc=False)
+        task_storage.legacy_dir(account.username, allow_storage_id_shape=True)
     except StorageRefused:
         return "<not a single path component>"
     return account.username.encode("unicode_escape").decode("ascii")
 
 
-def _plan_one(account: Account, aliased: set[int]) -> tuple[Entry, Manifest | None]:
+def _plan_one(
+    account: Account, aliased: set[int], copied_before: str | None = None
+) -> tuple[Entry, Manifest | None, bool]:
+    """One account's entry, the manifest to copy against, and whether an existing target is a
+    stale copy this tool made and a rollback left behind (`copied_before` is the manifest of
+    the last migration when the account's latest action is a rollback)."""
     storage_id = account.storage_id
     entry = Entry(account.id, storage_id, _legacy_text(account), storage_id or "-", BLOCKED)
     try:
         target = task_storage.storage_dir(storage_id)
     except StorageRefused:
         entry.reason = "no valid storage id; start the service once to backfill it"
-        return entry, None
+        return entry, None, False
 
     if account.storage_layout == LAYOUT_STORAGE_ID:
         try:
             task_storage.checked_directory(target)
         except StorageRefused as refused:
             entry.reason = refused.reason
-            return entry, None
+            return entry, None, False
         entry.status = DONE
-        return entry, None
+        return entry, None, False
 
     if account.id in aliased:
         entry.reason = "alias of another account's directory"
-        return entry, None
+        return entry, None, False
     try:
-        source = task_storage.legacy_dir(account.username, require_nfc=False)
+        source = task_storage.legacy_dir(account.username, allow_storage_id_shape=True)
     except StorageRefused as refused:
         entry.reason = refused.reason
-        return entry, None
+        return entry, None, False
 
     if not os.path.lexists(source):
         if os.path.lexists(target):
             entry.reason = "target exists and there is no source"
-            return entry, None
+            return entry, None, False
         entry.status = PROVISION
-        return entry, None
+        return entry, None, False
 
     try:
-        task_storage.checked_directory(source)
+        task_storage.checked_legacy_directory(source)
         found = manifest(source)
     except (StorageRefused, Blocked) as refused:
         entry.reason = refused.reason
-        return entry, None
+        return entry, None, False
     entry.files, entry.bytes = found.files, found.bytes
 
+    stale = False
     if os.path.lexists(target):
         # Resume after an interrupted apply: the rename happened, the database update did not.
+        # Or a rollback flipped the account back but left the copy it made in place: then the
+        # target is still exactly what the last migration recorded, and is replaced.
         try:
-            same = manifest(task_storage.checked_directory(target)) == found
+            existing: Manifest | None = manifest(task_storage.checked_directory(target))
         except (StorageRefused, Blocked):
-            same = False
-        if not same:
+            existing = None
+        stale = (
+            existing is not None
+            and copied_before is not None
+            and existing.digest == copied_before
+            and existing != found
+        )
+        if existing != found and not stale:
             entry.reason = "target exists with different content"
-            return entry, None
+            return entry, None, False
     entry.status = READY
-    return entry, found
+    return entry, found, stale
 
 
-async def plan(db) -> list[tuple[Account, Entry, Manifest | None]]:
+async def plan(db) -> list[tuple[Account, Entry, Manifest | None, bool]]:
     accounts = await database.list_accounts(db)
     aliased = _aliases(accounts)
-    return [(account, *_plan_one(account, aliased)) for account in accounts]
+    planned = []
+    for account in accounts:
+        copied_before = None
+        if await database.last_storage_action(db, account.id) == ROLLED_BACK:
+            copied_before = await database.last_migration_manifest(db, account.id)
+        planned.append((account, *_plan_one(account, aliased, copied_before)))
+    return planned
 
 
 # --- applying ------------------------------------------------------------------------------
 
 
-def _copy(source: Path, storage_id: str, expected: Manifest) -> Path:
+def _stamp() -> str:
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def _set_aside(storage_id: str) -> None:
+    """Rename `DATA_ROOT/<storage_id>` out of the way. Kept, never deleted: removing it is the
+    contract step's business, like the legacy sources."""
+    aside = task_storage.set_aside_dir(storage_id, _stamp())
+    if os.path.lexists(aside):
+        raise Blocked("set-aside path already exists")
+    os.rename(task_storage.storage_dir(storage_id), aside)
+
+
+def _copy(source: Path, storage_id: str, expected: Manifest, stale: bool = False) -> Path:
     """Copy `source` into place under `storage_id`; return the target. Raises `Blocked`."""
     target = task_storage.storage_dir(storage_id)
+    if stale and os.path.lexists(target):
+        _set_aside(storage_id)  # verified by the plan to be this tool's own earlier copy
     if os.path.lexists(target):
         return target  # verified identical by the plan
     staging = task_storage.staging_dir(storage_id)
@@ -269,7 +324,7 @@ def _copy(source: Path, storage_id: str, expected: Manifest) -> Path:
 
 async def apply(db, user_id: int | None = None) -> list[Entry]:
     results: list[Entry] = []
-    for account, entry, found in await plan(db):
+    for account, entry, found, stale in await plan(db):
         if user_id is not None and account.id != user_id:
             continue
         if entry.status == PROVISION:
@@ -287,9 +342,9 @@ async def apply(db, user_id: int | None = None) -> list[Entry]:
                 )
                 entry.status = PROVISIONED
         elif entry.status == READY and found is not None:
-            source = task_storage.legacy_dir(account.username, require_nfc=False)
+            source = task_storage.legacy_dir(account.username, allow_storage_id_shape=True)
             try:
-                target = _copy(source, account.storage_id, found)
+                target = _copy(source, account.storage_id, found, stale)
                 if manifest(target) != found or manifest(source) != found:
                     raise Blocked("source changed during the copy; stop the backend and retry")
             except Blocked as blocked:
@@ -332,13 +387,18 @@ async def rollback(db, user_id: int) -> Entry:
     if account.storage_layout != LAYOUT_STORAGE_ID:
         entry.reason = "account is not migrated"
         return entry
+    if task_storage.storage_mode() != task_storage.MODE_COMPAT:
+        # In strict mode a legacy account is refused, so this would turn a working account into
+        # a 500 at once. Set TASK_STORAGE_MODE=compat first, deliberately.
+        entry.reason = "rollback needs TASK_STORAGE_MODE=compat; strict refuses a legacy account"
+        return entry
     recorded = await database.last_migration_manifest(db, account.id)
     if recorded is None:
         entry.reason = "account was not migrated by this tool; it has no legacy source"
         return entry
     try:
-        source = task_storage.checked_directory(
-            task_storage.legacy_dir(account.username, require_nfc=False)
+        source = task_storage.checked_legacy_directory(
+            task_storage.legacy_dir(account.username, allow_storage_id_shape=True)
         )
         now = manifest(task_storage.checked_directory(task_storage.storage_dir(account.storage_id)))
         manifest(source)
@@ -352,6 +412,12 @@ async def rollback(db, user_id: int) -> Entry:
     await database.record_storage_migration(
         db, account, legacy_path=entry.legacy_path, action="rolled_back"
     )
+    # After the flip, so a failure here costs nothing but a stale copy — which the next `plan`
+    # recognises by the recorded manifest and replaces.
+    try:
+        _set_aside(account.storage_id)
+    except (OSError, Blocked):
+        entry.reason = "rolled back; the copy stays in place and the next apply replaces it"
     audit.record(
         audit.STORAGE_ROLLED_BACK,
         outcome=audit.SUCCESS,
@@ -386,7 +452,7 @@ def _emit(entries: list[Entry], as_json: bool) -> None:
 async def _main(args: argparse.Namespace) -> int:
     async with database.users_connection() as db:
         if args.command == "plan":
-            entries = [entry for _account, entry, _found in await plan(db)]
+            entries = [entry for _account, entry, _found, _stale in await plan(db)]
         elif args.command == "apply":
             entries = await apply(db, args.user_id)
         else:

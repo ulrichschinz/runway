@@ -16,6 +16,11 @@ services:
       - DATA_ROOT=/app/data
       - DB_PATH=/app/users.db
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # SEC-001, ADR 0043: compat serves accounts not yet migrated from data/<username>/;
+      # strict refuses them. The list above is explicit and there is no env_file, so without
+      # this line setting it in the host .env would not reach the container at all.
+      # backend/tests/unit/test_task_storage.py pins it.
+      - TASK_STORAGE_MODE=${TASK_STORAGE_MODE:-compat}
     network_mode: host
     restart: unless-stopped
     # The backend now writes a JSON line per request. Docker's default json-file driver has

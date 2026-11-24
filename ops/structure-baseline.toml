@@ -51,7 +51,11 @@ allowlist = [
 # the adapter take nothing else. Concentration is the control: one resolver instead of two copies of
 # `data_root / username`. An eleventh importer is a new place that handles a store; review it
 # against RULE-SEC-003.
-"backend/app/task_storage.py" = 10
+# Raised from 10 on 2026-11-24 (brief 0065, review findings; owner approval not independent,
+# RISK-GOV-001): the eleventh is `main.py`, reviewed against RULE-SEC-003 as asked above. It reads
+# only `storage_mode()` for the startup line, so an operator can see that the strict switch took;
+# it handles no store and builds no path.
+"backend/app/task_storage.py" = 11
 "frontend/src/components/TaskList.vue" = 6
 "frontend/src/components/TaskModal.vue" = 6
 # Raised from 5 on 2026-08-25: /inbox stopped implementing its own authentication and

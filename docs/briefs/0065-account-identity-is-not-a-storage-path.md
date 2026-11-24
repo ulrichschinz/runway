@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Requested outcome** | Finding **SEC-001** (audit run `20261118T131510Z-claude`, upheld by the Codex review of 2026-11-24): the registered username was joined onto `DATA_ROOT` verbatim and handed to Taskwarrior as `TASKDATA`/`TASKRC`/`HOME`, so `alice/../alice` opened alice's store and `../x` created a directory above the data root. Ordered by Uli on **2026-11-24** as milestones M0 and M1 of the security remediation plan (decision gate D1: a random, immutable `storage_id`, never the username). |
-| **Owning unit** | `be/leaves` — `backend/app/task_storage.py` (new: the account identity type, the storage resolver, the username rule). `be/adapters/db` — `backend/app/database.py` (columns, backfill, the protocol table, the account lookup), `backend/app/audit.py` (four events). `be/di` — `backend/app/dependencies.py` (`get_task_store`). `be/routers` — `auth.py`, `tasks.py`, `gtd.py`, `inbox.py`. `be/services` — `task_service.py`, `user_service.py`, `storage_migration.py` (new). `be/adapters/task` — `task_runner.py`. `be/leaves` — `config.py`. `ops` — `tools/checks/storage-binding.sh` + `storage_binding.py` (new rule), `profiles.conf`, `budgets`-neutral, `architecture.toml` (two paths), `rules/ledger.yaml`, `rules/shims.yaml`, `tools/fixtures/negative.sh`, `ops/surfaces/db-schema.sql`. `docs` — this brief, ADR 0043, `docs/security.md`, `docs/threat-model.md`, `docs/operations.md`, `docs/task-interface.md`, `README.md`, `AGENTS.md` (§3 one row). `tests`. |
+| **Owning unit** | `be/leaves` — `backend/app/task_storage.py` (new: the account identity type, the storage resolver, the username rule). `be/adapters/db` — `backend/app/database.py` (columns, backfill, the protocol table, the account lookup), `backend/app/audit.py` (three events: `storage.refused`, `storage.migrated`, `storage.rolled_back`). `be/di` — `backend/app/dependencies.py` (`get_task_store`). `be/routers` — `auth.py`, `tasks.py`, `gtd.py`, `inbox.py`. `be/services` — `task_service.py`, `user_service.py`, `storage_migration.py` (new). `be/adapters/task` — `task_runner.py`. `be/leaves` — `config.py`. `be/app` — `main.py` (the startup line names the effective storage mode). `ops` — `tools/checks/storage-binding.sh` + `storage_binding.py` (new rule), `profiles.conf`, `budgets`-neutral, `architecture.toml` (two paths), `rules/ledger.yaml`, `rules/shims.yaml`, `tools/fixtures/negative.sh`, `ops/surfaces/db-schema.sql`, `ops/deploy/docker-compose.yml` and `docker-compose.yml` (pass `TASK_STORAGE_MODE` through). `docs` — this brief, ADR 0043, `docs/security.md`, `docs/threat-model.md`, `docs/operations.md`, `docs/task-interface.md`, `README.md`. (`AGENTS.md` is unchanged.) `tests`. |
 | **Applicable contracts** | [`AGENTS.md`](../../AGENTS.md) §2–§5 and §9 (the META-RULE: a new gate rule lands with check, ledger entry, fixture and docs); [`backend/AGENTS.md`](../../backend/AGENTS.md) (only `be/adapters/task` runs the subprocess; only `be/adapters/db` opens a connection; migrations are additive `ALTER TABLE`s in `init_db()`). |
 | **Governed by** | **New:** [ADR 0043 — Account identity and Taskwarrior storage](../adr/0043-account-identity-and-taskwarrior-storage.md). Respected: [ADR 0025](../adr/0025-narrowing-the-migration-except.md) (the migration loop), [ADR 0026](../adr/0026-the-audit-log.md) (the audit log), [ADR 0006](../adr/0006-two-tier-backend-tests.md) (two test tiers). |
 | **Rule IDs introduced** | **`RULE-SEC-003`** — only `backend/app/task_storage.py` may build a path from `settings.data_root`, other than the audit database's fixed name. Shim **`SHIM-SEC-007`** — the legacy username layout, accepted in `compat` mode until 2027-02-28. Residual risk **`RISK-SEC-006`** — until the operator has migrated and switched, existing accounts still live in `DATA_ROOT/<username>/`. |
@@ -42,7 +42,10 @@
 3. Commit and image digest running, the process UID and mount permissions, the edge's headers and limits.
 4. An encrypted, restore-tested backup of `users.db`, `data/audit.db` and every Taskwarrior directory
    **before** `apply`.
-5. If the dry run shows an alias account (`blocked: alias of another account's directory`), treat it as a
+5. Whether the filesystem under `data/` is case- and normalisation-sensitive (ext4 is expected; the runbook has
+   a one-line probe). On a folding filesystem `ALICE` opens `alice`; compat and the migration refuse that by
+   spelling and by inode, but only a sensitive filesystem makes it impossible.
+6. If the dry run shows an alias account (`blocked: alias of another account's directory`), treat it as a
    possible incident: lock the account, keep the originals, and follow the incident process.
 
 ## Failure scenario
@@ -87,10 +90,29 @@ Whoever can create an account — open registration, or anyone an admin register
 | Switch | `TASK_STORAGE_MODE=strict`: legacy access becomes an error with an audit row. | **Done as configuration; default stays `compat`.** Flipping it is an operator step after `apply` reports every account `done`, no later than the shim expiry 2027-02-28. |
 | Contract | Delete `DATA_ROOT/<username>/` sources, remove the `compat` branch, the shim and `storage_layout='legacy'` handling. | **Deferred**, own change: not before 14 days after the switch **and** a restore drill of a migrated account, and not before the switch itself. |
 
-Rollback at every step: before `apply`, the previous image runs unchanged. After `apply` and before any
-write, `rollback --user-id N` returns an account to its untouched legacy directory. After a write to the
+Rollback at every step: before `apply`, the previous image runs unchanged **for every account that existed
+before the deploy**; an account registered after it (or provisioned by `apply`) has no `data/<username>/`, so
+the previous image answers its task routes with 500 until roll-forward — one more reason registration stays
+closed until the switch (query in `docs/operations.md` step 4). After `apply` and before any write,
+`rollback --user-id N` (only in `compat`) returns an account to its untouched legacy directory and sets the
+copy aside as `.<storage_id>.rolled-back.<stamp>`, so the account can be migrated again later. After a write to the
 new directory, rollback refuses (the copy has diverged) and the way back is the backup or a forward fix;
 the previous image would serve the frozen legacy copy, which is why `docs/operations.md` says so in bold.
+
+## Review findings (2026-11-24) and what changed
+
+Two independent reviews of `d66d831`. Each finding was reproduced or checked before it was fixed; every fix has a
+test that was observed failing on `d66d831` first (26 new tests red, then green).
+
+| Finding | Verdict | Fix |
+|---|---|---|
+| Alias detection compared resolved path strings: on APFS / a Docker Desktop bind mount `ALICE` and `alice` (or NFD and NFC `alicé`) were both `ready` and the alias got a copy of the victim's store; compat served `ALICE` from `alice/` | **Real** (reproduced on this Mac's APFS) | `_aliases` groups by `(st_dev, st_ino)` of the raw join, plus every account's store and any legacy name equal to a storage id. Compat and the migration require the exact spelling in the directory listing (`store is spelled differently on disk`). Unit tests skip where the FS does not fold; one identity test runs everywhere; a real-binary HTTP test too. M0 gains an FS-sensitivity check. |
+| The compose files never pass `TASK_STORAGE_MODE`, so the documented switch did nothing | **Real** | Both compose files pass `${TASK_STORAGE_MODE:-compat}`, pinned by a test; the startup line logs the effective mode; the runbook checks it after the switch. |
+| apply → rollback → write → apply blocked forever on the stale copy | **Real** (reproduced) | `rollback` renames the copy to `.<id>.rolled-back.<stamp>` (kept); `plan` recognises a copy left in place after a rollback by the recorded manifest and replaces it; any other target still blocks. `rollback` refuses in `strict`. |
+| Rollback claim wrong for accounts registered after the deploy | **Real** | ADR, brief and runbook say so, with the query. |
+| Legacy names with a leading `.`, a backslash, 32 hex characters, or non-NFC were refused for good | **Real** | Only reserved entries and the tool's own `.<id>.…` names are refused; compat also refuses a 32-hex name (it cannot see the storage ids), the migration checks it against all of them and moves it. Non-NFC is served because the spelling check replaces it. |
+| Brief listed `AGENTS.md` and "four events" | **Real** | Corrected above. |
+| Governance entries read as owner-approved | **Real** | `SHIM-SEC-007` carries the same "not independent, RISK-GOV-001" note as the baseline raise; owner sign-off is a deferred step below. |
 
 ## Registration re-open condition
 
@@ -143,4 +165,6 @@ green in CI on amd64 before SEC-001 counts as closed and before registration is 
 | Container tier green in CI (amd64) at the deployed commit | first CI run of this branch | CI |
 | Reopen registration | after the CI run above | maintainer |
 | Contract: delete `data/<username>/`, the `compat` branch and the `legacy` layout | ≥ 14 days after `strict` **and** one migrated account restored from backup | maintainer |
-| Downgrade then close `RISK-SEC-006` | `strict` set (downgrade); contract done (close) | maintainer |
+| Downgrade then close `RISK-SEC-006` | `strict` set **and the startup line shows `strict`** (downgrade); contract done (close) | maintainer |
+| Owner sign-off on `SHIM-SEC-007`, `RULE-SEC-003`, `RISK-SEC-006` and the fan-in baseline raises — written by the implementing agent, not independently reviewed (`RISK-GOV-001`) | before merge | maintainer |
+| Remove `data/.<id>.rolled-back.*` copies | with the contract step | maintainer |

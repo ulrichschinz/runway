@@ -198,9 +198,10 @@ the data root. Now:
    otherwise) that is explicitly *not* the path control.
 5. **Transition (`SHIM-SEC-007`, `RISK-SEC-006`).** An account created before the change is
    `storage_layout='legacy'` and, in the default `TASK_STORAGE_MODE=compat`, is served from
-   `DATA_ROOT/<username>/` only when that name is one plain path component resolving to a
-   real directory under the root — an alias name is refused with 500 and a `storage.refused`
-   audit row. `strict` refuses every legacy account. The operator moves accounts with
+   `DATA_ROOT/<username>/` only when that name is one path component that is, in exactly that
+   spelling, a real directory under the root — an alias name, including a spelling a case- or
+   normalisation-insensitive filesystem folds onto another directory, is refused with 500 and a
+   `storage.refused` audit row. The migration groups accounts by inode, not by spelling. `strict` refuses every legacy account. The operator moves accounts with
    `python -m app.services.storage_migration`
    ([runbook](operations.md#moving-task-storage-off-the-username)).
 

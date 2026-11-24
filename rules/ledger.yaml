@@ -1204,12 +1204,15 @@ residual_risks:
     statement: >
       SEC-001 is contained but not closed until the operator has migrated. Accounts created
       before brief 0065 keep storage_layout='legacy' and are served from DATA_ROOT/<username>/ in
-      the default `compat` mode (SHIM-SEC-007) — only when the name is one plain path component
-      that resolves to a real directory directly under the root, so a separator, `.`/`..`, a
-      symlink or a non-NFC spelling is refused, but two spellings a case-insensitive filesystem
-      folds together are not detected per request (the migration detects them by comparing where
-      each name lands). Whether production holds an alias account already is unknown from this
-      repository; the migration's dry run answers it. RULE-SEC-003 is a static scan of
+      the default `compat` mode (SHIM-SEC-007) — only when the name is one path component that
+      is, in exactly that spelling, a real directory directly under the root, so a separator,
+      `.`/`..`, a symlink, a storage-id-shaped name, or a spelling a case- or
+      normalisation-insensitive filesystem only reaches by folding it (`ALICE` opening `alice`)
+      is refused. The migration groups legacy accounts by the inode their raw name opens, so
+      such a pair is blocked there too. That the production volume is case- and
+      normalisation-sensitive (ext4 is expected) is an operator check, not something this
+      repository can see. Whether production holds an alias account already is unknown from
+      this repository; the migration's dry run answers it. RULE-SEC-003 is a static scan of
       backend/app/ by name: a path built from os.environ, from a copied value, or by a library is
       outside it. The container tier that proves isolation against the real binary runs only in
       CI on amd64 (RISK-TEST-001); locally it was run against the host's Taskwarrior 3.5.0.

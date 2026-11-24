@@ -15,9 +15,10 @@ build a path from `settings.data_root`.
 
 **The transition.** Accounts created before the switch are `storage_layout='legacy'` and their
 data is still in `DATA_ROOT/<username>/` until `app.services.storage_migration` has copied it.
-In `compat` mode such an account is served from there — but only when the name is one safe path
-component that resolves to a real directory directly under the root, so an alias like
-`alice/../alice` is refused rather than followed. In `strict` mode every legacy account is
+In `compat` mode such an account is served from there — but only when the name is one path
+component that is, in exactly that spelling, a real directory directly under the root, so an
+alias like `alice/../alice`, or `ALICE` on a case-insensitive filesystem, is refused rather
+than followed. In `strict` mode every legacy account is
 refused. The `compat` branch is `SHIM-SEC-007` in `rules/shims.yaml`, with an expiry.
 
 A leaf: it reads `settings` and the filesystem, opens no database and imports nothing above it,
@@ -152,47 +153,95 @@ def username_problem(username: str) -> str | None:
     return None
 
 
-def _legacy_component_problem(username: str, *, require_nfc: bool = True) -> str | None:
+# The names the migration gives its own directories in DATA_ROOT: `.<id>.partial` while a copy
+# is assembled, `.<id>.rolled-back.<stamp>` for a copy a rollback set aside. Never a store.
+TOOL_DIR_RE = re.compile(r"\.[0-9a-f]{32}\..*", re.DOTALL)
+
+
+def _legacy_component_problem(username: str, *, allow_storage_id_shape: bool = False) -> str | None:
     """Why `DATA_ROOT/<username>` must not be served for a legacy account, or None.
 
-    `require_nfc=False` is for the migration only, which proves the absence of an alias by
-    comparing inodes across every account instead of by spelling.
+    Syntactic only, and deliberately no narrower than "one path component that is no entry of
+    this service's own": every name the previous image accepted and that is its own directory
+    stays reachable, so a `.hidden` or a `back\\slash` account is not cut off by the deploy.
+    Spellings a filesystem folds together (`ALICE` opening `alice` on APFS, NFD opening NFC)
+    are not decided here — `checked_legacy_directory` requires the exact spelling on disk, and
+    the migration groups accounts by inode.
+
+    A 32-hex name is refused for serving (it could address another account's new store; the
+    resolver has no database to tell). The migration passes `allow_storage_id_shape=True`
+    because it compares the name against every account's storage id first.
     """
     if not username or username in (".", ".."):
         return "legacy name is a relative path"
-    if "/" in username or "\\" in username or "\x00" in username:
+    if "/" in username or "\x00" in username:
         return "legacy name contains a separator"
     if os.path.isabs(username) or Path(username).name != username:
         return "legacy name is not a single path component"
-    if any(unicodedata.category(ch)[0] == "C" for ch in username):
-        return "legacy name contains control characters"
-    if require_nfc and unicodedata.normalize("NFC", username) != username:
-        return "legacy name is not NFC"
-    if username.startswith(".") or username in RESERVED_NAMES or is_storage_id(username):
+    if username in RESERVED_NAMES or TOOL_DIR_RE.fullmatch(username):
+        return "legacy name collides with a reserved entry"
+    if is_storage_id(username) and not allow_storage_id_shape:
         return "legacy name collides with a reserved entry"
     return None
 
 
-def legacy_dir(username: str, *, require_nfc: bool = True) -> Path:
+def legacy_dir(username: str, *, allow_storage_id_shape: bool = False) -> Path:
     """`DATA_ROOT/<username>` for an existing legacy account, or `StorageRefused`.
 
-    The checks are syntactic and do not touch the filesystem; `checked_directory` does that.
+    The checks are syntactic and do not touch the filesystem; `checked_legacy_directory`
+    does that.
     """
-    problem = _legacy_component_problem(username, require_nfc=require_nfc)
+    problem = _legacy_component_problem(username, allow_storage_id_shape=allow_storage_id_shape)
     if problem:
         raise StorageRefused(problem)
     return data_root() / username
 
 
-def legacy_landing(username: str) -> str | None:
-    """Where the pre-0065 code actually put this account's store: the name joined onto the
-    data root verbatim and resolved by the OS. For the migration's alias detection only — the
-    result is compared, never served, and None when nothing exists there.
+def legacy_identity(username: str) -> tuple[int, int] | None:
+    """`(st_dev, st_ino)` of what the pre-0065 code opened for this name — the name joined onto
+    the data root verbatim and resolved by the OS, folding included. For the migration's alias
+    detection only: compared, never served; None when nothing exists there.
+
+    Identity, not spelling: on a case- or normalisation-insensitive filesystem `Alice` and
+    `alice` are two different strings and one directory, and a directory cannot be hard-linked,
+    so one inode is one store.
     """
     try:
-        return str(Path(os.path.join(data_root(), username)).resolve(strict=True))
-    except (OSError, RuntimeError, ValueError):
+        info = os.stat(os.path.join(data_root(), username))
+    except (OSError, ValueError):
         return None
+    return (info.st_dev, info.st_ino)
+
+
+def store_identity(storage_id: str) -> tuple[int, int] | None:
+    """`(st_dev, st_ino)` of `DATA_ROOT/<storage_id>`, or None. For alias detection only."""
+    if not is_storage_id(storage_id):
+        return None
+    try:
+        info = os.stat(storage_dir(storage_id))
+    except OSError:
+        return None
+    return (info.st_dev, info.st_ino)
+
+
+def set_aside_dir(storage_id: str, stamp: str) -> Path:
+    """Where a rollback moves the copy it no longer serves, so a later `apply` can copy fresh."""
+    return storage_dir(storage_id).with_name(f".{storage_id}.rolled-back.{stamp}")
+
+
+def spelled_on_disk(path: Path) -> bool:
+    """Whether `path.name` is, byte for byte, an entry of its parent directory.
+
+    `lstat("ALICE")` succeeds on a case-insensitive filesystem when only `alice` exists, and
+    `realpath` keeps the spelling it was given, so neither notices the fold. The listing does:
+    a case- and normalisation-preserving filesystem (APFS, ext4) lists the name a directory
+    was created under.
+    """
+    try:
+        with os.scandir(path.parent) as entries:
+            return any(entry.name == path.name for entry in entries)
+    except OSError:
+        return False
 
 
 def checked_directory(path: Path) -> Path:
@@ -217,6 +266,14 @@ def checked_directory(path: Path) -> Path:
     return path
 
 
+def checked_legacy_directory(path: Path) -> Path:
+    """`checked_directory`, and the name must be the exact spelling of a directory on disk."""
+    checked_directory(path)
+    if not spelled_on_disk(path):
+        raise StorageRefused("store is spelled differently on disk")
+    return path
+
+
 def resolve(account: Account, mode: str | None = None) -> TaskStore:
     """The one place an account becomes a directory. Raises `StorageRefused`."""
     mode = mode or storage_mode()
@@ -227,4 +284,4 @@ def resolve(account: Account, mode: str | None = None) -> TaskStore:
     if mode != MODE_COMPAT:
         raise StorageRefused("legacy layout refused in strict mode")
     # SHIM-SEC-007: the pre-migration layout, served only for a safe single component.
-    return TaskStore(checked_directory(legacy_dir(account.username)), account.username)
+    return TaskStore(checked_legacy_directory(legacy_dir(account.username)), account.username)
