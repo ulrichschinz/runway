@@ -42,7 +42,7 @@ Two credentials reach the same principal, checked in this order by `get_current_
    `UPDATE` ([`docs/operations.md`](operations.md#ending-sessions)). For one JWT lifetime after
    the deploy, a token from the previous image (no `auth_version`) still counts as version 1:
    `SHIM-SEC-008`. **API keys are not revoked by a password change** — they rotate separately
-   (`POST /auth/apikey/regenerate`), and the settings page offers that after the change.
+   (`POST /auth/apikey/regenerate`); both settings pages say so before the change and point to it after.
 3. **`Authorization: Bearer <api_key>`** — an API key in the Bearer slot, tried last, only
    after a JWT decode fails. This is `SHIM-SEC-006`, not a design: it is the shape `/inbox`
    used before it was unified onto `get_current_user` (finding SEC-6), kept because every

@@ -195,6 +195,54 @@ def _fresh_session_manager() -> None:
         transport._session_manager = None
 
 
+MCP_TOOLS = Path(__file__).resolve().parents[3] / "ops" / "surfaces" / "mcp-tools.json"
+
+
+def _protected_tools() -> list[str]:
+    """Every MCP tool in the snapshot whose REST operation needs a credential. Tool names are
+    operation ids (ADR 0037), so the OpenAPI snapshot says which ones are protected."""
+    spec = json.loads(OPENAPI.read_text())
+    protected = {
+        op["operationId"]
+        for methods in spec["paths"].values()
+        for op in methods.values()
+        if op.get("security")
+    }
+    tools = [t["name"] for t in json.loads(MCP_TOOLS.read_text())["tools"]]
+    return sorted(t for t in tools if t in protected)
+
+
+PROTECTED_TOOLS = _protected_tools()
+
+_PLACEHOLDER: dict[str, Any] = {
+    "string": "placeholder",
+    "integer": 1,
+    "number": 1,
+    "boolean": False,
+    "array": [],
+    "object": {},
+}
+
+
+def _minimal_arguments(schema: dict[str, Any]) -> dict[str, Any]:
+    """Fill every required argument of a tool's input schema with a type-correct placeholder, so
+    the call passes schema validation and reaches the REST route behind the tool."""
+    args: dict[str, Any] = {}
+    for name in schema.get("required", []):
+        prop = schema.get("properties", {}).get(name, {})
+        kind = prop.get("type")
+        if kind is None:
+            for alt in prop.get("anyOf", []) + prop.get("oneOf", []):
+                if alt.get("type") and alt["type"] != "null":
+                    kind = alt["type"]
+                    break
+        if "enum" in prop:
+            args[name] = prop["enum"][0]
+        else:
+            args[name] = _PLACEHOLDER.get(kind, "placeholder")
+    return args
+
+
 def _mcp_call(headers: dict[str, str], tool: str = "me_auth_me_get"):
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
@@ -218,22 +266,29 @@ def _mcp_call(headers: dict[str, str], tool: str = "me_auth_me_get"):
             ):
                 async with ClientSession(read, write) as s:
                     await s.initialize()
-                    return await s.call_tool(tool, {})
+                    listed = {t.name: t.inputSchema for t in (await s.list_tools()).tools}
+                    return await s.call_tool(tool, _minimal_arguments(listed[tool]))
 
     return asyncio.run(asyncio.wait_for(session(), TIMEOUT))
 
 
+def test_the_snapshot_lists_the_protected_tools():
+    """A guard on the guard: every exposed tool but `health` needs a credential."""
+    assert len(PROTECTED_TOOLS) == 26
+    assert "health_health_get" not in PROTECTED_TOOLS
+
+
 class TestMcpRefusesTheOldTokenToo:
-    @pytest.mark.parametrize(
-        "tool", ["me_auth_me_get", "list_tasks_tasks_get", "summary_gtd_summary_get"]
-    )
+    @pytest.mark.parametrize("tool", PROTECTED_TOOLS)
     def test_an_old_token_is_refused_at_the_tool(self, client, registered, auth, tool):
+        """Every protected tool, with schema-valid arguments. The positive control is "not
+        refused for authentication" rather than "succeeded": a placeholder uuid may well be 404."""
         before = _mcp_call(auth, tool)
-        assert not before.isError, before.content[0].text
+        assert not (before.isError and "401" in before.content[0].text), before.content[0].text
         assert _change_password(client, registered, auth).status_code == 200
         after = _mcp_call(auth, tool)
-        assert after.isError
-        assert "401" in after.content[0].text
+        assert after.isError, f"{tool} still accepts the old token"
+        assert "401" in after.content[0].text, after.content[0].text
 
     def test_the_new_token_reaches_the_tool(self, client, registered, auth):
         token = _change_password(client, registered, auth).json()["access_token"]

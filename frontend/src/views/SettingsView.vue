@@ -42,7 +42,10 @@
 
       <!-- Change Password -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
-        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">Change Password</h3>
+        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Change Password</h3>
+        <p class="text-sm text-gray-400 dark:text-gray-500 mb-4">
+          Changing your password signs out every other session. Your API key keeps working until you regenerate it below.
+        </p>
         <div class="space-y-3 max-w-sm">
           <div>
             <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Current password</label>
@@ -64,7 +67,7 @@
               class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors">
               Update password
             </button>
-            <span v-if="pwSaved" class="text-xs text-green-500">Password updated. Every other session was signed out; your API key still works.</span>
+            <span v-if="pwSaved" class="text-xs text-green-500">Password updated. Every other session was signed out; your API key still works &mdash; regenerate it below if it may be compromised.</span>
             <span v-if="pwError" class="text-xs text-red-500">{{ pwError }}</span>
           </div>
         </div>

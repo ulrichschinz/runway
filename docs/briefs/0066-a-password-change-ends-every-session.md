@@ -52,6 +52,10 @@ Rollback: the previous image ignores the column and the row; it accepts every co
 token again (REV-001 re-opens for the rollback's duration) and its password change does not bump the
 version. After rolling forward, bump every version once (`docs/operations.md`).
 
+Restore: bringing back `users.db` from a backup restores the versions and hashes of that moment and so
+undoes every revocation made since; the monotone trigger does not see a file replacement. After every
+restore, bump every version once, as after a rollback (`docs/operations.md`, ADR 0044).
+
 ## Test evidence
 
 Every result below was run on 2026-11-24 on an arm64 Mac. The red column is the new tests against the
@@ -60,7 +64,7 @@ unchanged production code at `b083e66`, before any line of the control was writt
 | Tier | What | Before the control (`b083e66`) | After |
 |---|---|---|---|
 | ASGI/REST | `test_session_revocation.py::TestAnOldTokenIsRefusedEverywhere` — every one of the 34 protected operations in `ops/surfaces/openapi.json`, with a positive control first (the old token is not 401 before the change) | **34 of 34 red** (`… still accepts the old token`), positive control green | green |
-| MCP, real `ClientSession` over ASGI | `TestMcpRefusesTheOldTokenToo` — `me`, `list_tasks`, `summary` refuse the old token at the tool; the response's token works | **4 of 4 red** | green |
+| MCP, real `ClientSession` over ASGI | `TestMcpRefusesTheOldTokenToo` — every one of the 26 protected tools in `ops/surfaces/mcp-tools.json` (all but `health`), each with schema-valid placeholder arguments built from the tool's own input schema, refuses the old token at the tool; positive control first (not refused for authentication before the change); the response's token works | **26 of 26 red** (re-run in review against `b083e66` in a detached worktree; the positive control held, e.g. `delete_task` answered `400 Invalid UUID` with the old token after the change) | green |
 | Unit | `TestClaims` — `sub`/`iat`/`exp`/`jti`/`auth_version`, login issues the stored version, malformed versions, **a token without `exp`** | **red**, including `a_token_without_exp_is_refused`: a correctly signed token without `exp` never expired (python-jose checks `exp` only when present) | green |
 | Unit | `TestTheVersionlessWindow` — the previous image's tokens inside / outside the window, revoked by the first change, missing record fails closed | **6 of 7 red** (the green one asserts what already held: a token inside the window works) | green |
 | DB integration | `TestPasswordAndVersionChangeTogether` — compare-and-swap of two concurrent `replace_password` calls; an aborted version write leaves the hash untouched even when the caller commits | **red** (no such function) | green |
@@ -103,4 +107,16 @@ works, the route list is non-empty). The concurrency tests were run five times i
 |---|---|---|
 | Contract: remove the versionless branch and `auth_version_expand_at` | after one `JWT_EXPIRE_HOURS` has passed since this image first booted in production; before 2027-01-31 (`SHIM-SEC-008`) | maintainer |
 | Post-deploy check: an old JWT gets 401 after a password change on the live instance, with a synthetic account | first deploy of this change | maintainer |
+| Global `auth_version` bump after any restore of `users.db` (and after rolling forward from a rollback) | every restore / roll-forward, before the app serves traffic | operator |
 | Owner sign-off on `SHIM-SEC-008` — written by the implementing agent, not independently reviewed (`RISK-GOV-001`) | before merge | maintainer |
+
+## Review round 1 (2026-11-24)
+
+Four reviewer findings, each verified against the code before acting.
+
+| Finding | Verdict | What changed | Red first |
+|---|---|---|---|
+| Restore of `users.db` called fail-closed in `docs/operations.md` and ADR 0044 (important) | **Real.** A restore brings back the versions and hashes of the backup; a token a later change ended matches the restored version again. The trigger never sees a file replacement. | Runbook, ADR 0044 and threat model corrected: after every restore, bump every version once, before serving traffic; the old password returns too. Added to the deferred table and the rollback section. | — (documentation) |
+| A stale-token 401 arriving after `adoptToken` logs out the session that changed the password (minor) | **Real.** `endsSession` checked only that a token was sent, not that it was still the stored one; a request in flight with the pre-change token could drop the new token and redirect to `/login`. | `endsSession(error, storedToken)` ends the session only when the refused token is the stored one (or nothing is stored); `client.js` passes `localStorage.getItem('token')`. | `sessionEnd.test.js` — *leaves the session alone when the refused request carried a token no longer stored*: **red** before the change |
+| Legacy `SettingsView` gives no hint about API-key rotation (minor) | **Real.** Only the new `SettingsPage` had the hint and the pointer. | A hint above the form and a pointer in the success message to *Regenerate key…*. | — (copy only) |
+| MCP covered three tools of 27 (minor) | **Real** as a gap between claim and test. | The MCP test now runs every protected tool in the snapshot (26), arguments derived from each tool's input schema; a guard test pins the count. | **26 of 26 red** against `b083e66` |

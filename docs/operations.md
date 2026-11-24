@@ -765,8 +765,15 @@ token in the change's response gets `200`.
 **Rollback.** The previous image ignores `auth_version`: while it runs, a password change ends no session
 (REV-001 is open again) and nothing else breaks. **After rolling forward, run the global statement above
 once**, so a token that should have been revoked during the rollback is not valid again. Users log in once
-more; that is the price. Restoring `users.db` from a backup needs nothing: tokens issued after the backup
-carry higher versions than the restored rows and are refused.
+more; that is the price.
+
+**Restoring `users.db` from a backup** brings back the `auth_version` values *and the password hashes*
+from the moment of the backup. Every revocation made since then is undone: a token that a later password
+change or the per-account `UPDATE` above had ended carries the restored version again and is accepted
+until it expires, and the old password logs in again. The monotone trigger cannot prevent that, because
+a restore replaces the file and runs no `UPDATE`. **After every restore, run the global statement above
+once, before the app serves traffic**, and tell the users whose password changed after the backup that
+their old password is back.
 
 ## The deploy host's topology
 

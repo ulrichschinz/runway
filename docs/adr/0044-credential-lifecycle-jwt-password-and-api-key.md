@@ -117,8 +117,12 @@ account with the same statement without the `WHERE`. Both are in `docs/operation
   price of closing what the rollback window left open. Tokens the previous image minted during the
   rollback are versionless and newer than the expand moment, so they are refused anyway and those
   users log in again.
-- Restoring `users.db` from a backup restores the versions in it; tokens issued after the backup
-  carry higher versions and are refused. That is fail-closed and needs nothing.
+- Restoring `users.db` from a backup restores the versions *and the password hashes* in it, so
+  every revocation made after the backup is undone: a token a later change had ended carries the
+  restored version again and is accepted until it expires. The monotone trigger cannot stop that —
+  a restore replaces the file and runs no `UPDATE`. **After every restore, bump every account's
+  version once** (Decision 4), exactly as after a rollback. (Corrected in review: an earlier draft
+  called a restore fail-closed.)
 - A leaked `JWT_SECRET` still lets an attacker mint a token at any version. That is not this
   decision's threat; rotating the secret (and `startup_checks`) remains the answer.
 - The web UI's own session survives its password change only because it stores the token from

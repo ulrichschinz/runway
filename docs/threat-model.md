@@ -513,14 +513,15 @@ then 401 everywhere; the changing session gets a fresh token. A trigger keeps th
 down. The operator can end one account's sessions, or all, with one `UPDATE`
 ([`docs/operations.md`](operations.md#ending-sessions)). Held by
 `backend/tests/unit/test_session_revocation.py`, which takes every protected route from the OpenAPI
-snapshot and three MCP tools over a real client session (ADR 0044).
+snapshot and every protected MCP tool from the tool snapshot over a real client session (ADR 0044).
 
 **Not stopped:** a request already authenticated when the password changes runs to completion
 (authorization is decided once, at the start of a request). For one JWT lifetime after the deploy a
 token from the previous image — without a version — is accepted as version 1 (`SHIM-SEC-008`); the
 first password change ends it too. The API key survives a password change by design and is
-`WAIVER-SEC-003`'s exposure; the settings page offers to rotate it after the change. A leaked
+`WAIVER-SEC-003`'s exposure; both settings pages point to its rotation before and after the change. A leaked
 `JWT_SECRET` mints tokens at any version — rotating the secret remains the only answer to that. A
+restore of `users.db` from a backup undoes every revocation made since the backup, and a
 rollback to an image before brief 0066 disables the check for its duration; the runbook bumps every
 version after rolling forward.
 
