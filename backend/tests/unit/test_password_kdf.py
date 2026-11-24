@@ -559,7 +559,7 @@ class TestRehashCompareAndSwap:
         from app.database import rehash_password
 
         _legacy_account(client, "alice", LEGACY["short"])
-        _sql("UPDATE users SET hashed_password='changed meanwhile' WHERE username='alice'")
+        _sql("UPDATE users SET hashed_password=? WHERE username='alice'", ("changed meanwhile",))
 
         async def attempt() -> bool:
             async with aiosqlite.connect(settings.db_path) as db:
