@@ -26,14 +26,23 @@ export const useAuthStore = defineStore('auth', () => {
   /** The account this page is bound to, so another tab's change of it is seen. */
   let boundId = token.value ? accountOf() : null
 
+  /** Set by an explicit logout: this page's snapshot belongs to a session that is over. */
+  let ended = false
+
   async function fetchMe() {
+    // The session this request is for. An answer that lands after another sign-in, a logout or a
+    // 401 is about a session that is gone: it sets no role and binds no account (review of brief
+    // 0075, round 3; otherwise a late answer rebinds a newer account to the earlier one's queue).
+    const asked = readToken()
+    if (!asked) return
     try {
       const { data } = await client.get('/auth/me')
+      if (readToken() !== asked || ended) return
       role.value = data.role === 'admin' ? 'admin' : 'user'
       fullName.value = data.full_name ?? ''
       email.value = data.email ?? ''
       if (data.username) username.value = data.username
-      const bound = bindAccount({ accountId: data.account_id, username: data.username, createdAt: data.created_at })
+      const bound = bindAccount({ accountId: data.account_id, username: data.username, createdAt: data.created_at, token: asked })
       if (bound) boundId = accountOf()
       if (bound && typeof window !== 'undefined') {
         try {
@@ -67,11 +76,12 @@ export const useAuthStore = defineStore('auth', () => {
    * Explicit logout. @returns {boolean} false when the user kept the unsent changes ("Abbrechen")
    */
   function logout() {
-    const ended = signOut({
+    const done = signOut({
       confirm: (n) => window.confirm(t('signout.discardQ', { n })),
       leave: () => window.location.assign('/login'),
     })
-    if (!ended) return false
+    if (!done) return false
+    ended = true
     token.value = null
     username.value = null
     role.value = 'user'
@@ -93,6 +103,19 @@ export const useAuthStore = defineStore('auth', () => {
       const now = readToken()
       const id = accountOf()
       if (now === token.value && (!boundId || !id || id === boundId)) return
+      if (!now) window.location.assign('/login')
+      else window.location.reload()
+    })
+    // The back/forward cache: Back after a logout, or after another tab's sign-in, restores this
+    // page as it was — its rendered tasks and its Pinia snapshot — without running a line of it
+    // again, so neither the router guard nor the full page load of the logout reaches it. A
+    // restored page whose session is over or replaced loads afresh instead (review of brief 0075,
+    // round 3).
+    window.addEventListener('pageshow', (event) => {
+      if (!event || !event.persisted) return
+      const now = readToken()
+      const id = accountOf()
+      if (!ended && now === token.value && (!boundId || !id || id === boundId)) return
       if (!now) window.location.assign('/login')
       else window.location.reload()
     })

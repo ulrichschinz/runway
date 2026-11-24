@@ -153,11 +153,26 @@ Gate, round 2 (2026-11-24, local, arm64): `make check` GREEN (17 s of 180 s). `m
 running" (`RISK-TEST-001`); it ran no container test, so CI has to. 57 negative-fixture arms
 passed.
 
+## Review round 3 (2026-11-24)
+
+Both findings verified (the reviewer's reproduction holds against `2e54443`) and fixed, each with a
+red test in `authStore.test.js` observed failing before the fix (5 tests: 5 failed, then green):
+
+| Finding | Fix | Red test |
+|---|---|---|
+| A late `/auth/me` answer for an earlier account rebinds a newer account's session to the earlier namespace (its queue shown and sent under the newer token); one landing after a logout writes `accountId`/`username` back | `fetchMe` binds only when the profile's token is still the one it sent and no logout came between; `bindAccount` takes that `token` and refuses to replace a bound account id with another | "a late answer for the previous account does not rebind…", "a late answer after an explicit logout writes nothing…", "binding refuses to replace the account a login bound…" |
+| *Back* after a logout restores the page from the back/forward cache with its snapshot; nothing reacts | `pageshow` listener in the auth store: a `persisted` restore of a logged-out or replaced session reloads (to `/login` without a token) | "a page restored from the back/forward cache" (2 red, 1 guard that a live session is not reloaded) |
+
+Not done: `Cache-Control: no-store` on `index.html` (it would only make bfcache less likely, and
+changes the deploy's nginx config for every page; the `pageshow` handler covers the restore). The
+behaviour in a real browser's bfcache is part of the browser-tier gap (`RISK-TEST-004`): the node
+test proves the handler, not that every browser fires `pageshow` with `persisted`.
+
 ## Deferred, with trigger
 
 | Step | Trigger / date | Why not now |
 |---|---|---|
 | Contract: delete the legacy keys and migration (`SHIM-FE-001`) | expires **2027-03-01**, or earlier by the maintainer's judgement | browsers that have not signed in since the deploy still hold unsent legacy work |
-| A browser-tier test of the logout dialog and the cross-tab reload | a browser runner in CI (`RISK-TEST-004`) | no runner exists here; adding one needs a dependency and a browser download |
+| A browser-tier test of the logout dialog, the cross-tab reload and the bfcache restore after logout | a browser runner in CI (`RISK-TEST-004`) | no runner exists here; adding one needs a dependency and a browser download |
 | Server-side revocation on logout | M2 (`auth_version`) | a different package; a copied JWT stays valid until expiry |
 | Owner sign-off on resolving `RISK-SEC-001` | the merge of this change | `RISK-GOV-001`: one maintainer |

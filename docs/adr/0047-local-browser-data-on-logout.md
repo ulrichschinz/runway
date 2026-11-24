@@ -67,10 +67,21 @@ ops only the page holds, which the outbox reports through `reportPending`; each 
 there are any, `window.confirm` asks: *Abbrechen* changes nothing and stays signed in; *OK* is
 "abmelden und lokale Änderungen verwerfen". Then it removes the account's queue and draft,
 `accountId`, `token`, `username` and every legacy key, and leaves with a full page load, so the
-in-memory task snapshot (the Pinia stores) goes with the page. Another tab that sees its token
+in-memory task snapshot (the Pinia stores) goes with the page. A full page load alone does not
+guarantee that: the browser may keep the left page in its back/forward cache and restore it,
+snapshot and rendered tasks included, on *Back* without running any of its code. So the auth store
+listens for `pageshow` and, on a restore (`persisted`) of a page whose session was logged out or
+replaced, loads afresh (to the login when no token is left). Another tab that sees its token
 disappear goes to the login as well; one that sees the token replaced by another sign-in, or the
 account id change, reloads, rather than rebinding its outbox to the other account. The listener is
 registered in every tab, signed in at load or not. Both UIs use the same `logout()`.
+
+An `/auth/me` answer binds only the session it was asked for. `fetchMe` notes the token it sends;
+an answer that lands after the profile's token changed (another tab signed in, a logout, a 401) sets
+no role and binds nothing. `bindAccount` refuses, besides, to replace an account id already bound
+with another: a login binds the id its response names and a token never changes account. Without
+both, a slow page load's answer for an earlier account could rebind a newer account's session to the
+earlier account's namespace, and its queue would be shown and sent under the newer token.
 
 `window.confirm` rather than a designed dialog: it is the one confirmation the app already uses
 (`plan.leaveQ`), it blocks the `pagehide` flush until answered, and it renders nothing a node test

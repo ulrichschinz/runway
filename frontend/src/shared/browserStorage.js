@@ -212,12 +212,23 @@ const DERIVED = [LEGACY.role, LEGACY.fullName, LEGACY.email]
 /**
  * `/auth/me` named the account: bind the session to it and migrate what the previous version
  * left for this account (`SHIM-FE-001`); from `LEGACY_SWEEP_FROM` on, sweep the legacy keys.
- * `createdAt` (ISO) is when the account was created. @returns {boolean} false when the id cannot
- * namespace
+ * `createdAt` (ISO) is when the account was created.
+ *
+ * `token` is the session the answer was asked for: when the profile's token is another one by
+ * now (another tab signed in, a logout, a 401), the answer is about a session that is gone and
+ * binds nothing. Nor does an answer replace an account already bound — a login binds the id its
+ * response names, and a token never changes account — so a late answer of an earlier account
+ * can never hand that account's namespace to the current session (review of brief 0075, round 3).
+ *
+ * @returns {boolean} false when the id cannot namespace, the session is not the one asked for,
+ *   or another account is bound
  */
-export function bindAccount({ accountId, username, createdAt }, storage, now = Date.now()) {
+export function bindAccount({ accountId, username, createdAt, token }, storage, now = Date.now()) {
   const id = validId(accountId)
   if (!id) return false
+  if (token !== undefined && (!token || readToken(storage) !== token)) return false
+  const bound = accountOf(storage)
+  if (bound && bound !== id) return false
   writeKey(KEY.accountId, id, storage)
   if (username) writeKey(KEY.username, username, storage)
   for (const key of DERIVED) removeKey(key, storage)
@@ -344,6 +355,7 @@ export function purgeAccount(storage) {
  * @param {object} io
  * @param {(n: number) => boolean} io.confirm
  * @param {() => void} io.leave  a full page load, so the in-memory snapshot goes with the page
+ *   (a copy the browser keeps in its back/forward cache is reloaded on `pageshow`: `stores/auth.js`)
  * @param {Storage} [io.storage]
  * @returns {boolean} whether the session was ended
  */

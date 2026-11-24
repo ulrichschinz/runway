@@ -14,6 +14,8 @@ function account(username, accountId, role = 'user', createdAt = '2026-01-01T00:
 }
 /** Whether GET /auth/me answers (false: a network blip, a 5xx, an offline phone). */
 const meAnswers = { on: true }
+/** While `hold` is on, each GET /auth/me answer waits in `held` until a test releases it (a slow network). */
+const meHeld = { hold: false, held: [] }
 
 /** The synthetic profile. */
 let profile
@@ -35,7 +37,9 @@ vi.mock('../src/api/client.js', () => ({
       const session = server.tokens.get(profile.get('token'))
       if (!session) throw httpError(401)
       const { account_id, role, created_at } = session.account
-      return { data: { username: session.username, role, full_name: 'Alice Example', email: 'a@example.com', account_id, created_at } }
+      const answer = { data: { username: session.username, role, full_name: 'Alice Example', email: 'a@example.com', account_id, created_at } }
+      if (!meHeld.hold) return answer
+      return new Promise((resolve) => meHeld.held.push(() => resolve(answer)))
     }),
     // Offline: every write fails without an answer, so it stays in the queue.
     request: vi.fn(async () => {
@@ -110,6 +114,8 @@ beforeEach(() => {
   leave.mockClear()
   reload.mockClear()
   meAnswers.on = true
+  meHeld.hold = false
+  meHeld.held.length = 0
   asked.length = 0
   answer = true
   account('alice', '1')
@@ -433,5 +439,93 @@ describe('the other open tabs', () => {
     profile.set('accountId', '2')
     storageEvent('token')
     expect(reload.mock.calls.length + leave.mock.calls.length).toBeGreaterThan(0)
+  })
+})
+
+// Review of brief 0075 (round 3): an /auth/me answer that arrives after its session was replaced
+// or ended, and a page the browser restores from its back/forward cache after a logout.
+describe('an /auth/me answer for a session that is no longer the current one', () => {
+  it("a late answer for the previous account does not rebind another account's session to it", async () => {
+    await aliceWithUnsentWork()
+    expect(profile.get('outbox:1')).toContain('Kündigung')
+    // Tab 1 loads; its /auth/me for alice is still on the way.
+    meHeld.hold = true
+    await page()
+    expect(meHeld.held.length).toBe(1)
+    const lateAliceAnswer = meHeld.held.shift()
+    // Tab 2, same profile: bob signs in, his /auth/me answers at once.
+    meHeld.hold = false
+    const tab2 = await page()
+    await tab2.auth.login('bob', 'pw')
+    expect(profile.get('accountId')).toBe('2')
+    lateAliceAnswer()
+    await flush()
+    expect(profile.get('accountId')).toBe('2')
+    expect(profile.get('username')).toBe('bob')
+    // Bob's next page, before his own /auth/me answers, shows nothing of alice's.
+    meAnswers.on = false
+    const bobPage = await page()
+    const outbox = await bobPage.outbox()
+    await flush()
+    expect(outbox.ops.value).toEqual([])
+  })
+
+  it('a late answer after an explicit logout writes nothing of the account back into the profile', async () => {
+    const first = await page()
+    await first.auth.login('alice', 'pw')
+    meHeld.hold = true
+    const p = await page()
+    const late = meHeld.held.shift()
+    expect(p.auth.logout()).toBe(true)
+    late()
+    await flush()
+    expect(leftovers()).toEqual([])
+    expect(p.auth.username).toBe(null)
+    expect(p.auth.fullName).toBe('')
+  })
+
+  it('binding refuses to replace the account a login bound for the current token', async () => {
+    const { bindAccount } = await import('../src/shared/browserStorage.js')
+    const first = await page()
+    await first.auth.login('bob', 'pw')
+    expect(bindAccount({ accountId: '1', username: 'alice' })).toBe(false)
+    expect(profile.get('accountId')).toBe('2')
+    expect(profile.get('username')).toBe('bob')
+  })
+})
+
+describe('a page restored from the back/forward cache', () => {
+  const pageshow = (persisted) => {
+    for (const l of listeners) if (l.type === 'pageshow') l.fn({ persisted })
+  }
+
+  it('after an explicit logout does not show the signed-out account again', async () => {
+    const p = await aliceWithUnsentWork()
+    expect(p.auth.logout()).toBe(true)
+    leave.mockClear()
+    reload.mockClear()
+    // Back button: the browser restores the page as it was, without running its code again.
+    pageshow(true)
+    expect(reload.mock.calls.length + leave.mock.calls.length).toBeGreaterThan(0)
+  })
+
+  it('after another tab signed in as someone else reloads', async () => {
+    const first = await page()
+    await first.auth.login('alice', 'pw')
+    profile.set('token', 'tok-bob-x')
+    profile.set('accountId', '2')
+    pageshow(true)
+    expect(reload.mock.calls.length + leave.mock.calls.length).toBeGreaterThan(0)
+  })
+
+  it('of the same, still signed-in session stays as it is', async () => {
+    const first = await page()
+    await first.auth.login('alice', 'pw')
+    leave.mockClear()
+    reload.mockClear()
+    pageshow(true)
+    pageshow(false)
+    expect(reload).not.toHaveBeenCalled()
+    expect(leave).not.toHaveBeenCalled()
   })
 })
