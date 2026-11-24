@@ -122,7 +122,16 @@ password reaches verification on login, the normal-size body passes).
   2774 edges). One earlier run in this session reported foreign failures (another workstream's brief and decision record, an
   `edge-headers` step) that exist in none of this branch's files; sibling workflow worktrees live under
   `.claude/worktrees/` in this checkout. Re-run after `make fix`: green.
-- Closed by this change against its plan criterion: **SEC-006** — Argon2id for new and changed
+- `make verify`: first run on `14316e9` in a clean, bootstrapped detached worktree was **RED** — the secret
+  scan (`RULE-DEP-003`) read a quoted placeholder hash in a test's SQL as a committed
+  credential (the main checkout's `make check` had not seen it: the file was untracked there, and the scan
+  reads tracked files), and `RULE-GATE-002` failed with it. Fixed in `8732c06` by binding the value as a
+  parameter, no suppression. Re-run on `8732c06`: **GREEN** (218 s): unit 951 passed, frontend 764 passed,
+  57 fixture arms passed, 0 failed, 47 of 50 executable rules proven able to fail (unchanged — no rule
+  added). **`py-test-container` was skipped** (arm64, `RISK-TEST-001`): the 94 container results above are
+  from the host's Taskwarrior 3.5.0, not from the image, and have to be observed in CI on amd64.
+  **Branch protection was skipped** (cannot resolve the repository, `RISK-GOV-002`).
+ **SEC-006** — Argon2id for new and changed
   passwords (after the 7-day soak), byte limits and a body limit before any work, safe legacy handling
   (exact → rehash; ambiguous → never rehashed, flagged, refused after the window), and the 72-byte test.
   Honest limit: during the 7-day soak new passwords are still bcrypt, so the 72-byte alias exists for
