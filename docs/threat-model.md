@@ -399,7 +399,9 @@ that the app serves no third-party script and CORS is closed.
 
 An **explicit logout** removes every account-bound key and leaves only the UI preferences; with unsent
 changes it asks first (ADR 0047, decision D6). The namespace is the stable `account_id`, so a second
-account — including one registered later under the same username — never reads the first one's.
+account — including one registered later under the same username — never reads the first one's. The
+legacy migration holds that too: after a fresh login it adopts a legacy op only when it is not older
+than the account's `created_at` (a skewed client clock shifts that line — `SHIM-FE-001`).
 **Asserted only:** a session that ends without a logout (a 401, a closed browser) leaves the queue and
 draft in the profile, locked to the account but readable by anyone holding the profile —
 `RISK-FE-001`. The dialog and the cross-tab reload are not exercised in a browser — `RISK-TEST-004`.

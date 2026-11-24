@@ -3,7 +3,8 @@
 - **Date:** 2026-11-24
 - **Status:** Accepted
 - **Scope:** `frontend/src/shared/browserStorage.js` (new), every former `localStorage` caller in
-  `frontend/src/`, `backend/app/models.py` and `backend/app/routers/auth.py` (`account_id`),
+  `frontend/src/`, `backend/app/models.py` and `backend/app/routers/auth.py` (`account_id` on
+  `/auth/me` and `/auth/login`, `created_at` on `/auth/me`),
   `tools/surfaces.py` (S8 capture of `RULE-SURF-001`), `ops/surfaces/{openapi,spa}.json`,
   `rules/ledger.yaml` (`RULE-SURF-001`, `RISK-SEC-001`, `RISK-FE-001`, `RISK-TEST-004`),
   `rules/shims.yaml` (`SHIM-FE-001`), `tools/fixtures/negative.sh`
@@ -45,11 +46,15 @@ account-bound.
 The queue lives under `outbox:<account_id>`, the draft under `captureDraft:<account_id>`. The S8
 snapshot records them as `outbox:{account}` and `captureDraft:{account}`.
 
-A login drops the previous `accountId` before it stores the new token, and binds the new id only
-when `/auth/me` answers. Until then nothing is persisted: the outbox queues in memory, as it already
-does when storage refuses writes (brief 0062), and what it queued joins the account's stored queue
-once the id is bound. When the binding goes away (a logout), the memory copy goes with it and is
-never sent.
+A login drops the previous `accountId` and binds the id the login response names (`POST /auth/login`
+returns `account_id`, review round 2), so a failed `/auth/me` after a login leaves no unbound window.
+The one session with a token and no id is the previous deploy's, on its first load before `/auth/me`
+answers: its outbox keeps writing the legacy `outbox` key exactly as that deploy did, so a reload
+loses nothing, and the bind migrates it. Signed out the outbox queues in memory, as it does when
+storage refuses writes (brief 0062); this user's ops queued that way join the account's stored queue
+once an id is bound. When the binding goes away (a logout), the memory copy goes with it and is never
+sent. `readKey`/`writeKey`/`removeKey` refuse a name the inventory does not declare, so no module can
+keep data a logout would not know of.
 
 *Rejected:* the username as namespace (the re-registration alias above); a hash of the username
 (the same alias, hidden); M1's `storage_id` (not on `main` when this was decided, and an internal
@@ -57,12 +62,15 @@ storage identifier should not double as a client-visible one).
 
 ## Decision 3 — explicit logout purges; with an unsent queue it asks first (D6)
 
-`auth.logout()` counts the unsent ops (the account's queue plus anything left in the legacy one). If
+`auth.logout()` counts the unsent ops (the account's queue, anything left in the legacy one, and the
+ops only the page holds, which the outbox reports through `reportPending`; each op once). If
 there are any, `window.confirm` asks: *Abbrechen* changes nothing and stays signed in; *OK* is
 "abmelden und lokale Änderungen verwerfen". Then it removes the account's queue and draft,
 `accountId`, `token`, `username` and every legacy key, and leaves with a full page load, so the
 in-memory task snapshot (the Pinia stores) goes with the page. Another tab that sees its token
-disappear reloads to the login as well. Both UIs use the same `logout()`.
+disappear goes to the login as well; one that sees the token replaced by another sign-in, or the
+account id change, reloads, rather than rebinding its outbox to the other account. The listener is
+registered in every tab, signed in at load or not. Both UIs use the same `logout()`.
 
 `window.confirm` rather than a designed dialog: it is the one confirmation the app already uses
 (`plan.leaveQ`), it blocks the `pagehide` flush until answered, and it renders nothing a node test
@@ -96,15 +104,25 @@ the same commit.
 **Expand → migrate → switch** happen in this change; **contract** is deferred.
 
 - Expand: `account_id` on `/auth/me` (additive; the MCP tool `me_auth_me_get` returns it too).
-- Migrate: on the first `/auth/me` after the deploy, the signed-in user's ops in the legacy `outbox`
-  move into `outbox:<id>` (the legacy copy is removed only after the write succeeded), their legacy
-  draft into `captureDraft:<id>`; `role`, `fullName`, `email` are removed. Other users' legacy
+- Migrate: on the first `/auth/me` after the deploy, this account's ops in the legacy `outbox`
+  move into `outbox:<id>` (the legacy copy is removed only after the write succeeded), its legacy
+  draft into `captureDraft:<id>`; `role`, `fullName`, `email` are removed. *Which* legacy entries are
+  this account's (review round 2): the username alone does not say, since a deleted account's name
+  can be registered again. Entries a still-running pre-deploy session wrote are that session's and
+  move. A fresh login (`startSession`) instead drops the legacy draft — it carries no time to prove
+  anything by — and marks the legacy ops `prior`; the bind adopts a `prior` op only when its `at`
+  is not older than the account's `created_at` (from `/auth/me`) and removes it when it is, since it
+  then provably belongs to an earlier account of that name. Without a `created_at` a `prior` op
+  stays, unread. The line is drawn with the browser's clock against the server's; a skewed client
+  clock moves it by the skew — a residual of the shim's life, recorded under `SHIM-FE-001`. Other users' legacy
   entries stay until the next explicit logout removes every legacy key — the one-time cleanup. Such
   entries were unsent and could not be sent by anyone but their author; the logout question counts
   them, so discarding them is not silent.
 - Switch: the new code reads and writes only the namespaced keys.
-- Contract (`SHIM-FE-001`, expires 2027-03-01): delete the legacy declarations and the migration and
-  cleanup code; `ops/surfaces/spa.json` then loses the five legacy keys.
+- Contract (`SHIM-FE-001`, expires 2027-03-01): delete the migration, the `prior` marking and the
+  legacy queue fallback, but keep the sweep: from `LEGACY_SWEEP_FROM` (2027-03-01) every bind already
+  removes the five legacy keys, whoever left them, so a profile that was never explicitly logged out
+  is still cleaned once anyone signs in. The five names stay declared as swept keys.
 
 **Rollback.** The previous image reads the legacy keys only. Ops already migrated are invisible to it
 — stranded, not lost: rolling forward sends them. A rollback while users have unsent offline work
@@ -124,6 +142,12 @@ Red before the control, observed on 2026-11-24 against `5d85f6e`:
 
 Green after: all three, plus `useOutbox.test.js` (now on the namespaced key, with five namespace
 cases), and `make check`.
+
+Review round 2 (same day): ten red tests across `authStore.test.js` (7), `browserStorage.test.js`
+(1) and `test_auth.py::TestAccountId` (2) failed against `1fef64c` and pass after the fix — the
+re-login whose `/auth/me` fails, the offline first load, the memory-only queue at logout, the
+deleted-account migration, undeclared keys, the dated sweep, the two cross-tab cases, the login's and
+`/me`'s new fields. Brief 0075 §Review round 2 lists them.
 
 **Not covered.** No test renders the confirm dialog, clicks *Abmelden*, or observes `pagehide` and
 the cross-tab reload in a real browser: there is no browser runner here (`RISK-TEST-004`, which now

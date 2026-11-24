@@ -9,7 +9,7 @@
 | **Rule IDs touched** | `RULE-SURF-001` — its S8 capture now also reads the key declarations in `frontend/src/shared/browserStorage.js` (otherwise the namespaced keys would be invisible to the snapshot). Check, ledger statement, negative fixture and docs change in the same commit (META-RULE). No rule added or removed. |
 | **Risks touched** | `RISK-SEC-001` — resolved when its closing criterion holds (role from a server response on every mount, never from storage). `RISK-TEST-004` — names the logout-confirm path as the remaining unrendered gap. New `RISK-FE-001` — a session that ends without an explicit logout (401, expiry, closed browser) leaves that account's namespace in the profile, locked rather than wiped (decision D6). New `SHIM-FE-001` — the legacy-key migration and cleanup code, with a removal date. |
 | **Entry points** | Every `localStorage` read/write in `frontend/src` (inventory below); `auth.login`, `auth.fetchMe`, `auth.logout`; the axios 401 interceptor; the outbox load/save/flush; the capture draft; `GET /auth/me`. |
-| **Affected public surfaces** | **S1 REST / S2 MCP:** `GET /auth/me` (and therefore the MCP tool `me_auth_me_get`) gains an optional `account_id` string — additive; old clients ignore it, `POST /auth/register`'s `UserInfo` leaves it `null`. **S8 SPA:** new keys `accountId`, `outbox:{account}`, `captureDraft:{account}`; the legacy keys `outbox`, `captureDraft`, `role`, `fullName`, `email` stay declared (read once for migration, then removed) until `SHIM-FE-001`'s contract step. No route changes. No env var. No DB schema change (`users.id` already exists and is `AUTOINCREMENT`, so never reused). |
+| **Affected public surfaces** | **S1 REST / S2 MCP:** `GET /auth/me` (and therefore the MCP tool `me_auth_me_get`) gains an optional `account_id` string, and (review round 2) an optional `created_at` (UTC ISO 8601, the account's creation time, the legacy migration's proof); `POST /auth/login`'s `Token` gains `account_id` too, and `POST /auth/register`'s `UserInfo` returns `account_id` (from the inserted row) with `created_at` `null`. All additive: old clients ignore the fields. **S8 SPA:** new keys `accountId`, `outbox:{account}`, `captureDraft:{account}`; the legacy keys `outbox`, `captureDraft`, `role`, `fullName`, `email` stay declared (read once for migration, then removed) until `SHIM-FE-001`'s contract step. No route changes. No env var. No DB schema change (`users.id` already exists and is `AUTOINCREMENT`, so never reused). |
 | **Known dependents** | From `./run impact` (index current at `5d85f6ee539e`): `stores/auth.js` → AppShell, LoginPage, useAccount, NewUiHost, LoginView, SettingsView (+ every old view transitively); `useOutbox.js` → `tasks/stores/gtd.js` and every new-UI page; `captureDraft.js` → CaptureLine → ListFrame and the list pages; `api/client.js` → 13 direct dependents; `models.py` → every router; `routers/auth.py` → `main.py`, tool `me`. No import-derived test protection on the stores, views or the host (`BLIND-TEST-001`). |
 | **Uncertain / dynamic areas** | `BLIND-FE-001`/`BLIND-FE-002` (template-only and dynamic imports). The storage event between tabs, `pagehide` ordering around `window.location.assign`, and `window.confirm` are browser behaviour no node test executes (`RISK-TEST-004`). An old tab still running the previous bundle after the deploy keeps writing legacy keys until it reloads. |
 | **Analogous implementations** | Brief 0062 (storage that refuses writes: the memory-only outbox); brief 0052 (capture draft bound to the user); `shared/sessionEnd.js` (a pure rule the client only calls); `tests/threeIsolation.test.js` (a source scan that holds an isolation property). |
@@ -56,31 +56,47 @@ load, so it goes with the page.
    class and is the only file that touches `localStorage` (a source-scan test holds that).
 2. **Namespace by a stable id.** `GET /auth/me` returns `account_id` = `users.id` as a string
    (`AUTOINCREMENT`: never reused, survives a restore). Outbox and draft live under
-   `…:{account_id}`; with no bound id nothing is persisted (the outbox queues in memory, as it
-   does when storage refuses writes). `login` drops the previous `accountId` before the new token
-   is used, so nothing can read the previous account's namespace in between.
-3. **Explicit logout (D6).** Count the unsent ops (own namespace plus any legacy queue). Non-zero
+   `…:{account_id}`. `login` drops the previous `accountId` and binds the one the login response
+   names in the same step, so there is no unbound window after a login, even if `/auth/me` then
+   fails. Only the previous deploy's session, on its first load before `/auth/me` answers, has a
+   token and no id: its outbox keeps writing the legacy `outbox` key exactly as that deploy did
+   (`queueKey`), so a reload loses nothing, and the next bind migrates it. Signed out, the outbox
+   queues in memory. Only declared keys can be read or written at all (`isDeclared`).
+3. **Explicit logout (D6).** Count the unsent ops (own namespace, any legacy queue, and the ops
+   only the page holds — a refused write — which the outbox reports through `reportPending`;
+   each op once). Non-zero
    → `window.confirm`: *Abbrechen* keeps everything, *OK* = "abmelden und lokale Änderungen
    verwerfen". Then remove `token`, `username`, `accountId`, the account's `outbox:`/`captureDraft:`
-   keys and every legacy key, and leave with a full page load. Other tabs see the token go and
-   reload too.
+   keys and every legacy key, and leave with a full page load. Other tabs see the token go — or
+   change to another sign-in, or the account id change — and leave or reload too; the listener is
+   registered whether or not the tab started signed in.
 4. **401 / offline locks.** The interceptor removes only the token. The namespace stays; a login of
    the same account (same `account_id`) sees it again, another account sees its own.
 5. **Role from the server.** `auth.role` starts as `user` in memory and is set from `/auth/me` on
    every store creation; nothing reads `localStorage['role']`.
 6. **One-time legacy cleanup.** On binding an account: legacy `role`/`fullName`/`email` are removed,
-   the signed-in user's legacy outbox ops and draft move into the namespace. On explicit logout:
-   every legacy key is removed.
+   and this account's legacy outbox ops and draft move into the namespace. A username alone does
+   not prove "this account": a fresh login therefore drops the legacy draft (no timestamp to prove
+   anything by) and marks the legacy ops `prior`; a `prior` op is adopted only when its `at` is not
+   older than the account's `created_at`, and removed when it is (an earlier account's of the same
+   name). Ops a still-running pre-deploy session left are its own and move as they are. On explicit
+   logout: every legacy key is removed. From **2027-03-01** (`LEGACY_SWEEP_FROM`, the shim's
+   expiry) every bind sweeps all legacy keys, whoever left them.
 
 ## Migration steps
 
 - **Expand** (this change): `account_id` on `/auth/me`; namespaced keys declared and written.
-- **Migrate** (this change, at runtime): the legacy queue/draft of the signed-in user moves on the
-  first `/auth/me` after the deploy; nothing unsent is dropped by the upgrade.
+- **Migrate** (this change, at runtime): the legacy queue/draft of the signed-in account moves on
+  the first `/auth/me` after the deploy. Until then the session keeps writing the legacy queue, so
+  nothing unsent is dropped by the upgrade. Two deliberate exceptions: after a fresh login a
+  legacy draft is discarded, and a legacy op older than the account is removed (both cannot be
+  shown to belong to the signing-in account).
 - **Switch** (this change): new code reads and writes only the namespaced keys.
-- **Contract** (deferred, `SHIM-FE-001`, expires **2027-03-01**): delete the legacy migration and
-  cleanup code and the legacy declarations from `browserStorage.js`; the S8 snapshot then loses
-  `outbox`, `captureDraft`, `role`, `fullName`, `email`. Trigger: the expiry, or earlier when the
+- **Contract** (deferred, `SHIM-FE-001`, expires **2027-03-01**): delete the legacy migration,
+  the `prior` marking and the legacy `queueKey` fallback from `browserStorage.js`, but **keep** an
+  unconditional sweep of the five legacy key names on every bind (already date-driven from
+  2027-03-01), so a profile that never logged out explicitly is still cleaned; the S8 snapshot then
+  keeps the five names only as swept keys. Trigger: the expiry, or earlier when the
   maintainer judges that every browser in use has loaded a post-switch bundle.
 
 **Rollback.** The previous image ignores `account_id` and the namespaced keys. Ops migrated into
@@ -107,8 +123,35 @@ rollback across an unsent queue should therefore be avoided or announced; nothin
 - Red tests written before the control and observed failing — see ADR 0047 §Evidence. The source
   scan in `browserStorage.test.js` was additionally watched going red on a constructed violation
   (a `localStorage.getItem('outbox')` appended to `shared/theme.js`, then reverted).
-- `make check` GREEN on the change; `make verify` — see the commit / PR for its outcome. The
-  container tier cannot run on arm64 (`RISK-TEST-001`); CI runs it.
+- Round 1: `make check` GREEN on the change; `make verify` was not recorded here (corrected in
+  round 2, below).
+
+## Review round 2 (2026-11-24)
+
+Reviewers found the unbound window and the username-matched migration weaker than this brief
+claimed. Verified and fixed, each with a red test observed failing before the fix:
+
+| Finding | Fix | Red test |
+|---|---|---|
+| A re-login whose `/auth/me` fails leaves no binding; logout then neither asks nor purges `outbox:<id>`/`captureDraft:<id>` | `POST /auth/login` returns `account_id`; `startSession` binds it | `authStore.test.js` "a re-login whose /auth/me fails…"; `test_auth.py::TestAccountId::test_login_names_the_account_too` |
+| Unbound (first post-deploy load offline): captures memory only, lost on reload; logout silent | legacy `queueKey` fallback while a token exists without an id | "the first load after the deploy while offline…"; `useOutbox.test.js` "a session with no account bound yet…" |
+| Logout ignores ops only the page holds (storage refused) | `reportPending` from `useOutbox`; `pendingChanges` counts the union of ids | "an unsent change that only the page holds…"; `browserStorage.test.js` "counts the live queue…" |
+| Legacy migration by username hands a deleted account's text to a new account of the same name | `prior` marking at login, `created_at` proof, legacy draft dropped at login | "a deleted account's unsent text is never adopted…"; `test_me_names_when_the_account_was_created` |
+| Raw accessors accept any key name | `isDeclared` guard on `readKey`/`writeKey`/`removeKey` | `browserStorage.test.js` "refuses a key the inventory does not declare…" |
+| The contract step would remove the only legacy cleanup | date-driven sweep from 2027-03-01; shim removal text keeps the sweep | "after the shim expires, binding sweeps every legacy key…" |
+| Cross-tab follow only for tabs that started signed in, and not on another sign-in | listener always registered; reloads on a changed token or account id | "the other open tabs" (2 tests) |
+| This brief misstated register's `account_id` and deferred the `make verify` result | corrected above and below | — |
+
+The regression guard "the same account, locked before the deploy, gets its unsent op back" passed
+before and after (the legitimate re-login keeps its work).
+
+Residual: the `created_at` line is drawn with the browser's clock against the server's; a skewed
+client clock moves it by the skew (ADR 0047).
+
+Gate, round 2 (2026-11-24, local, arm64): `make check` GREEN (17 s of 180 s). `make verify` GREEN
+(145 s of 600 s), **with the container tier `py-test-container` skipped** — "the docker daemon is not
+running" (`RISK-TEST-001`); it ran no container test, so CI has to. 57 negative-fixture arms
+passed.
 
 ## Deferred, with trigger
 

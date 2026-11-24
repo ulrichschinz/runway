@@ -56,12 +56,15 @@ that touches `localStorage` ([ADR 0047](adr/0047-local-browser-data-on-logout.md
 | outbox (task text) | `outbox:<accountId>` | yes | yes, after asking when it is not empty |
 | draft (task text) | `captureDraft:<accountId>` | yes | yes |
 | UI preference | `theme`, `ui`, `inboxMode` | no | no |
-| legacy (`SHIM-FE-001`) | `outbox`, `captureDraft`, `role`, `fullName`, `email` | — | yes; the signed-in user's entries are migrated first |
+| legacy (`SHIM-FE-001`) | `outbox`, `captureDraft`, `role`, `fullName`, `email` | — | yes; this account's entries are migrated first (after a fresh login only ops not older than the account's `created_at`; the legacy draft is dropped); swept on every bind from 2027-03-01 |
 
-- **Namespace by a stable id.** `accountId` is `account_id` from `GET /auth/me` — `users.id`, never
-  handed out twice — not the username, which a deleted account frees for someone else.
+- **Namespace by a stable id.** `accountId` is `account_id` from `POST /auth/login` and
+  `GET /auth/me` — `users.id`, never handed out twice — not the username, which a deleted account
+  frees for someone else. Only declared keys can be read or written (`isDeclared`).
 - **Explicit logout** asks *Abbrechen* / *abmelden und verwerfen* when unsent changes exist, then
-  removes the account's keys and leaves with a full page load; other tabs follow.
+  removes the account's keys and leaves with a full page load. The count includes ops only the page
+  holds (storage refused them). Other tabs follow: any tab that sees the token go, change to another
+  sign-in, or the account id change, leaves or reloads.
 - **A 401 locks.** Only the token goes; the account's queue waits for the same account. What that
   leaves in a profile is `RISK-FE-001`.
 - **The role is the server's.** `auth.role` comes from `GET /auth/me` on every page load and is

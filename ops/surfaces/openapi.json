@@ -1115,6 +1115,17 @@
             "title": "Access Token",
             "type": "string"
           },
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
           "token_type": {
             "default": "bearer",
             "title": "Token Type",
@@ -1157,6 +1168,17 @@
               }
             ],
             "title": "Account Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "email": {
             "default": "",

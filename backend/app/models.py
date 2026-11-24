@@ -161,6 +161,9 @@ class UserLogin(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"  # noqa: S105  # OAuth token type name, not a credential
+    # The signed-in account's stable id, as in `UserInfo.account_id`: the SPA binds its browser
+    # namespace at login, so a failed `GET /auth/me` leaves no unbound window (brief 0075).
+    account_id: str | None = None
 
 
 class UserInfo(BaseModel):
@@ -172,6 +175,10 @@ class UserInfo(BaseModel):
     # opaque string. The SPA namespaces the account's browser data by it rather than by the
     # username, which a deleted account frees for someone else (brief 0075, ADR 0047).
     account_id: str | None = None
+    # When the account was created (UTC, ISO 8601 with `Z`). An unsent op the browser kept from
+    # before that moment belongs to an earlier account of the same username, never to this one
+    # (the legacy migration's proof, ADR 0047). Only `GET /auth/me` fills it.
+    created_at: str | None = None
 
 
 class UserProfileUpdate(BaseModel):

@@ -94,7 +94,7 @@ async def login(request: Request, body: UserLogin, db: Connection = Depends(get_
         )
 
     async with db.execute(
-        "SELECT hashed_password FROM users WHERE username = ?", (body.username,)
+        "SELECT id, hashed_password FROM users WHERE username = ?", (body.username,)
     ) as cur:
         row = await cur.fetchone()
     if not row or not verify_password(body.password, row["hashed_password"]):
@@ -114,13 +114,20 @@ async def login(request: Request, body: UserLogin, db: Connection = Depends(get_
     rate_limit.clear(body.username)
     logger.info("login succeeded", extra={"username": body.username})
     audit.record(audit.LOGIN_SUCCEEDED, outcome=audit.SUCCESS, actor=body.username, route=route)
-    return Token(access_token=create_access_token(body.username))
+    return Token(access_token=create_access_token(body.username), account_id=str(row["id"]))
+
+
+def _utc_iso(stamp: str | None) -> str | None:
+    """SQLite's `CURRENT_TIMESTAMP` (`YYYY-MM-DD HH:MM:SS`, UTC) as ISO 8601 with `Z`."""
+    if not stamp:
+        return None
+    return f"{str(stamp).replace(' ', 'T')}Z"
 
 
 @router.get("/me", response_model=UserInfo, summary="Get current user profile")
 async def me(username: str = Depends(get_current_user), db: Connection = Depends(get_db)):
     async with db.execute(
-        "SELECT id, role, full_name, email FROM users WHERE username=?", (username,)
+        "SELECT id, role, full_name, email, created_at FROM users WHERE username=?", (username,)
     ) as cur:
         row = await cur.fetchone()
     # get_current_user already refuses a token whose account is gone; this is the narrow race
@@ -134,6 +141,7 @@ async def me(username: str = Depends(get_current_user), db: Connection = Depends
         full_name=row["full_name"] or "",
         email=row["email"] or "",
         account_id=str(row["id"]),
+        created_at=_utc_iso(row["created_at"]),
     )
 
 

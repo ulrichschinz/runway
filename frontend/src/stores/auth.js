@@ -12,7 +12,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import client from '../api/client.js'
 import {
-  ACCOUNT_BOUND, KEY, bindAccount, readToken, readUsername, signOut, startSession,
+  ACCOUNT_BOUND, KEY, accountOf, bindAccount, readToken, readUsername, signOut, startSession,
 } from '../shared/browserStorage.js'
 import { t } from '../shared/i18n.js'
 
@@ -23,6 +23,8 @@ export const useAuthStore = defineStore('auth', () => {
   const role = ref('user')
   const fullName = ref('')
   const email = ref('')
+  /** The account this page is bound to, so another tab's change of it is seen. */
+  let boundId = token.value ? accountOf() : null
 
   async function fetchMe() {
     try {
@@ -31,7 +33,9 @@ export const useAuthStore = defineStore('auth', () => {
       fullName.value = data.full_name ?? ''
       email.value = data.email ?? ''
       if (data.username) username.value = data.username
-      if (bindAccount({ accountId: data.account_id, username: data.username }) && typeof window !== 'undefined') {
+      const bound = bindAccount({ accountId: data.account_id, username: data.username, createdAt: data.created_at })
+      if (bound) boundId = accountOf()
+      if (bound && typeof window !== 'undefined') {
         try {
           window.dispatchEvent(new Event(ACCOUNT_BOUND))
         } catch {
@@ -48,7 +52,9 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = data.access_token
     username.value = user
     role.value = 'user'
-    startSession({ token: data.access_token, username: user })
+    // The login response names the account, so the namespace is bound even if /auth/me fails now.
+    startSession({ token: data.access_token, username: user, accountId: data.account_id })
+    boundId = accountOf()
     await fetchMe()
   }
 
@@ -77,12 +83,22 @@ export const useAuthStore = defineStore('auth', () => {
   // Refresh the profile on every page load if already authenticated: the role is the server's.
   if (token.value) fetchMe()
 
-  // Another tab ended the session (a logout, or a 401): this tab's page and its in-memory snapshot
-  // go too, rather than going on showing the account's tasks.
-  if (typeof window !== 'undefined' && token.value) {
+  if (typeof window !== 'undefined') {
+    // Another tab ended the session (a logout, a 401) or replaced it (another sign-in): this tab's
+    // page and its in-memory snapshot go too, rather than going on showing the account's tasks or
+    // rebinding its outbox to the new account. Registered whether or not this page started signed
+    // in, since the old UI signs in without a full page load.
     window.addEventListener('storage', (event) => {
-      if ((event.key !== KEY.token && event.key !== null) || readToken()) return
-      window.location.assign('/login')
+      if (event.key !== KEY.token && event.key !== KEY.accountId && event.key !== null) return
+      const now = readToken()
+      const id = accountOf()
+      if (now === token.value && (!boundId || !id || id === boundId)) return
+      if (!now) window.location.assign('/login')
+      else window.location.reload()
+    })
+    // A page that came up offline has the role `user` and maybe no binding: ask again once online.
+    window.addEventListener('online', () => {
+      if (token.value) fetchMe()
     })
   }
 

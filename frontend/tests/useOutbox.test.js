@@ -153,22 +153,39 @@ describe('useOutbox when storage fills up after it took writes (review of brief 
 describe('useOutbox and the account namespace (brief 0075, ADR 0047)', () => {
   const queueKeys = () => [...browser.store.keys()].filter((k) => k.startsWith('outbox'))
 
-  it('with no account bound writes nothing to storage, and still sends', async () => {
+  it('a session with no account bound yet keeps its queue where the previous deploy did, and still sends', async () => {
+    // Review of brief 0075: memory only, a reload in that window lost the capture.
     const outbox = await start({ refuseWrites: false, store: new Map([['token', 't'], ['username', 'uli']]) })
+    outbox.hold('done', { uuid: 'u-0', label: 'Belege' })
+    expect(queueKeys()).toEqual(['outbox'])
     outbox.add('capture', { description: 'Milch kaufen', label: 'Milch kaufen' })
     await flush()
     expect(sent).toEqual(['POST /inbox'])
+  })
+
+  it('signed out, nothing is written to storage', async () => {
+    const outbox = await start({ refuseWrites: false, store: new Map([['username', 'uli']]) })
+    outbox.hold('done', { uuid: 'u-1', label: 'Belege' })
     expect(queueKeys()).toEqual([])
   })
 
   it('what was queued before the account was bound joins its queue', async () => {
     const outbox = await start({ refuseWrites: false, store: new Map([['token', 't'], ['username', 'uli']]) })
     outbox.hold('done', { uuid: 'u-1', label: 'Belege' })
-    expect(queueKeys()).toEqual([])
     browser.store.set('accountId', '1')
     outbox.hold('done', { uuid: 'u-2', label: 'Angebot' })
-    expect(queueKeys()).toEqual([QUEUE])
     expect(JSON.parse(browser.store.get(QUEUE)).ops.map((op) => op.uuid)).toEqual(['u-1', 'u-2'])
+  })
+
+  it("never shows or sends an op a fresh login marked as an earlier account's", async () => {
+    const prior = JSON.stringify({ v: 1, ops: [{ id: 'p', kind: 'capture', method: 'POST', path: '/inbox', body: { description: 'alt' }, state: 'queued', user: 'uli', at: 1, prior: true }] })
+    const outbox = await start({ refuseWrites: false, store: new Map([['token', 't'], ['username', 'uli'], ['outbox', prior]]) })
+    outbox.add('capture', { description: 'neu', label: 'neu' })
+    await flush()
+    expect(outbox.ops.value.map((op) => op.body?.description)).not.toContain('alt')
+    expect(sent).toEqual(['POST /inbox'])
+    // Kept, unread, for the bind to judge.
+    expect(browser.store.get('outbox')).toContain('"prior":true')
   })
 
   it("never reads another account's queue, nor the unnamespaced legacy one", async () => {

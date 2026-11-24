@@ -73,6 +73,22 @@ describe('access', () => {
   })
 })
 
+describe('only declared keys', () => {
+  it('refuses a key the inventory does not declare, so nothing can hide task text outside it', () => {
+    const s = memory()
+    expect(writeKey('notes', 'Kündigung', s)).toBe(false)
+    expect(s.map.size).toBe(0)
+    expect(readKey('notes', memory([['notes', 'x']]))).toBe(undefined)
+    expect(removeKey('notes', s)).toBe(false)
+    // A template matches only with a well-formed account id behind it.
+    expect(writeKey('outbox:../x', '[]', s)).toBe(false)
+    expect(writeKey('outbox:', '[]', s)).toBe(false)
+    expect(writeKey('outbox:{account}', '[]', s)).toBe(false)
+    expect(writeKey('outbox:42', '[]', s)).toBe(true)
+    expect(writeKey('captureDraft:42', '{}', s)).toBe(true)
+  })
+})
+
 describe('the account namespace', () => {
   it('needs a bound, well-formed account id', () => {
     expect(forAccount(KEY.outbox, '42')).toBe('outbox:42')
@@ -184,6 +200,23 @@ describe('the outbox decision on logout', () => {
     expect(signOut({ storage: s, confirm: () => { throw new Error('asked') }, leave: () => left.push(1) })).toBe(true)
     expect(Object.fromEntries(s.map)).toEqual({ theme: 'dark' })
     expect(left).toEqual([1])
+  })
+})
+
+describe('what only the page holds', () => {
+  it('counts the live queue the outbox reports, each op once', async () => {
+    const { reportPending } = await import('../src/shared/browserStorage.js')
+    const s = memory([['token', 't'], ['accountId', '1'], ['outbox:1', queue(op('a', 'uli'))]])
+    reportPending(() => ['a', 'm'])
+    try {
+      expect(pendingChanges(s)).toBe(2)
+      reportPending(() => {
+        throw new Error('gone')
+      })
+      expect(pendingChanges(s)).toBe(1)
+    } finally {
+      reportPending(() => [])
+    }
   })
 })
 

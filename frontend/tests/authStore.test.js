@@ -9,9 +9,11 @@ import 'vue'
 
 /** The fake server: who holds which token, and each username's current account. */
 const server = { accounts: new Map(), tokens: new Map(), seq: 0 }
-function account(username, accountId, role = 'user') {
-  server.accounts.set(username, { account_id: accountId, role })
+function account(username, accountId, role = 'user', createdAt = '2026-01-01T00:00:00Z') {
+  server.accounts.set(username, { account_id: accountId, role, created_at: createdAt })
 }
+/** Whether GET /auth/me answers (false: a network blip, a 5xx, an offline phone). */
+const meAnswers = { on: true }
 
 /** The synthetic profile. */
 let profile
@@ -22,16 +24,18 @@ vi.mock('../src/api/client.js', () => ({
     post: vi.fn(async (url, body) => {
       if (url !== '/auth/login') throw httpError(404)
       const token = `tok-${body.username}-${++server.seq}`
-      server.tokens.set(token, { username: body.username, account: server.accounts.get(body.username) })
-      return { data: { access_token: token, token_type: 'bearer' } }
+      const acct = server.accounts.get(body.username)
+      server.tokens.set(token, { username: body.username, account: acct })
+      return { data: { access_token: token, token_type: 'bearer', account_id: acct.account_id } }
     }),
     get: vi.fn(async (url) => {
       if (url !== '/auth/me') return { data: [] }
+      if (!meAnswers.on) throw new Error('Network Error')
       // The real interceptor sends the stored token.
       const session = server.tokens.get(profile.get('token'))
       if (!session) throw httpError(401)
-      const { account_id, role } = session.account
-      return { data: { username: session.username, role, full_name: 'Alice Example', email: 'a@example.com', account_id } }
+      const { account_id, role, created_at } = session.account
+      return { data: { username: session.username, role, full_name: 'Alice Example', email: 'a@example.com', account_id, created_at } }
     }),
     // Offline: every write fails without an answer, so it stays in the queue.
     request: vi.fn(async () => {
@@ -43,14 +47,21 @@ vi.mock('../src/api/client.js', () => ({
 vi.mock('../src/api/keepalive.js', () => ({ sendKeepalive: vi.fn(async () => ({ ok: false, status: 401, json: async () => null })) }))
 
 const leave = vi.fn()
+const reload = vi.fn()
+/** What the page registered on `window`, so a test can fire another tab's `storage` event. */
+let listeners
 let answer = true
 const asked = []
 
-function fakeBrowser(entries = []) {
+function fakeBrowser(entries = [], { refuse = () => false } = {}) {
   profile = new Map(entries)
+  listeners = []
   vi.stubGlobal('localStorage', {
     getItem: (k) => (profile.has(k) ? profile.get(k) : null),
-    setItem: (k, v) => profile.set(k, String(v)),
+    setItem: (k, v) => {
+      if (refuse(k)) throw new DOMException('full', 'QuotaExceededError')
+      profile.set(k, String(v))
+    },
     removeItem: (k) => profile.delete(k),
     key: (i) => [...profile.keys()][i] ?? null,
     get length() {
@@ -58,14 +69,14 @@ function fakeBrowser(entries = []) {
     },
   })
   vi.stubGlobal('window', {
-    addEventListener: () => {},
+    addEventListener: (type, fn) => listeners.push({ type, fn }),
     removeEventListener: () => {},
     dispatchEvent: () => true,
     confirm: (text) => {
       asked.push(text)
       return answer
     },
-    location: { assign: leave, pathname: '/inbox', search: '', hash: '', href: '/inbox' },
+    location: { assign: leave, reload, pathname: '/inbox', search: '', hash: '', href: '/inbox' },
   })
   vi.stubGlobal('document', { addEventListener: () => {}, visibilityState: 'visible' })
 }
@@ -97,6 +108,8 @@ beforeEach(() => {
   server.accounts.clear()
   server.tokens.clear()
   leave.mockClear()
+  reload.mockClear()
+  meAnswers.on = true
   asked.length = 0
   answer = true
   account('alice', '1')
@@ -276,5 +289,149 @@ describe('the profile the previous deploy left behind', () => {
     expect(asked.length).toBe(1)
     expect(asked[0]).toContain('2')
     expect(Object.fromEntries(profile)).toEqual({ theme: 'dark' })
+  })
+})
+
+// Review of brief 0075 (round 2): the window in which no account id is bound, the in-memory
+// queue, the username-matched migration, and the other tabs.
+describe('an account id that /auth/me never delivered', () => {
+  it('a re-login whose /auth/me fails still binds the account, and the logout asks and purges', async () => {
+    await aliceWithUnsentWork()
+    profile.delete('token') // a 401 locked the session
+    const login = await page()
+    meAnswers.on = false
+    await login.auth.login('alice', 'pw')
+    await flush()
+    answer = true
+    expect(login.auth.logout()).toBe(true)
+    expect(asked.length).toBe(1)
+    expect(leftovers()).toEqual([])
+    expect([...profile.values()].join('\n')).not.toMatch(/Kündigung|Anwalt/)
+  })
+
+  it('the first load after the deploy while offline keeps a new capture in the profile, and the logout asks', async () => {
+    // The previous deploy's session: a token, a username, no account id; /auth/me unreachable.
+    fakeBrowser([['token', 'legacy-token'], ['username', 'alice']])
+    server.tokens.set('legacy-token', { username: 'alice', account: server.accounts.get('alice') })
+    meAnswers.on = false
+    const p = await page()
+    const outbox = await p.outbox()
+    outbox.add('capture', { description: 'Geheime Notiz', label: 'Geheime Notiz' })
+    await flush()
+    // A reload or a closed tab must not lose it.
+    expect([...profile.values()].join('\n')).toContain('Geheime Notiz')
+    answer = false
+    expect(p.auth.logout()).toBe(false)
+    expect(asked.length).toBe(1)
+    // Once /auth/me answers, the capture is in Alice's namespace.
+    meAnswers.on = true
+    const later = await page()
+    const again = await later.outbox()
+    await flush()
+    expect(again.ops.value.map((op) => op.label)).toEqual(['Geheime Notiz'])
+    expect(profile.get('outbox:1')).toContain('Geheime Notiz')
+  })
+
+  it('an unsent change that only the page holds (storage refuses) is asked about, and Abbrechen keeps the session', async () => {
+    const first = await page()
+    await first.auth.login('alice', 'pw')
+    // The quota is full for the queue: the outbox keeps it in memory only.
+    const refusingQueue = new Map(profile)
+    fakeBrowser([...refusingQueue], { refuse: (k) => k.startsWith('outbox') })
+    const p = await page()
+    const outbox = await p.outbox()
+    outbox.add('capture', { description: 'Nur im Speicher', label: 'Nur im Speicher' })
+    await flush()
+    expect(outbox.ops.value.length).toBe(1)
+    answer = false
+    expect(p.auth.logout()).toBe(false)
+    expect(asked.length).toBe(1)
+    expect(asked[0]).toContain('1')
+    expect(profile.get('token')).toBeTruthy()
+    expect(leave).not.toHaveBeenCalled()
+  })
+})
+
+describe('the legacy profile after a fresh login', () => {
+  const legacyOp = (id, text, at) => ({ id, kind: 'capture', method: 'POST', path: '/inbox', body: { description: text }, state: 'queued', user: 'alice', at, label: text })
+
+  it("a deleted account's unsent text is never adopted by a new account under the same username", async () => {
+    fakeBrowser([
+      ['username', 'alice'],
+      ['outbox', JSON.stringify({ v: 1, ops: [legacyOp('a1', 'Alte Alice Geheimnis', Date.parse('2026-03-01T00:00:00Z'))] })],
+      ['captureDraft', JSON.stringify({ user: 'alice', tab: 'old', text: 'alter Entwurf der alten Alice' })],
+    ])
+    // The old alice is gone; a new "alice" registered on 2026-06-01 with a new id.
+    account('alice', '99', 'user', '2026-06-01T00:00:00Z')
+    const login = await page()
+    await login.auth.login('alice', 'pw')
+    const p = await page()
+    const outbox = await p.outbox()
+    await flush()
+    expect(outbox.ops.value).toEqual([])
+    expect(p.draft.readDraft()).toBe('')
+    const { default: client } = await import('../src/api/client.js')
+    expect(JSON.stringify(client.request.mock.calls)).not.toContain('Alte Alice Geheimnis')
+    // Provably another account's: removed, not kept for anyone.
+    expect([...profile.values()].join('\n')).not.toMatch(/Alte Alice|alter Entwurf/)
+  })
+
+  it("the same account, locked before the deploy, gets its unsent op back after signing in again", async () => {
+    fakeBrowser([
+      ['username', 'alice'],
+      ['outbox', JSON.stringify({ v: 1, ops: [legacyOp('a2', 'Vor dem Deploy erfasst', Date.parse('2026-11-01T00:00:00Z'))] })],
+    ])
+    const login = await page()
+    await login.auth.login('alice', 'pw')
+    const p = await page()
+    const outbox = await p.outbox()
+    await flush()
+    expect(outbox.ops.value.map((op) => op.label)).toEqual(['Vor dem Deploy erfasst'])
+  })
+
+  it('after the shim expires, binding sweeps every legacy key, other users’ included', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2027-03-02T00:00:00Z'))
+    try {
+      fakeBrowser([
+        ['token', 'legacy-token'],
+        ['username', 'alice'],
+        ['outbox', JSON.stringify({ v: 1, ops: [{ ...legacyOp('b9', 'Bobs Rest', 5), user: 'bob' }] })],
+        ['captureDraft', JSON.stringify({ user: 'bob', tab: 'old', text: 'Bobs Entwurf' })],
+        ['role', 'admin'],
+      ])
+      server.tokens.set('legacy-token', { username: 'alice', account: server.accounts.get('alice') })
+      await page()
+      await flush()
+      for (const k of ['outbox', 'captureDraft', 'role', 'fullName', 'email']) expect(profile.has(k)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('the other open tabs', () => {
+  const storageEvent = (key) => {
+    for (const l of listeners) if (l.type === 'storage') l.fn({ key })
+  }
+
+  it('a tab signed in without a full load still follows a logout in another tab', async () => {
+    const p = await page() // the login page: no token yet
+    await p.auth.login('alice', 'pw') // the old UI: router.push, no reload
+    profile.delete('token') // another tab logged out
+    storageEvent('token')
+    expect(leave).toHaveBeenCalledWith('/login')
+  })
+
+  it("another tab signing in as another account reloads this tab instead of rebinding it", async () => {
+    const first = await page()
+    await first.auth.login('alice', 'pw')
+    leave.mockClear()
+    reload.mockClear()
+    // Another tab: bob signs in on the same profile.
+    profile.set('token', 'tok-bob-x')
+    profile.set('accountId', '2')
+    storageEvent('token')
+    expect(reload.mock.calls.length + leave.mock.calls.length).toBeGreaterThan(0)
   })
 })

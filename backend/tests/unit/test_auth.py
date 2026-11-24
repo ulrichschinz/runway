@@ -30,6 +30,8 @@ class TestRegistration:
         body = r.json()
         # `account_id` since brief 0075: the stable id the SPA namespaces browser data by.
         assert body.pop("account_id").isdigit()
+        # `created_at` only on GET /auth/me (the migration's proof); register leaves it null.
+        assert body.pop("created_at") is None
         assert body == {"username": "bob", "role": "user", "full_name": "", "email": ""}
 
     def test_is_refused_when_the_site_setting_is_off(self, client):
@@ -187,6 +189,23 @@ class TestAccountId:
             "/auth/me", headers={"Authorization": f"Bearer {again['token']}"}
         ).json()["account_id"]
         assert after != before
+
+    def test_login_names_the_account_too(self, client, registered, auth):
+        """The SPA binds the namespace at login, so a failed /auth/me leaves no unbound window."""
+        r = client.post(
+            "/auth/login",
+            json={"username": registered["username"], "password": registered["password"]},
+        )
+        assert r.status_code == 200
+        assert r.json()["account_id"] == client.get("/auth/me", headers=auth).json()["account_id"]
+
+    def test_me_names_when_the_account_was_created(self, client, registered, auth):
+        """Ops older than the account cannot be its own: the legacy migration's proof (ADR 0047)."""
+        from datetime import datetime
+
+        created = client.get("/auth/me", headers=auth).json()["created_at"]
+        assert created.endswith("Z")
+        assert datetime.fromisoformat(created.replace("Z", "+00:00")).year >= 2026
 
     def test_api_key_callers_see_the_same_id(self, client, registered, auth):
         by_jwt = client.get("/auth/me", headers=auth).json()["account_id"]
