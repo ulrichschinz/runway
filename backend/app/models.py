@@ -168,6 +168,10 @@ class UserInfo(BaseModel):
     role: str = "user"
     full_name: str = ""
     email: str = ""
+    # The account's stable id (`users.id`, AUTOINCREMENT, so never handed out twice), as an
+    # opaque string. The SPA namespaces the account's browser data by it rather than by the
+    # username, which a deleted account frees for someone else (brief 0075, ADR 0047).
+    account_id: str | None = None
 
 
 class UserProfileUpdate(BaseModel):

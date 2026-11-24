@@ -70,19 +70,13 @@ export function useAccount() {
     })
   }
 
-  /** The profile as the old page saves it, and as `stores/auth.js` keeps it for the next load. */
+  /** The profile as the old page saves it; `stores/auth.js` keeps it in memory, the next load asks `/auth/me`. */
   function saveProfile({ fullName, email }) {
     return once('profile', async () => {
       try {
         const { data } = await client.put('/auth/me', { full_name: fullName, email })
         auth.fullName = data.full_name
         auth.email = data.email
-        try {
-          localStorage.setItem('fullName', data.full_name)
-          localStorage.setItem('email', data.email)
-        } catch {
-          // Storage refused: the profile is saved on the server, and the next load reads it there.
-        }
         return { ok: true }
       } catch (e) {
         return { error: failure(e) }

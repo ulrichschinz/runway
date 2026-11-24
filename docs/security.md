@@ -43,6 +43,32 @@ Two credentials reach the same principal, checked in this order by `get_current_
 returning **403** when the principal is authenticated but not an admin — distinct from the
 **401** an unauthenticated request gets.
 
+## The browser session and logout
+
+What the SPA keeps in the browser, by data class, is declared in one place,
+[`frontend/src/shared/browserStorage.js`](../frontend/src/shared/browserStorage.js), the only file
+that touches `localStorage` ([ADR 0047](adr/0047-local-browser-data-on-logout.md)):
+
+| Class | Keys | Account-bound | Removed by an explicit logout |
+|---|---|---|---|
+| credential | `token` | yes | yes (a 401 removes it too) |
+| identity | `username`, `accountId` | yes | yes |
+| outbox (task text) | `outbox:<accountId>` | yes | yes, after asking when it is not empty |
+| draft (task text) | `captureDraft:<accountId>` | yes | yes |
+| UI preference | `theme`, `ui`, `inboxMode` | no | no |
+| legacy (`SHIM-FE-001`) | `outbox`, `captureDraft`, `role`, `fullName`, `email` | — | yes; the signed-in user's entries are migrated first |
+
+- **Namespace by a stable id.** `accountId` is `account_id` from `GET /auth/me` — `users.id`, never
+  handed out twice — not the username, which a deleted account frees for someone else.
+- **Explicit logout** asks *Abbrechen* / *abmelden und verwerfen* when unsent changes exist, then
+  removes the account's keys and leaves with a full page load; other tabs follow.
+- **A 401 locks.** Only the token goes; the account's queue waits for the same account. What that
+  leaves in a profile is `RISK-FE-001`.
+- **The role is the server's.** `auth.role` comes from `GET /auth/me` on every page load and is
+  never read from storage; the frontend's admin screens are display, the `/admin` guards are the
+  boundary.
+- Logging out does not revoke the JWT on the server: a copied token stays valid until it expires.
+
 ## The route guard declaration
 
 [`rules/route-guards.toml`](../rules/route-guards.toml) names every HTTP route and the guard
@@ -254,10 +280,13 @@ third-party argument parser, and it could change in any release — as the theme
 
 ## What is not enforced here
 
-- **Frontend role checks are cosmetic.** `auth.role` in the Vue store is read from
-  `localStorage`, so a viewer can make the admin UI appear. Every `/admin` route is guarded
-  server-side, so the result is 403s rather than access — a display bug, not a privilege
-  escalation. Recorded as `RISK-SEC-001`.
+- **Frontend role checks are display, not a control.** Since ADR 0047 `auth.role` comes from
+  `GET /auth/me` on every page load and storage no longer decides it (`RISK-SEC-001`, resolved).
+  Code running in the page can still change the in-memory store and see admin screens; every
+  `/admin` route is guarded server-side, so the result is 403s rather than access.
+- **Only an explicit logout clears the browser.** A session that ends by a 401 or a closed browser
+  leaves the account's unsent queue and draft in the profile, locked to that account
+  (`RISK-FE-001`).
 - **`role` has no database-level constraint.** The column is `TEXT DEFAULT 'user'` and would
   accept anything written outside the application. Every in-application writer validates
   against `VALID_ROLES`; a value written by hand would not be an admin, so it fails closed.

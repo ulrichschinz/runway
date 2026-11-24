@@ -62,3 +62,32 @@ shims:
     expires: 2026-11-25
     re_open_trigger: "the expiry passes, or a caller is found still using the Bearer shape after Step 13"
     decision_record: docs/adr/0018-cors-startup-refusal-and-the-inbox-shim.md
+
+  - id: SHIM-FE-001
+    what: >
+      The legacy browser keys `outbox`, `captureDraft`, `role`, `fullName` and `email`, declared
+      under LEGACY in frontend/src/shared/browserStorage.js and read only by its `bindAccount`
+      (migration of the signed-in user's unsent ops and draft into `outbox:<accountId>` /
+      `captureDraft:<accountId>`) and `purgeAccount` (removal on explicit logout).
+    why: >
+      Browsers that ran the bundle before ADR 0047 hold unsent work under the unnamespaced keys.
+      Without the migration the upgrade would strand it invisibly; without the cleanup an
+      earlier account's leftovers would stay in a shared profile for good. An old tab that is
+      still open after the deploy keeps writing the old keys until it reloads.
+    removal: >
+      The contract step of brief 0075: delete LEGACY, `migrateLegacy` and the legacy loop in
+      `purgeAccount`, run `./run surfaces --update` (spa.json loses the five keys) and record it
+      in a brief. Precondition: every browser in use has loaded a post-switch bundle at least
+      once while signed in, so its legacy queue has been migrated.
+    evidence: >
+      None that the server can see: localStorage never leaves the browser, and nothing reports
+      it. The evidence is time plus use — the maintainer's own browsers and devices signed in
+      since the deploy — which is why the expiry is a date rather than a measurement. A browser
+      that never signs in again after the deploy keeps its legacy keys; removing the shim then
+      leaves them unread, not exposed to another account (they were never namespaced, and the
+      new code never reads them).
+    owner: maintainer
+    approved_on: 2026-11-24
+    expires: 2027-03-01
+    re_open_trigger: "the expiry passes, or a user reports unsent work missing after the upgrade"
+    decision_record: docs/adr/0047-local-browser-data-on-logout.md

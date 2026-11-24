@@ -59,12 +59,9 @@ const props = computed(() => ({
 const on = {
   retry: () => gtd.retry(),
   theme: (choice) => theme.setChoice(choice),
-  // A full load, as on a session's end (`shared/sessionEnd.js`): the store's snapshot and its
-  // listeners belong to this account and go with the page.
-  signout: () => {
-    auth.logout()
-    window.location.assign('/login')
-  },
+  // The explicit logout (ADR 0047): asks before discarding unsent changes, purges the account's
+  // browser data, and leaves with a full load, so the store's snapshot and its listeners go too.
+  signout: () => auth.logout(),
 }
 
 // A capture made elsewhere marks the Inbox until it is on screen.

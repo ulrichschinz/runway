@@ -259,8 +259,6 @@ async function saveProfile() {
     const { data } = await client.put('/auth/me', { full_name: profileForm.full_name, email: profileForm.email })
     auth.fullName = data.full_name
     auth.email = data.email
-    localStorage.setItem('fullName', data.full_name)
-    localStorage.setItem('email', data.email)
     profileSaved.value = true
     setTimeout(() => (profileSaved.value = false), 2000)
   } catch (e) {
@@ -301,6 +299,9 @@ onMounted(async () => {
     auth.fetchMe(),
   ])
   apiKey.value = keyData.api_key
+  // The profile is no longer cached in storage (brief 0075): fill the form from /auth/me's answer.
+  if (!profileForm.full_name) profileForm.full_name = auth.fullName
+  if (!profileForm.email) profileForm.email = auth.email
   if (auth.role === 'admin') loadAdminSettings()
 })
 

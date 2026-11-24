@@ -14,7 +14,8 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { PHONE, useMedia } from '../../composables/useMedia.js'
 import { t } from '../../shared/i18n.js'
-import { readDraft, saveDraft, takeDraft } from '../captureDraft.js'
+import { ACCOUNT_BOUND } from '../../shared/browserStorage.js'
+import { isDraftKey, readDraft, saveDraft, takeDraft } from '../captureDraft.js'
 import { showNotice } from '../notice.js'
 import { useGtdStore } from '../stores/gtd.js'
 
@@ -40,7 +41,12 @@ function submit() {
 
 /** Another tab changed the draft: show it here too, so one draft is never captured twice. */
 function onStorage(event) {
-  if (event.key === 'captureDraft') text.value = readDraft(event.newValue)
+  if (isDraftKey(event.key)) text.value = readDraft(event.key === null ? undefined : event.newValue)
+}
+
+/** `/auth/me` bound the account (the first load after a login or the deploy): its draft shows. */
+function onBound() {
+  if (!text.value) text.value = readDraft()
 }
 
 function onPageHide() {
@@ -51,11 +57,13 @@ function onPageHide() {
 onMounted(() => {
   window.addEventListener('storage', onStorage)
   window.addEventListener('pagehide', onPageHide)
+  window.addEventListener(ACCOUNT_BOUND, onBound)
   if (props.focusOnOpen && phone.value) input.value.focus()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('storage', onStorage)
   window.removeEventListener('pagehide', onPageHide)
+  window.removeEventListener(ACCOUNT_BOUND, onBound)
 })
 
 defineExpose({ focus: () => input.value?.focus() })

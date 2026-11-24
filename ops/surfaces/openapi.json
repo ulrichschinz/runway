@@ -1147,6 +1147,17 @@
       },
       "UserInfo": {
         "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
           "email": {
             "default": "",
             "title": "Email",

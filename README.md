@@ -136,6 +136,20 @@ X-Api-Key: <key>
 
 API keys are ideal for agents and automations. Each user can view and rotate their key via `GET /api/auth/apikey` and `POST /api/auth/apikey/regenerate`.
 
+`GET /api/auth/me` returns the caller's profile: `username`, `role`, `full_name`, `email` and
+`account_id`, the account's stable id as an opaque string (added in brief 0075; a client that
+does not know the field ignores it). It stays the same for the life of the account and is never
+given to another account, even one registered later under the same username.
+
+**What the web app keeps in the browser** ([ADR 0047](docs/adr/0047-local-browser-data-on-logout.md)):
+the session token, the username and the account id; the account's unsent offline changes and its
+capture draft, under keys namespaced by the account id; and three display choices (`theme`, `ui`,
+`inboxMode`) shared by everyone using the browser. **Abmelden** removes everything but the display
+choices — if changes have not reached the server yet, it asks first, and *Abbrechen* keeps you
+signed in. A session that merely expires keeps the account's unsent changes, locked, until the same
+account signs in again; on a shared computer, sign out explicitly. The full key list is
+`ops/surfaces/spa.json`.
+
 ---
 
 ## Agent & automation integration

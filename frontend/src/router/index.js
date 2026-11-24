@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { UI_NEW, currentUi, rememberUi } from '../shared/uiFlag.js'
 import { loginRedirect } from '../shared/returnPath.js'
+import { readToken } from '../shared/browserStorage.js'
 import { pick } from './pick.js'
 import LoginView from '../views/LoginView.vue'
 import InboxView from '../views/InboxView.vue'
@@ -44,7 +45,7 @@ const router = createRouter({
 router.beforeEach((to) => {
   // Before the auth check, so a choice made on a URL that redirects to /login is kept.
   rememberUi(to.query.ui)
-  const token = localStorage.getItem('token')
+  const token = readToken()
   // The visited path rides along (`?next=`), so the new login page can return there (F19).
   if (!to.meta.public && !token) return loginRedirect(to.fullPath)
   // Here rather than on the record: a record's beforeEnter skips query-only navigations.

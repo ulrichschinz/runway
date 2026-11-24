@@ -8,6 +8,8 @@
  * to handle (the outbox pauses the op until the next login).
  */
 
+import { readToken } from '../shared/browserStorage.js'
+
 /** The prefix `api/client.js` uses: nginx and the Vite proxy route it to the backend. */
 const API_BASE = '/api'
 
@@ -17,12 +19,8 @@ const API_BASE = '/api'
  */
 export function sendKeepalive(op) {
   const headers = {}
-  let token = null
-  try {
-    token = localStorage.getItem('token')
-  } catch {
-    // Storage refused: sent without a token, the server answers 401 and the op waits.
-  }
+  // Storage refused: sent without a token, the server answers 401 and the op waits.
+  const token = readToken()
   if (token) headers.Authorization = `Bearer ${token}`
   const init = { method: op.method, keepalive: true, headers }
   if (op.body) {

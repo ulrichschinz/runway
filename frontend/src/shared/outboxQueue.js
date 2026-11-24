@@ -3,7 +3,7 @@
  * confirmed, as plain data (plan §6.4, brief 0049).
  *
  * Pure: no timers, no storage, no requests. `composables/useOutbox.js` runs the effects —
- * it persists the queue to `localStorage['outbox']` before every request, arms the hold
+ * it persists the queue to the account's `outbox:<accountId>` before every request, arms the hold
  * timers, sends, and feeds the answers back through `commit`, `fail` and `pauseAuth`.
  *
  * An op's life:

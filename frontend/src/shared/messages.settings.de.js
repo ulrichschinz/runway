@@ -44,5 +44,5 @@ export default {
   'set.admin.noUser': 'Diesen Benutzer gibt es nicht mehr.',
   'set.offline': 'Kein Netz. Es wurde nichts geändert.', 'set.failed': 'Das hat nicht geklappt. Versuch es noch einmal.',
   'set.loadFailed': 'Ließ sich nicht laden.', 'set.reload': 'Erneut laden', 'set.loading': 'Wird geladen …',
-  'set.signoutP': 'Meldet diesen Browser ab. Die Android-App und Claude bleiben verbunden: sie nutzen den API-Key.',
+  'set.signoutP': 'Meldet diesen Browser ab und entfernt die Daten dieses Kontos aus ihm; nur die Darstellung bleibt. Die Android-App und Claude bleiben verbunden: sie nutzen den API-Key.',
 }

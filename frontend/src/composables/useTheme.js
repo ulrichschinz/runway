@@ -1,5 +1,6 @@
 import { computed, effectScope, ref, watchEffect } from 'vue'
 import { parseTheme, resolveTheme, themeColorFor } from '../shared/theme.js'
+import { KEY, readKey, removeKey, writeKey } from '../shared/browserStorage.js'
 
 let state = null
 
@@ -33,20 +34,13 @@ export function useTheme() {
 }
 
 function readStored() {
-  try {
-    return localStorage.getItem('theme')
-  } catch {
-    return null
-  }
+  return readKey(KEY.theme) ?? null
 }
 
+/** Storage refused: the choice still applies until the page is left. */
 function writeStored(value) {
-  try {
-    if (value) localStorage.setItem('theme', value)
-    else localStorage.removeItem('theme')
-  } catch {
-    // Storage refused: the choice still applies until the page is left.
-  }
+  if (value) writeKey(KEY.theme, value)
+  else removeKey(KEY.theme)
 }
 
 function applyToDocument(theme) {
