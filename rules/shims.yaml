@@ -100,6 +100,36 @@ shims:
     re_open_trigger: "the expiry passes, the dry-run reports an anomaly that cannot be resolved by hand, or a write fails as uid 10001"
     decision_record: docs/adr/0048-container-hardening-and-the-browser-edge.md
 
+  - id: SHIM-OPS-002
+    what: >
+      The frontend service in ops/deploy/docker-compose.yml keeps the previous deploy's shape —
+      no `user:`, no `read_only`, no `cap_drop` — plus a capped noexec /tmp tmpfs and
+      `no-new-privileges:true`. frontend/Dockerfile ends on `USER 10002:10002` and writes only
+      /tmp, so the new image runs non-root under it regardless. tools/checks/deploy_compose.py
+      (RULE-OPS-004) requires exactly this shape, and that `USER`, only while this entry exists.
+    why: >
+      The expand step for the frontend (second review of brief 0076). The image of the commit
+      before brief 0076 runs nginx as root and writes /etc/nginx/conf.d; under a read-only,
+      capability-free, uid-10002 block it cannot start. Hardening the compose on the same deploy
+      as the image would make that deploy the one merge on main that pinning RUNWAY_SHA cannot
+      roll back. One deploy with the hardened image under the previous block makes the hardened
+      image the rollback target first.
+    removal: >
+      The frontend switch change, its own pull request: the frontend block gains
+      `user: "10002:10002"`, `read_only: true` and `cap_drop: [ALL]`, and this entry goes. First
+      brief 0076 must be deployed and verify-deploy green on it, so that its frontend image — the
+      one the switched block starts — is what RUNWAY_SHA rolls back to.
+    evidence: >
+      verify-deploy green on the brief 0076 deploy (the public origin answers with the browser
+      headers from the new image), and on the host `docker compose exec frontend id -u`
+      answers 10002. Both are reads after an authorised deploy; nothing in this repository can
+      produce them beforehand.
+    owner: maintainer
+    approved_on: 2026-11-24
+    expires: 2026-12-31
+    re_open_trigger: "the expiry passes, or the brief 0076 deploy fails verify-deploy"
+    decision_record: docs/adr/0048-container-hardening-and-the-browser-edge.md
+
   - id: SHIM-WEB-001
     what: >
       frontend/nginx.conf sends the strict Content-Security-Policy as

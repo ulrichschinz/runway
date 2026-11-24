@@ -14,11 +14,16 @@ anyone who can merge to main can still change what the services run. What it sto
 specific set of edits that convert a container-scoped change into a host-scoped one, quietly,
 in a file that is easy to skim past in review because it is mostly YAML nobody reads twice.
 
-Four refusals:
+Six refusals:
 
 * `privileged: true` — a privileged container is the host.
 * `network_mode: host` — removes the network boundary the deployment is built on. The services
   talk over the `traefik-public` network and publish no ports; this would undo both.
+* `pid`, `ipc`, `uts`, `userns_mode` or `cgroup` set to `host` — each removes one more namespace
+  between the container and the machine; `pid: host` alone lets it see and signal every process.
+* `devices`, `device_cgroup_rules` and `sysctls` — a host device is the host's hardware below every
+  file permission, and neither service needs a kernel parameter of its own. Refused outright rather
+  than judged entry by entry: none is in use, and an allowlist of zero fails closed.
 * a bind mount whose source escapes the service directory — `./data`, `./db` and `./users.db`
   are the deployment's own state. `/`, `/etc`, `/var/run/docker.sock` and `..` are not.
 * `cap_add` — capabilities are privilege in smaller pieces.
@@ -28,7 +33,13 @@ service may ask the host for; this one requires what every service must give up,
 write primitive or a command inside a container lands as an unprivileged user on a read-only
 root with no capabilities:
 
-* `read_only: true`, `security_opt: [no-new-privileges:true]` and `cap_drop: [ALL]`;
+* `read_only: true`, `security_opt: [no-new-privileges:true]` and `cap_drop: [ALL]`. `security_opt`
+  is read the way Docker reads it — in order, the last value of a key winning — so a later
+  `no-new-privileges:false` undoes an earlier `true`; and `no-new-privileges` is the only key
+  allowed, which refuses `seccomp`, `apparmor`, `label` and `systempaths` overrides, every one of
+  which only ever loosens the default profile;
+* no `group_add`: a supplementary group is a privilege the `user:` line does not show, and
+  `group_add: ["0"]` would hand a non-root uid the root group;
 * an explicit numeric `user: "<uid>:<gid>"` that is not root and is the user the image's
   Dockerfile declares in its final stage — the image and the compose must agree, or one of
   them is wrong about what runs;
@@ -38,7 +49,9 @@ Root is judged by value, not by spelling: `00:00` and `0:000` are uid 0 to Docke
 compared as an integer.
 
 A service may be held to less only while a dated shim in rules/shims.yaml names the exact
-transitional shape (TRANSITIONS below). The shim's expiry is RULE-SEC-002's to enforce; this
+transitional shape (TRANSITIONS below): the backend at uid 0 until its data is migrated
+(SHIM-OPS-001), and the frontend's compose block in the previous deploy's shape for one deploy,
+so the previous image still starts and pinning RUNWAY_SHA rolls back (SHIM-OPS-002). The shim's expiry is RULE-SEC-002's to enforce; this
 check refuses the exception once the shim is gone, which is what makes the contract step
 something the gate asks for rather than something a reader has to remember.
 
@@ -108,9 +121,15 @@ class Transition:
     """
 
     shim: str
-    user: str
-    keeps: frozenset[str]
+    # The compose `user:` exactly, or None: the key must be absent and the image decides.
+    user: str | None
+    # The default capabilities kept, or None: no `cap_drop` at all (Docker's default set).
+    keeps: frozenset[str] | None
     image_user: str
+    # Whether `read_only: true` is required (True) or must be absent (False).
+    read_only: bool = True
+    # Why the shape must be exactly this while the shim stands, for the finding's text.
+    reason: str = ""
 
 
 # SHIM-OPS-001: the host's data was written by a root container and nobody has read who owns it
@@ -126,7 +145,38 @@ TRANSITIONS = {
         keeps=frozenset({"DAC_OVERRIDE"}),
         image_user="0:0",
     ),
+    # SHIM-OPS-002: the expand step for the frontend. Its image is hardened already — it ends on
+    # `USER 10002:10002` and writes only /tmp — but the compose block keeps the previous deploy's
+    # shape (no `user:`, a writable root, Docker's default capabilities), plus the tmpfs and
+    # no-new-privileges, both of which the previous image also starts under. So pinning
+    # RUNWAY_SHA to the commit before brief 0076 rolls the frontend back without restoring a
+    # compose: that image runs nginx as root and writes /etc/nginx/conf.d, which a read-only,
+    # capability-free, uid-10002 block would refuse. The switch change adds those three and
+    # removes the shim; this check then holds the frontend to the full floor.
+    "frontend": Transition(
+        shim="SHIM-OPS-002",
+        user=None,
+        keeps=None,
+        image_user="10002:10002",
+        read_only=False,
+        reason=(
+            "the previous deploy's frontend image runs nginx as root and writes /etc/nginx, so "
+            "until the switch change this block must still start it, or pinning RUNWAY_SHA no "
+            "longer rolls back"
+        ),
+    ),
 }
+
+# The only `security_opt` key a deploy service may set. Every other key Docker knows — seccomp,
+# apparmor, label, systempaths — exists to loosen the default confinement.
+ALLOWED_SECURITY_OPTS = frozenset({"no-new-privileges"})
+
+# Go's strconv.ParseBool, which is how Docker reads the value.
+_TRUE = {"1", "t", "T", "TRUE", "true", "True"}
+_FALSE = {"0", "f", "F", "FALSE", "false", "False"}
+
+HOST_NAMESPACE_KEYS = ("pid", "ipc", "uts", "userns_mode", "cgroup")
+REFUSED_KEYS = ("devices", "device_cgroup_rules", "sysctls")
 
 NUMERIC_USER = re.compile(r"^(\d+):(\d+)$")
 
@@ -161,6 +211,20 @@ def check_service(name: str, service: dict) -> None:
 
     if service.get("cap_add"):
         fail(f"{where} asks for `cap_add`. Capabilities are privilege in smaller pieces")
+
+    for key in HOST_NAMESPACE_KEYS:
+        if str(service.get(key, "")).strip().lower() == "host":
+            fail(
+                f"{where} asks for `{key}: host`. It shares that namespace with the machine, "
+                "which is one boundary fewer between the container and the host"
+            )
+
+    for key in REFUSED_KEYS:
+        if key in service:
+            fail(
+                f"{where} declares `{key}`. A host device or kernel parameter reaches below "
+                "the container; neither service needs one"
+            )
 
     for volume in service.get("volumes") or []:
         # Long form: {type: bind, source: ..., target: ...}. Short form: "source:target[:mode]".
@@ -228,7 +292,10 @@ def _image_user(where: str, name: str, transition: Transition | None) -> str | N
                 "falls back to, so the image still works under a compose that names no user "
                 "(the previous deploy's, whenever the host keeps it)"
             )
-        return None
+            return None
+        wanted = NUMERIC_USER.match(transition.image_user)
+        if wanted is None or is_root(wanted):
+            return None  # a transitional root image: no non-root user to agree with yet
     match = NUMERIC_USER.match(declared or "")
     if match is None:
         harden(
@@ -248,17 +315,30 @@ def check_hardening(name: str, service: dict, shims: set[str]) -> None:
     if transition is not None and transition.shim not in shims:
         transition = None
 
-    if service.get("read_only") is not True:
+    if transition is not None and not transition.read_only:
+        if "read_only" in service:
+            harden(
+                f"{where} declares `read_only` while {transition.shim} stands; "
+                f"{transition.reason}"
+            )
+    elif service.get("read_only") is not True:
         harden(f"{where} has no `read_only: true`. Only its mounts and a tmpfs may be writable")
 
-    if "no-new-privileges:true" not in [str(s) for s in service.get("security_opt") or []]:
+    check_security_opt(where, service.get("security_opt"))
+
+    if "group_add" in service:
         harden(
-            f"{where} has no `security_opt: [no-new-privileges:true]`. Without it a setuid "
-            "binary in the image can still raise a process back to root"
+            f"{where} declares `group_add`. A supplementary group is privilege the `user:` line "
+            "does not show — gid 0 among them makes a non-root uid a member of root's group"
         )
 
     dropped = {str(c).upper() for c in service.get("cap_drop") or []}
-    if "ALL" not in dropped:
+    if transition is not None and transition.keeps is None:
+        if "cap_drop" in service:
+            harden(
+                f"{where} declares `cap_drop` while {transition.shim} stands; {transition.reason}"
+            )
+    elif "ALL" not in dropped:
         if transition is None:
             harden(f"{where} does not declare `cap_drop: [ALL]`")
         elif dropped != DOCKER_DEFAULT_CAPS - transition.keeps:
@@ -269,6 +349,13 @@ def check_hardening(name: str, service: dict, shims: set[str]) -> None:
             )
 
     image_user = _image_user(where, name, transition)
+
+    if transition is not None and transition.user is None:
+        if "user" in service:
+            harden(
+                f"{where} declares `user:` while {transition.shim} stands; {transition.reason}"
+            )
+        return
 
     user = str(service.get("user", "")).strip()
     if transition is not None and user == transition.user:
@@ -282,6 +369,48 @@ def check_hardening(name: str, service: dict, shims: set[str]) -> None:
         harden(
             f"{where} runs as `{user}` but its Dockerfile declares `USER {image_user}`; the "
             "files the image owns belong to the second one"
+        )
+
+
+def check_security_opt(where: str, options: object) -> None:
+    """Read `security_opt` as Docker does and require no-new-privileges to end up true.
+
+    moby's parseSecurityOpt splits each entry on `=`, else on `:`, and sets the option once per
+    entry, so the last one wins. A membership test for the string `no-new-privileges:true` would
+    pass a list that switches it off again two lines later.
+    """
+    if options is None:
+        options = []
+    if not isinstance(options, list):
+        harden(f"{where} has a `security_opt` that is not a list")
+        return
+    effective: bool | None = None
+    for raw in options:
+        entry = str(raw).strip()
+        if "=" in entry:
+            key, _, value = entry.partition("=")
+        elif ":" in entry:
+            key, _, value = entry.partition(":")
+        else:
+            key, value = entry, "true"  # bare `no-new-privileges` means true to Docker
+        if key not in ALLOWED_SECURITY_OPTS:
+            harden(
+                f"{where} sets `security_opt: {entry}`. Only no-new-privileges is allowed; every "
+                "other key — seccomp, apparmor, label, systempaths — loosens the default confinement"
+            )
+            continue
+        if value in _TRUE:
+            effective = True
+        elif value in _FALSE:
+            effective = False
+        else:
+            harden(f"{where} sets `security_opt: {entry}`, which Docker does not read as a boolean")
+            effective = False
+    if effective is not True:
+        harden(
+            f"{where} does not end up with no-new-privileges set: its last `security_opt` value "
+            "for it must be true. Without it a setuid binary in the image can still raise a "
+            "process back to root"
         )
 
 

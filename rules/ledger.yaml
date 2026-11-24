@@ -897,8 +897,9 @@ rules:
 
   - id: RULE-OPS-003
     statement: >
-      The deploy compose file MUST NOT ask the host for privilege, for its network namespace,
-      or for a bind mount whose source lies outside the service directory.
+      The deploy compose file MUST NOT ask the host for privilege, for its network, pid, ipc,
+      uts, user or cgroup namespace, for a device, a device cgroup rule or a sysctl, or for a
+      bind mount whose source lies outside the service directory.
     class: executable
     check: tools/checks/deploy-compose.sh
     fixture: tools/fixtures/negative.sh
@@ -923,11 +924,12 @@ rules:
   - id: RULE-OPS-004
     statement: >
       Every service in the deploy compose file MUST run with `read_only: true`,
-      `security_opt: [no-new-privileges:true]`, `cap_drop: [ALL]` and an explicit numeric
-      non-root `user:` equal to the numeric non-root `USER` that ends its image's Dockerfile —
-      root judged by value, so `00:00` is root — except for the exact transitional shape a
-      declared shim names in tools/checks/deploy_compose.py, which also fixes the `USER` the
-      image must end on meanwhile.
+      `security_opt` whose only key is no-new-privileges and whose last value for it is true,
+      no `group_add`, `cap_drop: [ALL]` and an explicit numeric non-root `user:` equal to the
+      numeric non-root `USER` that ends its image's Dockerfile — root judged by value, so
+      `00:00` is root — except for the exact transitional shape a declared shim names in
+      tools/checks/deploy_compose.py, which also fixes the `USER` the image must end on
+      meanwhile.
     class: executable
     check: tools/checks/deploy-compose.sh
     fixture: tools/fixtures/negative.sh
@@ -947,7 +949,13 @@ rules:
       host's volumes are migrated, and its image defaulting to uid 0 meanwhile so that it still
       writes under a compose that names no user (the previous deploy's, which the host keeps
       whenever its deploy script does not extract the new one) — is tied to SHIM-OPS-001, so the gate refuses it the day the
-      shim is removed and RULE-SEC-002 refuses the shim the day it expires. It is a
+      shim is removed and RULE-SEC-002 refuses the shim the day it expires. The frontend's
+      expand step is the same shape the other way round: its image is non-root already, and its
+      compose block must keep the previous deploy's form (no user, no read_only, no cap_drop)
+      while SHIM-OPS-002 stands, so the previous image still starts and RUNWAY_SHA alone rolls
+      back. security_opt is read as Docker reads it, in order with the last value winning,
+      because a membership test passed `no-new-privileges:false` and `seccomp:unconfined`
+      appended beside a correct entry (second review of brief 0076). It is a
       declaration check: what the runtime images actually do under these flags is proven by
       the RULE-TEST-002 tier, and non-root is not tenant isolation.
 

@@ -412,8 +412,11 @@ boundary is still `TASKDATA`.
   directories provide is exercised rather than reasoned about; since 2026-11-24 as uid 10001 on a
   read-only root, and the runtime images under the deploy flags.
 - `RULE-OPS-004` — every deploy service runs read-only, without new privileges or capabilities, as an
-  explicit numeric non-root user matching its image; the backend's uid-0 fallback only while
-  `SHIM-OPS-001` stands.
+  explicit numeric non-root user matching its image, with no-new-privileges as the last word of a
+  `security_opt` that may carry nothing else and no `group_add`; the backend's uid-0 fallback only
+  while `SHIM-OPS-001` stands, the frontend's previous-deploy block (its image non-root regardless)
+  only while `SHIM-OPS-002` stands. `RULE-OPS-003` also refuses host namespaces, devices and
+  sysctls.
 - `RULE-OPS-005` — the edge declares the browser headers on every response, same-origin, no HSTS.
 
 **Asserted**

@@ -6,7 +6,7 @@
 | **Owning unit** | `ops` — `backend/Dockerfile`, `backend/Dockerfile.test`, `frontend/Dockerfile`, `frontend/nginx.conf`, new `frontend/nginx-main.conf`, `ops/deploy/docker-compose.yml`, `docker-compose.yml`, new `ops/deploy/volume_ownership.py`, `tools/checks/deploy_compose.py`, new `tools/checks/edge_headers.py` + `edge-headers.sh`, `tools/checks/py-test-container.sh`, new `tools/checks/container_hardening.py`, `tools/checks/profiles.conf`, `tools/fixtures/negative.sh`, `tools/bootstrap.sh`, `tools/checks/repo-hygiene.sh`, `.dockerignore`, `.gitignore`, `.github/workflows/deploy.yml`, `rules/ledger.yaml`, `rules/shims.yaml`, `architecture.toml` (one path). `tests` — new `backend/tests/unit/test_volume_ownership.py`, new `frontend/tests/cspBuild.test.js`. `docs` — this brief, ADR 0048, `docs/security.md`, `docs/threat-model.md`, `docs/operations.md`, `README.md`. |
 | **Applicable contracts** | [`AGENTS.md`](../../AGENTS.md) §2 (procedure), §5 (env vars documented in README; container images), §6 (governance files: ledger, shims, `architecture.toml`, gate config — owner approval, `RISK-GOV-001`), §9 (META-RULE: check + ledger + fixture + docs + ADR in one commit). [`docs/change-workflow.md`](../change-workflow.md) *Security or Operability Change* and *Public-Surface or Data Migration*. |
 | **Governed by** | New [ADR 0048](../adr/0048-container-hardening-and-the-browser-edge.md). Builds on ADR 0032 (the compose file is deployed from the image) and ADR 0006 (two test tiers). |
-| **Rule IDs introduced** | `RULE-OPS-004` (container hardening floor: deploy compose + final-stage `USER`), `RULE-OPS-005` (browser headers declared at the nginx edge). `RULE-TEST-002` is widened: the container tier also runs the *runtime* images under the deploy hardening. Two dated shims: `SHIM-OPS-001` (backend still uid 0 until the host volumes are migrated), `SHIM-WEB-001` (strict CSP still report-only). |
+| **Rule IDs introduced** | `RULE-OPS-004` (container hardening floor: deploy compose + final-stage `USER`), `RULE-OPS-005` (browser headers declared at the nginx edge). `RULE-TEST-002` is widened: the container tier also runs the *runtime* images under the deploy hardening. Three dated shims: `SHIM-OPS-001` (backend still uid 0 until the host volumes are migrated), `SHIM-OPS-002` (frontend compose keeps the previous deploy's shape for one deploy, so `RUNWAY_SHA` alone rolls back — second review), `SHIM-WEB-001` (strict CSP still report-only). `RULE-OPS-003` is widened (second review): host `pid`/`ipc`/`uts`/`userns_mode`/`cgroup` namespaces, `devices`, `device_cgroup_rules` and `sysctls` are refused. |
 | **Entry points** | Container start (`CMD` of both images), the compose service blocks, nginx `server {}`. Operator entry point: `python /opt/runway/volume_ownership.py` inside the backend image. |
 | **Affected public surfaces** | **Container images**: the frontend now ends on a numeric non-root `USER 10002:10002`; the backend carries `10001:10001` but ends on `USER 0:0` until the contract step (see *Review amendments*). **Deploy compose**: new `./db` bind mount, `DB_PATH` moves from `/app/users.db` to `/app/db/users.db` while the *same host file* `./users.db` is still mounted there (see *Migration*). **Env**: new compose-only variable `RUNWAY_BACKEND_USER` (not read by the application, so not a `Settings` field; documented in README beside `RUNWAY_SHA`). `DB_PATH`'s README default stays the application default `/app/users.db`; only the compose value changes. **HTTP**: every response through nginx gains six headers. No REST route, MCP tool, DB schema, SPA route or `localStorage` key changes, so `ops/surfaces/` is untouched. |
 | **Known dependents** | From `./run impact` (index current at `5d85f6ee539e`, 1636 nodes): no import dependents for any file above; every one is `files_without_import_derived_test_protection`. Blind spots: `BLIND-OPS-001` (the host's compose is this file, but nothing observes the write), `BLIND-NGINX-001` (nginx.conf is templated at start), `BLIND-TEST-001`. `frontend/src/layout/lens/LensFlat.vue` was checked as a CSP risk (inline `style=` on SVG stops) and needs **no change**: the build compiles it to a CSSOM style object, not an attribute. Consumers of the edge: the SPA, MCP clients via `/api/mcp`, the webhook `/api/inbox`, CI's `verify-deploy`. |
@@ -42,9 +42,14 @@ under the previous compose; the deploy compose names its user explicitly (amende
 config of our own puts the pid file, the temp paths and the generated server config under `/tmp`, so
 the container runs non-root on a read-only root with one tmpfs. `USER 10002:10002`.
 
-**Deploy compose, both services.** `read_only: true`, a size-capped `noexec,nosuid,nodev` tmpfs on
-`/tmp`, `security_opt: [no-new-privileges:true]`, an explicit `user:`. The frontend: `cap_drop: [ALL]`,
-`user: "10002:10002"`. The backend, until the operator has migrated volume ownership: `user:
+**Deploy compose, both services.** A size-capped `noexec,nosuid,nodev` tmpfs on `/tmp` and
+`security_opt: [no-new-privileges:true]` — the only `security_opt` key allowed, its last value the one
+that counts — and no `group_add`. The backend also `read_only: true` and an explicit `user:`. The
+frontend, for this deploy only, keeps the previous deploy's shape otherwise — no `user:`, a writable root,
+Docker's default capabilities — so that the image of the commit before this one still starts under it
+(`SHIM-OPS-002`, second review). Its image runs as uid 10002 regardless, from its own `USER`; the compose
+`read_only: true`, `cap_drop: [ALL]` and `user: "10002:10002"` follow in the frontend's switch change. The
+backend, until the operator has migrated volume ownership: `user:
 "${RUNWAY_BACKEND_USER:-0:0}"` and every default capability dropped **except `DAC_OVERRIDE`**, so a
 host file not owned by root keeps working exactly as today (`SHIM-OPS-001`).
 
@@ -82,7 +87,8 @@ re-checks its inode before `fchown`/`fchmod`. It also tightens modes to owner-on
 
 | Step | What | When | Rollback |
 |---|---|---|---|
-| **Expand** (this change) | Images carry the users; compose mounts `./db`, moves `DB_PATH`, read-only root, tmpfs, no-new-privileges, reduced capabilities. Backend still uid 0, and its image still *defaults* to uid 0, so the new image also runs under the previous compose if the host keeps it. Frontend fully switched (it holds no data). Migration tool shipped. | Deploys on merge — **after** the container tier's first green CI run and the maintainer's sign-off on the frontend rollback procedure. | Pin the previous `RUNWAY_SHA` **and restore that commit's compose** (extracted from its image): the old frontend image cannot start under the new compose's read-only root. Data needs nothing: the old compose mounts the same `./users.db`. |
+| **Expand** (this change) | Images carry the users; compose mounts `./db`, moves `DB_PATH`, backend read-only root, tmpfs, no-new-privileges, reduced capabilities. Backend still uid 0, and its image still *defaults* to uid 0, so the new image also runs under the previous compose if the host keeps it. Frontend image non-root (uid 10002, writes only `/tmp`, headers); frontend compose in the previous shape plus tmpfs and no-new-privileges (`SHIM-OPS-002`). Migration tool shipped. | Deploys on merge — **after** the container tier's first green CI run. | Pin the previous `RUNWAY_SHA`. Both previous images start under this compose: the backend's as before, the frontend's because its block is the previous one plus a tmpfs on `/tmp` and no-new-privileges. Data needs nothing: the old compose mounts the same `./users.db`. |
+| **Frontend switch** | A later change: the frontend compose gains `user: "10002:10002"`, `read_only: true`, `cap_drop: [ALL]`; `SHIM-OPS-002` is removed and `RULE-OPS-004` then holds the frontend to the full floor. | Trigger: this change deployed and `verify-deploy` green on it (its image is then the rollback target), **by 2026-12-31** (`SHIM-OPS-002` expires). | Pin `RUNWAY_SHA` to this change: its frontend image is the hardened one and starts under the switched compose. |
 | **Migrate** | Operator: dry-run, review, `--apply`, dry-run again (must be clean). | Operator, after a backup; trigger = this change running in production. | Ownership change is harmless to uid 0, which still has `DAC_OVERRIDE`. |
 | **Switch** | Operator sets `RUNWAY_BACKEND_USER=10001:10001` in the host `.env`, `docker compose up -d`, runs the post-deploy checks. | Operator, after a clean dry-run. | Delete the line, `up -d`: back to uid 0. Switching to 10001 again repeats *Migrate* first: what uid 0 created meanwhile is root's. |
 | **Contract** | A later change: backend compose default and image `USER` `10001:10001`, `cap_drop: [ALL]`, the knob and `SHIM-OPS-001` removed — after the host's on-disk compose has been read and the `deploy.sh` extraction recorded (M0). Optionally `users.db` moved physically into `./db`. | After the switch has run without incident for 14 days, **by 2027-02-28** (`SHIM-OPS-001` expires; `RULE-SEC-002` fails the gate on that date). | Forward-fix only for the capability change; the data layout is unchanged. |
@@ -97,7 +103,7 @@ header after a soak in which the maintainer has used every view with DevTools op
 |---|---|---|
 | Static gate | `RULE-OPS-004` against today's compose and Dockerfiles — red before the change (no `read_only`, no `user`, no `USER`), green after. | Observed red, then green. |
 | Static gate | `RULE-OPS-005` against today's `nginx.conf` — red before the change (no header at all), green after. | Observed red, then green. |
-| Negative fixtures | Six arms for `RULE-OPS-004` (writable root, root user, root spelled `00:00` in compose and Dockerfile, no `USER`, backend image switched to 10001 while the shim stands, shim removed) and five for `RULE-OPS-005` (no `always`, per-location `add_header`, `'unsafe-inline'`, HSTS, shim removed). | All eleven observed red in `make verify` (counts in *Review amendments*). The two new arms were first observed **green** against the pre-review check — i.e. the check missed them. |
+| Negative fixtures | Six arms for `RULE-OPS-004` (writable root, root user, root spelled `00:00` in compose and Dockerfile, no `USER`, backend image switched to 10001 while the shim stands, shim removed) and five for `RULE-OPS-005` (no `always`, per-location `add_header`, `'unsafe-inline'`, HSTS, shim removed). | All eleven observed red in `make verify` (counts in *Review amendments*); seven more arms from the second review (see there). The two new arms were first observed **green** against the pre-review check — i.e. the check missed them. |
 | Unit | `backend/tests/unit/test_volume_ownership.py`: dry-run changes nothing; apply converges and is idempotent; symlink, hard link, FIFO, foreign-depth entries refuse `--apply`; no path outside the two roots is touched; a swapped inode is refused. Written before the tool. | Observed red (module missing), then green. |
 | Build | `frontend/tests/cspBuild.test.js`: builds the SPA and refuses inline scripts, inline handlers, `style=` attributes, `eval`/`new Function`, `javascript:` URLs and any off-origin `src`/`href`/`url()`; a crafted inline script proves the scanner can fail. | Observed red on the crafted input, green on the build. |
 | Browser (local, one-off) | Built SPA behind a local proxy that **enforces** the strict policy, real Taskwarrior 3.5.0 backend, headless Chrome: login, every new-UI route, the old UI's main routes. | 0 violations over 16 page loads; positive control caught 2. Recorded below. |
@@ -141,7 +147,8 @@ An independent review of the first commit raised seven points; each was checked 
    `SHIM-OPS-001` stands; `RULE-OPS-004` requires exactly that (arm `OPS-004-early-user`, observed green
    against the old check, red after); the container tier's new step 0 runs the image under the previous
    compose's flags and mounts.
-2. **Frontend rollback needs the old compose** (minor, upheld as a trade, not fixed in code). No compose
+2. **Frontend rollback needs the old compose** (minor, upheld as a trade, not fixed in code —
+   **superseded by the second review, point 2 below**). No compose
    shape starts both the old frontend image (root nginx: writes `/etc/nginx/conf.d`, needs `SETUID`,
    `SETGID`, `CHOWN`; a tmpfs on `conf.d` would also hide its template) and the hardened one. The
    alternative — frontend hardening one deploy later — ships it unhardened meanwhile. The procedure is
@@ -163,10 +170,47 @@ Gate after the amendments, this checkout (arm64): `make check` GREEN; `make veri
 arms passed, 48 of 51 executable rules proven able to fail (RULE-GATE-002, RULE-GOV-001, RULE-TEST-002
 declare no automated fixture), and **`py-test-container` skipped: no Docker daemon (`RISK-TEST-001`)**.
 
+## Second review amendments (2026-11-24)
+
+1. **`security_opt` was a membership test** (important, upheld). `no-new-privileges:false` appended after
+   the `true` entry, `seccomp:unconfined`, `apparmor:unconfined`, `group_add: ["0"]`, and `pid`/`ipc`/
+   `userns_mode: host`, `devices`, `sysctls` all passed the gate. Fixed: `security_opt` is parsed in
+   order as moby's `parseSecurityOpt` does (split on `=`, else `:`; bare key means true; Go
+   `ParseBool` values; last value wins), `no-new-privileges` is the only allowed key and must end up
+   true; `group_add` is refused (`RULE-OPS-004`); host `pid`/`ipc`/`uts`/`userns_mode`/`cgroup`,
+   `devices`, `device_cgroup_rules`, `sysctls` are refused (`RULE-OPS-003`). Red first: arms
+   `OPS-004-nnp-override`, `OPS-004-seccomp`, `OPS-004-group-root`, `OPS-003-host-pid`,
+   `OPS-003-devices` were added to `tools/fixtures/negative.sh` and **observed failing (the check
+   stayed green, "67 passed, 5 failed")** before the check changed; all red after. Also checked by hand
+   in a scratch copy: bare `no-new-privileges` passes, `=false`, `:yes`, `apparmor:unconfined`,
+   `label=disable`, `ipc: host`, `userns_mode: host`, `sysctls`, `group_add: [wheel]` are refused.
+2. **The frontend skipped the expand step** (important, upheld). The first amendment's "no compose
+   shape" argument judged the compose alone: the previous frontend block starts the old image *and*
+   runs the new one as uid 10002 by its `USER`, writing only `/tmp`. Fixed: the frontend block keeps
+   the previous shape plus the tmpfs and no-new-privileges (`SHIM-OPS-002`, expires 2026-12-31);
+   `RULE-OPS-004` requires exactly that while the shim stands and the full floor once it goes. Red
+   first: declaring `SHIM-OPS-002` against the then-current compose made the gate report the frontend's
+   `read_only`, `cap_drop` and `user:` (observed), green after the block changed. Arms
+   `OPS-004-early-front` (read-only added during the transition) and `OPS-004-front-shim-gone` (shim
+   removed, block left transitional) observed red. Container tier step 6 now runs the new frontend
+   image under the previous block and under the expand block (health, uid 10002, headers); step 7 is
+   the switch change's flags. The backward half — the previous frontend image under the expand block —
+   is reasoned, not executed: that image is root nginx writing `/etc/nginx/conf.d` with no setuid exec,
+   which no-new-privileges and a `/tmp` tmpfs do not touch. The maintainer sign-off is no longer a
+   merge precondition. Existing arms `OPS-004-writable`, `-root-user`, `-zero-pad` were re-anchored
+   (backend read-only removed; a frontend `user:` inserted), still red.
+
+Gate after the second amendments, this checkout (arm64): `make check` GREEN (18 s of 180 s); `make verify`
+GREEN — 74 fixture arms passed, 48 of 51 executable rules proven able to fail, and **`py-test-container`
+skipped again: no Docker daemon (`RISK-TEST-001`)**, so container steps 6 and 7 have not executed.
+
 ## What stays open
 
-- **Merge preconditions:** the container tier's first green run in CI on this tree, and the maintainer's
-  sign-off on the frontend rollback procedure. Neither can be produced in this checkout.
+- **Merge precondition:** the container tier's first green run in CI on this tree. It cannot be
+  produced in this checkout.
+- **Frontend switch change** (`SHIM-OPS-002`, by 2026-12-31): after this change is deployed and
+  `verify-deploy` is green on it, add `user: "10002:10002"`, `read_only: true`, `cap_drop: [ALL]` to the
+  frontend block and remove the shim.
 - **Plan M0:** how `/opt/scripts/deploy.sh` extracts the baked compose, and whether the host's on-disk
   compose is this repository's after the deploy. Required before the contract step flips the image's
   default user.
@@ -174,7 +218,7 @@ declare no automated fixture), and **`py-test-container` skipped: no Docker daem
   removes `SHIM-WEB-001`.
 
 - **SEC-003 is not closed by this change.** Its criterion — the runtime is demonstrably non-root with
-  minimal file rights — is met by the frontend now and by the backend only after the operator's
+  minimal file rights — is met by the frontend's process now (uid 10002 by its image), by its read-only root only after the frontend switch change, and by the backend only after the operator's
   *migrate* and *switch*. `SHIM-OPS-001` carries the date.
 - **SEC-004 is not closed by this change.** Framing is blocked and the headers exist on every path, but
   the strict CSP is report-only and the edge answer has not yet been read after an authorised deploy.

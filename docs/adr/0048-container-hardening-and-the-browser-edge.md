@@ -47,10 +47,19 @@ not depend on the compose changing with it; RULE-OPS-004 requires exactly `USER 
 
 ## Decision 2 — read-only root, tmpfs, no new privileges, capabilities dropped
 
-Both services: `read_only: true`, one size-capped `noexec,nosuid,nodev` tmpfs on `/tmp`,
-`no-new-privileges:true`, an explicit `user:`. The frontend drops every capability from the first
-deploy: it holds no data, listens on 4000, and its own main config moves the pid file, the temp
-paths and the generated server block under `/tmp`.
+Both services: one size-capped `noexec,nosuid,nodev` tmpfs on `/tmp` and `no-new-privileges:true`
+— read in order as Docker reads it, the only `security_opt` key allowed — and no `group_add`. The
+backend also `read_only: true` and an explicit `user:` from this deploy.
+
+The frontend gets its own expand step (amended after the second review, still 2026-11-24). Its image
+needs no compose to be non-root: it ends on `USER 10002:10002`, listens on 4000, and its own main
+config moves the pid file, the temp paths and the generated server block under `/tmp`. So this deploy
+ships that image under the previous deploy's frontend block — no `user:`, a writable root, Docker's
+default capabilities — plus the tmpfs and no-new-privileges, both of which the previous image also
+starts under (`SHIM-OPS-002`). A follow-up switch change adds `user: "10002:10002"`, `read_only: true`
+and `cap_drop: [ALL]` once this image is the rollback target, by 2026-12-31. The first version of this
+ADR said no compose shape could keep the old image and harden the new one; that judged the compose
+alone and was wrong, since the previous block already runs the new image as uid 10002.
 
 ## Decision 3 — the backend switches in four steps, the data never moves
 
@@ -133,13 +142,13 @@ and only the post-deploy step sees Traefik (`RISK-OPS-008`).
 
 ## Consequences
 
-- **Rollback across this change needs the old compose too — for the frontend only.** The old
-  frontend image runs nginx as root, writes its config into `/etc/nginx` and needs `SETUID`,
-  `SETGID` and `CHOWN`, so no read-only, capability-free compose starts it. Hardening the frontend
-  one deploy later would keep `RUNWAY_SHA` rollback plain at the price of shipping it unhardened
-  meanwhile; the frontend holds no data, the restore is three documented commands, and the merge
-  needs the maintainer's sign-off on that trade. The backend needs no restore: its image still
-  defaults to uid 0 and runs under either compose. The data needs nothing.
+- **Every deploy of this change rolls back by pinning `RUNWAY_SHA`.** The frontend's compose
+  hardening waits one deploy (`SHIM-OPS-002`), so the previous frontend image — root nginx writing
+  `/etc/nginx` — still starts; the new one runs as uid 10002 by its own `USER` meanwhile, with a
+  writable root it can barely write to and capabilities that are not effective for it. Only after
+  the frontend switch does a rollback to a commit *before* this one need that commit's compose too
+  (docs/operations.md#rolling-back). The backend needs no restore: its image still defaults to uid
+  0 and runs under either compose. The data needs nothing.
 - FastAPI's `/api/docs` and `/api/redoc` load from `cdn.jsdelivr.net` and run inline script: they
   report violations under the report-only policy and will break under the enforced one. The change
   that removes `SHIM-WEB-001` decides them (off, through the migration pattern, or accepted).

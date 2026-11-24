@@ -179,10 +179,14 @@ Every deploy pushes two tags per image: `:latest` and an immutable `:<commit-sha
 there was only `:latest`, which means there was no rollback target at all** — nothing named the previous
 build.
 
-> **Rolling back to a commit before 2026-11-24 (brief 0076) needs that commit's compose as well as its
-> images.** The on-disk compose is the one the newest image wrote, and since that date it runs the frontend
-> read-only as uid 10002 — an older frontend image writes its config into `/etc/nginx` and cannot start
-> that way. Take the compose out of the backend image you roll back to, then pin:
+> **Rolling back across 2026-11-24 (brief 0076).** While `SHIM-OPS-002` stands, pinning `RUNWAY_SHA`
+> is enough: the frontend block keeps the previous deploy's shape (no `user:`, a writable root, default
+> capabilities, plus a `/tmp` tmpfs and no-new-privileges), so the older frontend image — root nginx
+> writing `/etc/nginx/conf.d` — still starts under it, and the new image runs as its own uid 10002
+> either way. **After the frontend switch change** makes that block read-only as uid 10002 without
+> capabilities, rolling back to a commit *before brief 0076* needs that commit's compose as well as its
+> images; rolling back to brief 0076's commit or later does not. Take the compose out of the backend
+> image you roll back to, then pin:
 >
 > ```sh
 > cd /opt/services/runway
@@ -195,12 +199,12 @@ build.
 > The data needs nothing: the older compose mounts the same `./users.db`. If the backend stopped
 > uncleanly, check that `./db/users.db-journal` does not exist first — the older compose would not see it.
 >
-> This is the one place the deploy of 2026-11-24 is not rollbackable by pinning `RUNWAY_SHA` alone, and it
-> is a choice, not an accident: the frontend is hardened on the deploy that ships the hardening, because no
-> compose shape both keeps the old image (root nginx that writes `/etc/nginx/conf.d` and needs `SETUID`,
-> `SETGID`, `CHOWN`) and is read-only without capabilities. The backend has no such step: its image still
-> defaults to uid 0 and runs under either compose. **Merging brief 0076 needs the maintainer's sign-off on
-> this procedure.**
+> This corrects what stood here when brief 0076 was first written: that no compose shape keeps the old
+> frontend image and is hardened. That was true of the *compose* and missed the point — the new image is
+> non-root by its own `USER` and writes only `/tmp`, so the previous block already starts both images. The
+> frontend therefore gets an expand step like the backend's (second review, ADR 0048): image now, compose
+> `read_only`/`cap_drop ALL`/`user:` one deploy later, so no deploy needs this restore to roll back one
+> step. The backend has no such step: its image still defaults to uid 0 and runs under either compose.
 
 To roll back, pin the last good SHA on the deploy host:
 
@@ -282,7 +286,7 @@ silently failed deploy looks like, and a health probe alone cannot tell the two 
 ## Container hardening
 
 > **Pending the first CI run of the container tier.** What this section says the runtime images *do* — the
-> frontend starting as uid 10002 on a read-only root, the backend writing as uid 10001 with `cap_drop ALL`,
+> frontend starting as uid 10002 under the previous, the expand and the switch change's flags, the backend writing as uid 10001 with `cap_drop ALL`,
 > the nested `./users.db` mount, the migration tool on real volumes, the headers on a 502 — is designed and
 > asserted by `tools/checks/container_hardening.py`, which had not executed anywhere when this was written
 > (arm64, no Docker, `RISK-TEST-001`). Its first green CI run is the trigger for reading this section as
@@ -296,9 +300,9 @@ loses any of that, or if its `user:` and its image's final-stage `USER` stop agr
 | | Frontend | Backend |
 |---|---|---|
 | Image user | `10002:10002` (`runway-web`) | carries `10001:10001` (`runway`); **defaults to `0:0`** until the contract step |
-| Runs as | `10002:10002` | **uid 0 until the switch below**, then `10001:10001` |
-| Capabilities | none | every default except `DAC_OVERRIDE` until the contract step, then none |
-| Writable | `/tmp` | `/tmp`, `/app/data` (`./data`), `/app/db` (`./db`) |
+| Runs as | `10002:10002` (the image's own `USER`; the compose names it from the frontend switch change) | **uid 0 until the switch below**, then `10001:10001` |
+| Capabilities | Docker's default bounding set, none effective for uid 10002 under no-new-privileges, until the frontend switch change (`SHIM-OPS-002`, by 2026-12-31); then none | every default except `DAC_OVERRIDE` until the contract step, then none |
+| Writable | what uid 10002 may write in the image (`/tmp` and the world-writable paths) until the frontend switch change, then `/tmp` only | `/tmp`, `/app/data` (`./data`), `/app/db` (`./db`) |
 
 **`users.db` is mounted into `./db`.** SQLite writes its rollback journal beside the database, so the database
 needs a directory the process can write; the image's `/app` is neither writable nor persistent. The compose

@@ -26,10 +26,15 @@ What it proves, in order (finding SEC-003 and SEC-004, brief 0076, ADR 0048):
 5. Rolling the switch back to uid 0 on migrated data still works — and an account registered
    meanwhile is root's, so switching to uid 10001 again needs the migration again: the dry-run
    plans that change, the apply converges, and both accounts work as uid 10001 afterwards.
-6. Frontend — uid 10002, `cap_drop ALL`, read-only root: healthy, cannot write its own content,
-   and every response carries the browser headers: 200 at /, the SPA fallback, an asset and the
-   favicon, 405 from nginx, the proxied API's 200 and 404, and 502 with the backend absent. None
-   carries HSTS.
+6. Frontend under the previous deploy's compose (no `user:`, writable root, default capabilities)
+   and under this deploy's expand block (SHIM-OPS-002: the same plus the /tmp tmpfs and
+   no-new-privileges): the new image is healthy, runs as its own uid 10002, and sends the headers.
+   That is the forward half of the frontend's rollback trade; the backward half — the previous
+   image under the expand block — needs that image and is not built here.
+7. Frontend under the switch change's flags — uid 10002, `cap_drop ALL`, read-only root: healthy,
+   cannot write its own content, and every response carries the browser headers: 200 at /, the
+   SPA fallback, an asset and the favicon, 405 from nginx, the proxied API's 200 and 404, and 502
+   with the backend absent. None carries HSTS.
 
 It does NOT prove what the public origin sends — Traefik sits in front of this nginx — which is
 the post-deploy check in deploy.yml. And non-root is not tenant isolation; that is the
@@ -76,6 +81,21 @@ LEGACY = ["--user", "0:0", *[a for c in TRANSITIONAL_DROPS for a in ("--cap-drop
 # The deploy compose before brief 0076: no user (the image decides), no hardening at all.
 PREVIOUS_COMPOSE: list[str] = []
 SWITCHED = ["--user", "10001:10001", "--cap-drop", "ALL"]
+
+FRONTEND_TMPFS = "/tmp:rw,noexec,nosuid,nodev,size=16m"
+# The frontend block before brief 0076: nothing but the image's own defaults.
+FRONTEND_PREVIOUS: list[str] = []
+# This deploy's frontend block while SHIM-OPS-002 stands.
+FRONTEND_EXPAND = ["--tmpfs", FRONTEND_TMPFS, "--security-opt", "no-new-privileges:true"]
+# The frontend switch change's block.
+FRONTEND_SWITCHED = [
+    "--read-only",
+    *FRONTEND_EXPAND,
+    "--user",
+    "10002:10002",
+    "--cap-drop",
+    "ALL",
+]
 
 EXPECTED_HEADERS = {
     "content-security-policy": "frame-ancestors 'none'",
@@ -460,10 +480,26 @@ class Scenario:
         check(len(tasks) == 5, f"the first account reads {tasks} after switching again")
         backend_for_frontend = be
 
-        print("  6. frontend: uid 10002, cap_drop ALL, read-only root, headers on every path")
+        print("  6. frontend under the previous compose and under the expand block (SHIM-OPS-002)")
+        probe = ["wget", "--spider", "-q", "http://127.0.0.1:4000/"]
+        for label, flags in (("previous", FRONTEND_PREVIOUS), ("expand", FRONTEND_EXPAND)):
+            fe, fe_port = self.frontend(f"frontend-{label}", backend_for_frontend, flags)
+            check(
+                self.wait_healthy(fe, probe, 60),
+                f"the new frontend image did not start under the {label} compose block",
+            )
+            ids = docker("exec", fe, "sh", "-c", "id -u; id -g").stdout.split()
+            check(ids == ["10002", "10002"], f"the frontend runs as {ids} under the {label} block")
+            self.assert_headers(fe_port, "GET", "/", 200)
+            self.assert_headers(fe_port, "GET", "/api/health", 200)
+            self.stop(fe)
+
+        print("  7. frontend: uid 10002, cap_drop ALL, read-only root, headers on every path")
         self.frontend_checks(backend_for_frontend)
 
-    def frontend(self, name: str, backend_host: str) -> tuple[str, int]:
+    def frontend(
+        self, name: str, backend_host: str, flags: list[str] | None = None
+    ) -> tuple[str, int]:
         cname = f"{name}-{self.tag}"
         docker(
             "run",
@@ -472,11 +508,7 @@ class Scenario:
             cname,
             "--network",
             self.network,
-            *COMMON,
-            "--user",
-            "10002:10002",
-            "--cap-drop",
-            "ALL",
+            *(FRONTEND_SWITCHED if flags is None else flags),
             "-e",
             f"BACKEND_HOST={backend_host}",
             "-p",

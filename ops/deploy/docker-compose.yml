@@ -26,9 +26,11 @@
 # secret ever replaces a ${...} reference. RULE-OPS-004 fails it if a service stops giving up
 # what it gives up below: a writable root, new privileges, its capabilities, or root itself.
 #
-# ROLLING BACK ACROSS 2026-11-24 (brief 0076): restore the compose of the commit you roll back
-# to, not only its image. The frontend image of an older commit writes its config into
-# /etc/nginx and cannot start under `read_only: true`. docs/operations.md#rolling-back.
+# ROLLING BACK ACROSS 2026-11-24 (brief 0076): pinning RUNWAY_SHA is enough while the frontend
+# block below keeps the previous deploy's shape (SHIM-OPS-002). Once the frontend switch change
+# has made it read-only, roll back no further than brief 0076's commit without restoring that
+# commit's compose too: an older frontend image writes its config into /etc/nginx and cannot
+# start read-only. docs/operations.md#rolling-back.
 services:
   backend:
     # Parameterised so the documented rollback works. Unset resolves to :latest, which is
@@ -140,18 +142,18 @@ services:
   frontend:
     image: ghcr.io/ulrichschinz/runway-frontend:${RUNWAY_SHA:-latest}
     restart: unless-stopped
-    # Fully hardened from the first deploy: the frontend holds no data, so there is nothing to
-    # migrate (ADR 0048). It runs as the image's uid 10002 with no capability at all — it listens
-    # on 4000, not a privileged port — and writes only /tmp, where its command puts the generated
-    # server config, the pid file and nginx's temp files.
-    user: "10002:10002"
-    read_only: true
+    # The expand step (ADR 0048, SHIM-OPS-002). The image runs as its own uid 10002 and writes
+    # only /tmp, where its command puts the generated server config, the pid file and nginx's
+    # temp files. This block deliberately keeps the previous deploy's shape — no `user:`, a
+    # writable root, Docker's default capabilities, none of them effective for uid 10002 — so the
+    # previous frontend image (root nginx, writing /etc/nginx/conf.d) still starts under it and
+    # pinning RUNWAY_SHA rolls back. Both images start under the tmpfs and no-new-privileges.
+    # The frontend switch change adds `user: "10002:10002"`, `read_only: true` and
+    # `cap_drop: [ALL]`; RULE-OPS-004 requires exactly this shape until SHIM-OPS-002 is removed.
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
     environment:
       - BACKEND_HOST=backend
     depends_on:
