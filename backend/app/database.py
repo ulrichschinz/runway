@@ -1,12 +1,13 @@
 import logging
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
 import aiosqlite
 
 from app.config import settings
+from app.task_storage import LAYOUT_STORAGE_ID, Account, new_storage_id
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,44 @@ MIGRATIONS = (
     "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
     "ALTER TABLE users ADD COLUMN full_name TEXT DEFAULT ''",
     "ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''",
+    # SEC-001, ADR 0043 — expand. The Taskwarrior directory is named by this id, never by the
+    # username. NULL only between this ALTER and the backfill below, and for a row an older
+    # image inserts after a rollback; the backfill fills both on the next start. UNIQUE cannot
+    # be declared by ALTER TABLE, so the index after it carries it.
+    "ALTER TABLE users ADD COLUMN storage_id TEXT"
+    " CHECK (storage_id IS NULL OR (length(storage_id) = 32"
+    " AND storage_id NOT GLOB '*[^0-9a-f]*'))",
+    # 'legacy' is the default so a row written by the previous image — which knows nothing of
+    # this column and still creates DATA_ROOT/<username>/ — is described truthfully.
+    "ALTER TABLE users ADD COLUMN storage_layout TEXT NOT NULL DEFAULT 'legacy'"
+    " CHECK (storage_layout IN ('legacy', 'storage_id'))",
+    "CREATE UNIQUE INDEX IF NOT EXISTS users_storage_id ON users (storage_id)",
+    # Immutable once set: an id that could be rewritten would be a path that could be chosen.
+    """CREATE TRIGGER IF NOT EXISTS users_storage_id_immutable
+    BEFORE UPDATE OF storage_id ON users
+    WHEN OLD.storage_id IS NOT NULL AND NEW.storage_id IS NOT OLD.storage_id
+    BEGIN SELECT RAISE(ABORT, 'storage_id is immutable'); END""",
 )
+
+# The migration's protocol (SEC-001, M1.2): one row per decision the operator CLI took about
+# one account. Ids, a path relative to DATA_ROOT, counts and a manifest digest — never a task's
+# text and never a credential. `manifest` is a SHA-256 over the sorted (path, size, SHA-256)
+# list of the copied files; rollback compares against it to know whether the new store has
+# been written to since.
+CREATE_STORAGE_MIGRATIONS = """
+CREATE TABLE IF NOT EXISTS storage_migrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    storage_id TEXT NOT NULL,
+    legacy_path TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('migrated', 'provisioned', 'blocked', 'rolled_back')),
+    reason TEXT NOT NULL DEFAULT '',
+    files INTEGER NOT NULL DEFAULT 0,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    manifest TEXT NOT NULL DEFAULT '',
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
 
 # SQLite's own words for "this column is already there", observed rather than guessed: on
 # sqlite3 3.53.4 through aiosqlite 0.20.0, re-adding a column raises
@@ -137,6 +175,120 @@ async def get_db():
     async with aiosqlite.connect(settings.db_path) as db:
         db.row_factory = aiosqlite.Row
         yield db
+
+
+@asynccontextmanager
+async def users_connection() -> AsyncIterator[aiosqlite.Connection]:
+    """The users database outside a request — for the storage migration CLI."""
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        yield db
+
+
+# --- accounts and their storage (SEC-001, ADR 0043) ----------------------------------------
+
+
+def _account(row) -> Account:
+    return Account(
+        id=row["id"],
+        username=row["username"],
+        storage_id=row["storage_id"] or "",
+        storage_layout=row["storage_layout"],
+    )
+
+
+async def get_account(db, username: str) -> Account | None:
+    """The typed identity of one account, or None. What `get_task_store` resolves."""
+    async with db.execute(
+        "SELECT id, username, storage_id, storage_layout FROM users WHERE username=?",
+        (username,),
+    ) as cur:
+        row = await cur.fetchone()
+    return _account(row) if row else None
+
+
+async def list_accounts(db) -> list[Account]:
+    async with db.execute(
+        "SELECT id, username, storage_id, storage_layout FROM users ORDER BY id"
+    ) as cur:
+        return [_account(row) for row in await cur.fetchall()]
+
+
+async def create_account(db, username: str, hashed_password: str, api_key: str) -> Account:
+    """Insert a new account in the storage-id layout. Raises sqlite3.IntegrityError when the
+    username is taken. Never the legacy layout: that is created by nothing any more."""
+    storage_id = new_storage_id()
+    cur = await db.execute(
+        "INSERT INTO users (username, hashed_password, api_key, storage_id, storage_layout)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (username, hashed_password, api_key, storage_id, LAYOUT_STORAGE_ID),
+    )
+    await db.commit()
+    return Account(
+        id=cur.lastrowid or 0,
+        username=username,
+        storage_id=storage_id,
+        storage_layout=LAYOUT_STORAGE_ID,
+    )
+
+
+async def delete_account(db, account_id: int) -> None:
+    """Undo `create_account` when its store could not be provisioned."""
+    await db.execute("DELETE FROM users WHERE id=?", (account_id,))
+    await db.commit()
+
+
+async def backfill_storage_ids(db) -> int:
+    """Give every account without one a storage id. Idempotent; returns how many it set.
+
+    Runs at every boot. It never changes the layout: an account backfilled here is still
+    served from its legacy directory until the migration has copied it.
+    """
+    async with db.execute("SELECT id FROM users WHERE storage_id IS NULL OR storage_id=''") as cur:
+        rows = await cur.fetchall()
+    for row in rows:
+        await db.execute(
+            "UPDATE users SET storage_id=? WHERE id=? AND (storage_id IS NULL OR storage_id='')",
+            (new_storage_id(), row["id"]),
+        )
+    await db.commit()
+    return len(rows)
+
+
+async def set_storage_layout(db, account_id: int, layout: str) -> None:
+    await db.execute("UPDATE users SET storage_layout=? WHERE id=?", (layout, account_id))
+    await db.commit()
+
+
+async def record_storage_migration(
+    db,
+    account: Account,
+    *,
+    legacy_path: str,
+    action: str,
+    reason: str = "",
+    files: int = 0,
+    size: int = 0,
+    manifest: str = "",
+) -> None:
+    await db.execute(
+        "INSERT INTO storage_migrations"
+        " (user_id, storage_id, legacy_path, action, reason, files, bytes, manifest)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (account.id, account.storage_id, legacy_path, action, reason, files, size, manifest),
+    )
+    await db.commit()
+
+
+async def last_migration_manifest(db, account_id: int) -> str | None:
+    """The manifest the most recent successful migration of this account recorded."""
+    async with db.execute(
+        "SELECT manifest FROM storage_migrations WHERE user_id=? AND action='migrated'"
+        " ORDER BY id DESC LIMIT 1",
+        (account_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    return row["manifest"] if row else None
 
 
 # --- the audit database -------------------------------------------------------------------
@@ -344,6 +496,8 @@ async def init_db() -> str:
                     "schema migration failed",
                     extra={"statement": statement, "sqlite_error": str(failure)},
                 )
+        # SEC-001: every account gets its storage id before anything can resolve it.
+        await backfill_storage_ids(db)
         # generate api_key for users that don't have one
         async with db.execute("SELECT username FROM users WHERE api_key IS NULL") as cur:
             rows = await cur.fetchall()
@@ -358,6 +512,7 @@ async def init_db() -> str:
         await db.execute(CREATE_SITE_SETTINGS)
         await db.execute(CREATE_REVIEWS)
         await db.execute(CREATE_PROJECT_STATUS)
+        await db.execute(CREATE_STORAGE_MIGRATIONS)
         # seed allow_registration from env if not set
         await db.execute(
             "INSERT OR IGNORE INTO site_settings (key, value) VALUES ('allow_registration', ?)",

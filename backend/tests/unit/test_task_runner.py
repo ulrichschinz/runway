@@ -6,10 +6,15 @@ Everything else in the unit tier replaces `_run` with the fake. These do not: th
 """
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from app.services import task_runner
+from app.task_storage import TaskStore
+
+# A resolved store, as `get_task_store` would hand it over. `_run` takes nothing else.
+ALICE = TaskStore(Path("/data/0123456789abcdef0123456789abcdef"), "alice")
 
 
 class _Completed:
@@ -40,18 +45,18 @@ class TestInvocation:
     def test_stdin_is_never_inherited(self, spawned):
         """A recurring instance's modify prompts "modify all pending recurrences?" and would
         block on an inherited terminal until the timeout (500). /dev/null answers no."""
-        task_runner._run("alice", ["export"])
+        task_runner._run(ALICE, ["export"])
         _cmd, kwargs = spawned.calls[0]
         assert kwargs["stdin"] is subprocess.DEVNULL
 
     def test_recurrence_confirmation_is_off_and_precedes_the_caller_args(self, spawned):
-        task_runner.modify_task("alice", "11111111-1111-4111-8111-111111111111", ["+next"])
+        task_runner.modify_task(ALICE, "11111111-1111-4111-8111-111111111111", ["+next"])
         cmd, _kwargs = spawned.calls[0]
         assert "rc.recurrence.confirmation=no" in cmd
         assert cmd.index("rc.recurrence.confirmation=no") < cmd.index("modify")
 
     def test_every_own_override_precedes_the_caller_args(self, spawned):
-        task_runner._run("alice", ["export"])
+        task_runner._run(ALICE, ["export"])
         cmd, _kwargs = spawned.calls[0]
         assert cmd[0] == "task"
         assert cmd[1 : 1 + len(task_runner._OWN_OVERRIDES)] == list(task_runner._OWN_OVERRIDES)
@@ -62,7 +67,7 @@ class TestExitCodes:
     @pytest.mark.parametrize("rc", [0, 1])
     def test_zero_and_one_return_stdout(self, spawned, rc):
         spawned.result = _Completed(rc, "out")
-        assert task_runner._run("alice", ["export"]) == "out"
+        assert task_runner._run(ALICE, ["export"]) == "out"
 
     def test_two_is_a_rejection_carrying_stderr(self, spawned):
         """Taskwarrior exits 2 for input it refuses: a bad date, a bad priority, recur
@@ -71,13 +76,13 @@ class TestExitCodes:
             2, stderr="'notadate' is not a valid date in the 'Y-M-D' format.\n"
         )
         with pytest.raises(task_runner.TaskwarriorRejected, match="not a valid date") as exc:
-            task_runner._run("alice", ["add", "due:notadate"], ["t"])
+            task_runner._run(ALICE, ["add", "due:notadate"], ["t"])
         assert isinstance(exc.value, ValueError)
 
     def test_two_without_stderr_still_says_what_happened(self, spawned):
         spawned.result = _Completed(2)
         with pytest.raises(task_runner.TaskwarriorRejected, match="rejected"):
-            task_runner._run("alice", ["export"])
+            task_runner._run(ALICE, ["export"])
 
     @pytest.mark.parametrize(
         "stderr",
@@ -100,7 +105,7 @@ class TestExitCodes:
         spawned.result = _Completed(2, stderr=stderr + "\n")
         with caplog.at_level("ERROR", logger=task_runner.__name__):
             with pytest.raises(RuntimeError) as exc:
-                task_runner._run("alice", ["add"], ["t"])
+                task_runner._run(ALICE, ["add"], ["t"])
         assert not isinstance(exc.value, ValueError)
         assert str(exc.value) == task_runner._SYSTEM_FAULT_MESSAGE
         assert "/data" not in str(exc.value)
@@ -109,5 +114,23 @@ class TestExitCodes:
     def test_any_other_code_stays_a_runtime_error(self, spawned):
         spawned.result = _Completed(3, stderr="boom")
         with pytest.raises(RuntimeError, match="boom") as exc:
-            task_runner._run("alice", ["export"])
+            task_runner._run(ALICE, ["export"])
         assert not isinstance(exc.value, ValueError)
+
+
+class TestTheStoreIsTheEnvironment:
+    """SEC-001: the three variables come from the resolved store, and from nothing else."""
+
+    def test_taskdata_taskrc_and_home_point_into_the_store(self, spawned):
+        task_runner._run(ALICE, ["export"])
+        _cmd, kwargs = spawned.calls[0]
+        env = kwargs["env"]
+        assert env["TASKDATA"] == str(ALICE.path)
+        assert env["HOME"] == str(ALICE.path)
+        assert env["TASKRC"] == str(ALICE.path / ".taskrc")
+
+    def test_a_username_is_not_a_store(self, spawned):
+        """The type is the control: a bare name has no directory to give the binary."""
+        with pytest.raises(AttributeError):
+            task_runner._run("alice/../alice", ["export"])  # type: ignore[arg-type]
+        assert spawned.calls == []

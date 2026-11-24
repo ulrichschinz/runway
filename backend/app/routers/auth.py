@@ -5,7 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app import audit, rate_limit
 from app.auth import create_access_token, hash_password, verify_password
-from app.database import generate_api_key, get_allow_registration, get_db
+from app.database import (
+    create_account,
+    delete_account,
+    generate_api_key,
+    get_allow_registration,
+    get_db,
+)
 from app.dependencies import get_current_user
 from app.models import (
     ApiKeyInfo,
@@ -17,7 +23,8 @@ from app.models import (
     UserLogin,
     UserProfileUpdate,
 )
-from app.services.user_service import init_user_data
+from app.services.user_service import provision_store
+from app.task_storage import username_problem
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -50,12 +57,23 @@ async def register(request: Request, body: UserCreate, db: Connection = Depends(
             detail="registration is disabled on this instance",
         )
         raise HTTPException(status_code=403, detail="Registration is disabled")
-    try:
-        await db.execute(
-            "INSERT INTO users (username, hashed_password, api_key) VALUES (?, ?, ?)",
-            (body.username, hash_password(body.password), generate_api_key()),
+    # A login and display rule, not the path control: the store is named by a random id
+    # whatever the name is (SEC-001, ADR 0043). 400, the status this route already uses for a
+    # name it will not accept, so the OpenAPI document does not move.
+    problem = username_problem(body.username)
+    if problem:
+        audit.record(
+            audit.REGISTERED,
+            outcome=audit.REFUSED,
+            actor=body.username,
+            route=route,
+            detail="username is not a plain name",
         )
-        await db.commit()
+        raise HTTPException(status_code=400, detail=problem)
+    try:
+        account = await create_account(
+            db, body.username, hash_password(body.password), generate_api_key()
+        )
     except Exception as e:
         audit.record(
             audit.REGISTERED,
@@ -65,7 +83,13 @@ async def register(request: Request, body: UserCreate, db: Connection = Depends(
             detail="username already taken",
         )
         raise HTTPException(status_code=400, detail="Username already taken") from e
-    init_user_data(body.username)
+    try:
+        provision_store(account)
+    except OSError as e:
+        # An account without a store would be refused on every task route; better no account.
+        await delete_account(db, account.id)
+        logger.error("account store could not be provisioned", extra={"username": body.username})
+        raise HTTPException(status_code=500, detail="Could not create the account") from e
     logger.info("account registered", extra={"username": body.username})
     audit.record(audit.REGISTERED, outcome=audit.SUCCESS, actor=body.username, route=route)
     return UserInfo(username=body.username)

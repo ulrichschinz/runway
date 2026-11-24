@@ -62,3 +62,28 @@ shims:
     expires: 2026-11-25
     re_open_trigger: "the expiry passes, or a caller is found still using the Bearer shape after Step 13"
     decision_record: docs/adr/0018-cors-startup-refusal-and-the-inbox-shim.md
+
+  - id: SHIM-SEC-007
+    what: >
+      `task_storage.resolve` in `compat` mode (TASK_STORAGE_MODE, the default) serves an account
+      with users.storage_layout='legacy' from DATA_ROOT/<username>/, when that name is one plain
+      path component resolving to a real directory directly under the root.
+    why: >
+      Every account created before brief 0065 still has its tasks there. Refusing the layout in
+      the same change would take every existing user's task list away on the deploy, before the
+      operator has taken a restore point and run the migration (finding SEC-001, ADR 0043).
+    removal: >
+      The contract step of brief 0065, its own change: once `python -m
+      app.services.storage_migration plan` reports every account `done` in production,
+      TASK_STORAGE_MODE=strict has been set and run for 14 days, and a migrated account has been
+      restored from backup once. Then the compat branch, the legacy layout value and the old
+      directories go.
+    evidence: >
+      `SELECT COUNT(*) FROM users WHERE storage_layout='legacy'` on the deploy host is zero, and
+      the audit log shows no `storage.refused` row with reason "legacy layout refused in strict
+      mode" over the soak. Both are queries on the host, not something this repository can see.
+    owner: maintainer
+    approved_on: 2026-11-24
+    expires: 2027-02-28
+    re_open_trigger: "the expiry passes, the plan reports a blocked account that cannot be migrated, or an alias account is found"
+    decision_record: docs/adr/0043-account-identity-and-taskwarrior-storage.md

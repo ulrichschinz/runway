@@ -608,6 +608,78 @@ wrapped, and a failure is logged at `ERROR` as `the audit event could not be wri
 served anyway. So if a row seems absent, grep the log stream for that message before concluding the event
 did not happen.
 
+## Moving task storage off the username
+
+Finding SEC-001, [ADR 0043](adr/0043-account-identity-and-taskwarrior-storage.md), brief
+[0065](briefs/0065-account-identity-is-not-a-storage-path.md). Since that change a new account's tasks
+live in `data/<storage_id>/`. Accounts created before it keep `users.storage_layout='legacy'` and their tasks
+in `data/<username>/` until this procedure has run; the default `TASK_STORAGE_MODE=compat` serves them from
+there only when the name is one plain path component (`SHIM-SEC-007`, expires 2027-02-28).
+
+Nothing below has been run against production by this repository. Each step is the operator's, on the deploy
+host, and none of them copies a task, a token or a password into a ticket, a chat or a log.
+
+**1. Before anything — baseline (plan milestone M0).**
+
+- Is registration open? `sqlite3 users.db "SELECT value FROM site_settings WHERE key='allow_registration'"`.
+  If `true`, close it (`PUT /admin/settings`, or Settings in the web UI) until step 5 — containment, not the fix.
+- Record the running commit (`GET /health`), the image digests (`docker compose images`), the process UID
+  (`docker compose exec backend id -u`) and the mount permissions of `data/`.
+- Take an **encrypted backup** of `users.db`, `data/audit.db` and every directory under `data/`, and restore it
+  once into a scratch directory to prove it restores. This is the rollback point after a write (step 4).
+
+**2. The dry run.** The backend can keep running for this; it changes nothing.
+
+```sh
+docker compose run --rm --no-deps backend python -m app.services.storage_migration plan
+```
+
+One line per account: `user <id>  <status>  <files> files <bytes> bytes  <legacy path> -> <storage id>`, paths
+relative to `DATA_ROOT`, no task text. Statuses: `done` (already in the new layout), `ready` (will be copied),
+`provision` (no legacy directory: an empty store is created), `blocked` with a reason. Exit 1 when anything is
+blocked. **`blocked: alias of another account's directory` is a possible incident** — two account names land
+in the same directory, so one account may have read or written the other's tasks. Lock the accounts concerned,
+keep the originals untouched, and follow the incident process; do not "fix" the directory. Every other blocked
+reason (a symlink, a hard link, a special file, a foreign owner, a name that is not one component, a target with
+other content) stops that account only, and needs a human decision before it is retried.
+
+**3. Apply, with the backend stopped** — a live SQLite store copied while it is written is not a copy.
+
+```sh
+docker compose stop backend
+docker compose run --rm --no-deps backend python -m app.services.storage_migration apply
+docker compose start backend
+```
+
+`apply` copies each `ready` account into a staging directory, verifies every file's size and SHA-256 against
+the source, renames it into place, re-verifies, and only then switches the account. **The legacy directory is
+never modified or removed.** It writes a row per account to `users.db`'s `storage_migrations` table and a
+`storage.migrated` row to the audit log. It is safe to run again: `done` accounts are skipped and an interrupted
+run is completed. `--user-id N` limits it to one account; `--json` prints one JSON document.
+
+**4. Rolling back one account.** Only while the new store has not been written to since the copy:
+
+```sh
+docker compose run --rm --no-deps backend python -m app.services.storage_migration rollback --user-id N
+```
+
+**After a write to a migrated store, rollback refuses**, and the way back is the backup from step 1 or a
+forward fix. **Redeploying the previous image after a migration serves the frozen legacy copy**: every task
+written since the migration would seem lost (it is still in `data/<storage_id>/`). Prefer fixing forward.
+
+**5. The switch.** When `plan` reports every account `done`: set `TASK_STORAGE_MODE=strict` in the host `.env`
+and restart. A legacy account is then refused with 500 and a `storage.refused` audit row:
+
+```sql
+SELECT recorded_at, actor, detail FROM audit_events WHERE event = 'storage.refused' ORDER BY id DESC;
+```
+
+Registration may be reopened once the commit running in production has its container tier green in CI.
+
+**6. Contract — not yet, and not by hand.** Removing `data/<username>/` directories is its own change, after
+`strict` has run for 14 days and one migrated account has been restored from the backup. Until then the legacy
+directories are the rollback source; the backup still has to include them.
+
 ## The deploy host's topology
 
 **Read directly from the host on 2026-08-24 and checked in as** [`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml).

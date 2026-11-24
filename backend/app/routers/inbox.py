@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_task_store
 from app.services import task_service
+from app.task_storage import TaskStore
 
 router = APIRouter(prefix="/inbox", tags=["inbox"])
 
@@ -25,6 +26,7 @@ class InboxItem(BaseModel):
 async def webhook_inbox(
     item: InboxItem,
     username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
 ):
     from app.models import TaskCreate
 
@@ -32,7 +34,7 @@ async def webhook_inbox(
     # (rc 2) is the caller's error, 400; a failing binary is a 500. Unmapped, both were 500.
     try:
         task = task_service.create_task(
-            username,
+            store,
             TaskCreate(
                 description=item.description,
                 priority=item.priority,
@@ -40,7 +42,7 @@ async def webhook_inbox(
         )
 
         if item.note:
-            task_service.annotate_task(username, task.uuid, item.note)
+            task_service.annotate_task(store, task.uuid, item.note)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:

@@ -44,9 +44,11 @@ its own argument to the same pair, though it declares a second copy of the tuple
 importing the first ([`tools/grant-admin.py:24`](../tools/grant-admin.py)). `admin` may read and
 change site settings, list every account, and change any account's role.
 
-**A role is not a data boundary.** Task data is separated by the per-user Taskwarrior data directory
-that [`backend/app/services/task_runner.py:79-87`](../backend/app/services/task_runner.py) builds
-from the authenticated username — `TASKDATA`, `TASKRC` and `HOME` all point inside it. An admin has
+**A role is not a data boundary.** Task data is separated by the per-account Taskwarrior data
+directory that [`backend/app/task_storage.py`](../backend/app/task_storage.py) resolves from the
+account's random, immutable `storage_id` — never from the username since brief 0065 (finding
+SEC-001) — and that [`backend/app/services/task_runner.py`](../backend/app/services/task_runner.py)
+hands to the binary as `TASKDATA`, `TASKRC` and `HOME`. An admin has
 no route to another account's tasks and does not acquire one by being an admin. This matters more
 than the role model does: it means a compromised admin account reads *settings and usernames*, not
 everybody's data.
@@ -127,6 +129,18 @@ priority and tag shapes (`TAG_RE` for a tag written or added, the looser `EXISTI
 stored tag being removed, whose first character still excludes a digit or `.`, because the
 binary reads `-1abc` as description text), and lines 277-280 pin the recurrence grammar. A tag removal is a `-tag`
 modifier and goes before `--` like every other modifier; after it, it would be description text.
+
+### The account name, which used to be a path
+
+A username is chosen by whoever registers. Until brief 0065 it was also the name of the
+Taskwarrior directory, so `alice/../alice` was alice's store and `../x` a directory outside the
+data root (finding SEC-001, reproduced in both test tiers on `5d85f6e`). **Enforced:** the store is
+named by a random `storage_id` and resolved in one module (`RULE-SEC-003`); the HTTP path is pinned
+by `tests/unit/test_storage_identity.py` and, against the real binary, by
+`tests/container/test_storage_isolation.py`. **Asserted only:** that production holds no alias
+account created before the change, and that no legacy account is served once the switch is made —
+both depend on the operator running the migration and setting `TASK_STORAGE_MODE=strict`
+(`RISK-SEC-006`).
 
 ### Values that must stay parseable: filters and modifiers
 
@@ -290,11 +304,12 @@ Everything this application does to the world outside its own process, exhaustiv
 | Execute the `task` binary | [`task_runner.py:93-100`](../backend/app/services/task_runner.py) | `timeout=10`, `shell=False`, argv validated, one call site |
 | Write `users.db` | [`database.py:89-92`](../backend/app/database.py) via `get_db` | the only module permitted to open a connection |
 | Write `data/audit.db` | [`database.py:119-135`](../backend/app/database.py) via `audit_connection` | 5s lock wait; a failed write logs and the request still succeeds |
-| Create a user's data directory and copy a `.taskrc` into it | [`user_service.py:9-14`](../backend/app/services/user_service.py) | once, at registration |
+| Create a user's data directory and copy a `.taskrc` into it | [`user_service.py`](../backend/app/services/user_service.py) `provision_store` | once, at registration; `DATA_ROOT/<storage_id>/` only, mode 0700 |
+| Copy a legacy store to `DATA_ROOT/<storage_id>/` | [`storage_migration.py`](../backend/app/services/storage_migration.py) | operator CLI only, never a request; source never modified |
 | Write lines to stdout | [`logging_setup.py:290-297`](../backend/app/logging_setup.py) | one handler, one formatter, one redaction filter |
 
 That is the complete list. `grep` for `subprocess` across `backend/app/` returns exactly one import
-and one call, both in `task_runner.py`. There is no file write outside the two `mkdir` calls above, no
+and one call, both in `task_runner.py`. There is no file write outside the `mkdir` calls above and the operator-run migration, no
 mail, no queue, no scheduler, no background task.
 
 The single-choke-point property is the structurally important one. It is why the argv hardening in
@@ -377,12 +392,14 @@ silently emptied by the next deploy while continuing to look present. It holds n
 caller fingerprint — no IP address, no user-agent — which is a deliberate deferral of a retention
 question, recorded in [ADR 0026](adr/0026-the-audit-log.md).
 
-**The Taskwarrior data directory** — `DATA_ROOT/<username>/`, holding a TaskChampion SQLite file and
-a `.taskrc`, created at
-[`backend/app/services/user_service.py:9-14`](../backend/app/services/user_service.py) and addressed
-only through `TASKDATA` at
-[`backend/app/services/task_runner.py:79-87`](../backend/app/services/task_runner.py). **This is the
-tenancy boundary**, which is why §2 is as long as it is.
+**The Taskwarrior data directory** — `DATA_ROOT/<storage_id>/`, holding a TaskChampion SQLite file
+and a `.taskrc`, created by `provision_store` in
+[`backend/app/services/user_service.py`](../backend/app/services/user_service.py), resolved only by
+[`backend/app/task_storage.py`](../backend/app/task_storage.py) (`RULE-SEC-003`) and addressed only
+through `TASKDATA` in [`backend/app/services/task_runner.py`](../backend/app/services/task_runner.py).
+**This is the tenancy boundary**, which is why §2 is as long as it is. Accounts created before
+brief 0065 still live in `DATA_ROOT/<username>/` until the operator migrates them, served in
+`compat` mode only for a plain single-component name; that residual is `RISK-SEC-006`.
 
 **The browser** — `localStorage` holds `token`, `role`, `username`, `email`, `fullName`, `theme`
 and `ui` ([`ops/surfaces/spa.json`](../ops/surfaces/spa.json)); `ui` is the non-secret choice

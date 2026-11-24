@@ -67,6 +67,12 @@ ROLE_CHANGED = "admin.role.changed"
 REGISTRATION_TOGGLED = "admin.registration.toggled"
 ADMIN_BOOTSTRAP = "admin.bootstrap"
 TASK_DELETED = "task.deleted"
+# SEC-001 (ADR 0043): the storage boundary refused an account, or the operator CLI moved one
+# to its storage-id directory or returned it. Who is still on the legacy layout is a query on
+# users.storage_layout, not an event per request.
+STORAGE_REFUSED = "storage.refused"
+STORAGE_MIGRATED = "storage.migrated"
+STORAGE_ROLLED_BACK = "storage.rolled_back"
 
 EVENTS = frozenset(
     {
@@ -82,6 +88,9 @@ EVENTS = frozenset(
         REGISTRATION_TOGGLED,
         ADMIN_BOOTSTRAP,
         TASK_DELETED,
+        STORAGE_REFUSED,
+        STORAGE_MIGRATED,
+        STORAGE_ROLLED_BACK,
     }
 )
 
