@@ -117,6 +117,10 @@ green in CI on amd64 before SEC-001 counts as closed and before registration is 
 
 ## Results
 
+- Fan-in baseline (`ops/structure-baseline.toml`, `RULE-ARCH-003`) raised deliberately, with dated reasons:
+  `database.py` 7 → 8 and `audit.py` 5 → 6 (the migration CLI), `task_storage.py` recorded at 10 (the identity
+  type every Taskwarrior layer carries). The main checkout's index had not seen the then-untracked new
+  module, so only the clean-worktree `verify` showed it.
 - REST/OpenAPI and MCP snapshots: **unchanged**. DB schema snapshot: additive change only. Env: one variable.
 - `make check`: GREEN on the final commit. `make verify`: see the commit message / hand-over — run in a clean
   worktree, because the untracked audit evidence in the main checkout (`docs/security-audits/`, not part of
