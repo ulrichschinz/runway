@@ -234,10 +234,14 @@
       "PasswordChange": {
         "properties": {
           "current_password": {
+            "description": "At most 1024 bytes in UTF-8. No minimum: a password set before the rule still works.",
+            "maxLength": 1024,
             "title": "Current Password",
             "type": "string"
           },
           "new_password": {
+            "description": "The password to set: 8 to 1024 bytes in UTF-8 (counted in bytes, not characters).",
+            "maxLength": 1024,
             "title": "New Password",
             "type": "string"
           }
@@ -1115,6 +1119,12 @@
             "title": "Access Token",
             "type": "string"
           },
+          "password_change_required": {
+            "default": false,
+            "description": "True when this login was accepted by a pre-2026-11 bcrypt hash for a password of 72 bytes or more. bcrypt read only its first 72 bytes, so the stored hash cannot be upgraded from it: set a new password (PUT /auth/password). After a transition window such a login is refused.",
+            "title": "Password Change Required",
+            "type": "boolean"
+          },
           "token_type": {
             "default": "bearer",
             "title": "Token Type",
@@ -1130,6 +1140,8 @@
       "UserCreate": {
         "properties": {
           "password": {
+            "description": "The password to set: 8 to 1024 bytes in UTF-8 (counted in bytes, not characters).",
+            "maxLength": 1024,
             "title": "Password",
             "type": "string"
           },
@@ -1176,6 +1188,8 @@
       "UserLogin": {
         "properties": {
           "password": {
+            "description": "At most 1024 bytes in UTF-8. No minimum: a password set before the rule still works.",
+            "maxLength": 1024,
             "title": "Password",
             "type": "string"
           },

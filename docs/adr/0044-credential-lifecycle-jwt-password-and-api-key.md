@@ -6,13 +6,16 @@
   (`get_current_user`), `backend/app/database.py` (column `users.auth_version`, trigger
   `users_auth_version_monotone`, the `site_settings` row `auth_version_expand_at`,
   `get_auth_version`, `change_password`), `backend/app/routers/auth.py` (login, password change),
-  the settings pages of both UIs, `SHIM-SEC-008`
-- **Brief:** [0066](../briefs/0066-a-password-change-ends-every-session.md)
+  the settings pages of both UIs, `SHIM-SEC-008`; amended for Decision 5 by `backend/app/auth.py`
+  (password policy, Argon2id, legacy bcrypt), `backend/app/models.py`, `backend/app/middleware.py`
+  (body limit), `frontend/nginx.conf`, `SHIM-SEC-009`
+- **Brief:** [0066](../briefs/0066-a-password-change-ends-every-session.md); Decision 5:
+  [0067](../briefs/0067-passwords-are-hashed-with-argon2id.md) (amended 2026-11-24)
 
-This record is written for milestone M2.1 of the security remediation plan (finding **REV-001**).
-The password hash (M2.2, SEC-006) and the API-key lifecycle (M4, `WAIVER-SEC-003`) are later
-decisions of the same lifecycle and will be added here as their own sections when they are made;
-nothing below decides them.
+This record was written for milestone M2.1 of the security remediation plan (finding **REV-001**)
+and amended for M2.2 (finding **SEC-006**, Decision 5). The API-key lifecycle (M4,
+`WAIVER-SEC-003`) is a later decision of the same lifecycle and will be added as its own section
+when it is made; nothing below decides it.
 
 ## Context
 
@@ -105,6 +108,63 @@ For an incident the operator ends an account's sessions with one statement on th
 `UPDATE users SET auth_version = auth_version + 1 WHERE username = ?` — and every session of every
 account with the same statement without the `WHERE`. Both are in `docs/operations.md`. This is the
 "global event" of the plan: no secret rotation, no restart, API keys untouched.
+
+## Decision 5 — the password hash: Argon2id, bounded in bytes, migrated on login (M2.2)
+
+*Added 2026-11-24, brief 0067.* Passwords were hashed with bcrypt through passlib, which reads only
+the first 72 UTF-8 bytes: two passwords sharing a 72-byte prefix were the same password (SEC-006).
+No password field and no request body had a limit, an unknown account cost no hash work (so the
+response time said whether it existed), and a NUL byte made passlib raise — a 500.
+
+Decision gate D2 of the plan: **Argon2id with measured server parameters and rehash-on-login.**
+
+1. **Policy in UTF-8 bytes.** Every password field at most 1024 bytes; a password being set at least
+   8. A login has no minimum, so a password set before the rule still logs in. Pydantic refuses
+   outside the rule with 422 while parsing, before any hash or query; the OpenAPI document declares
+   `maxLength: 1024` (a true bound in characters) and the byte rule in the description.
+2. **Body limit** in the backend, outside every route: 16 KiB on `/auth/*`, 1 MiB elsewhere (nginx's
+   default, so nothing the SPA path could send is refused), 413 before a declared oversized body is
+   read and as soon as a chunked one passes the limit; nginx gets the 16 KiB on `/api/auth/` too.
+3. **Argon2id** via argon2-cffi used directly; passlib is removed. Parameters: t=3, m=64 MiB, p=1,
+   measured on 2026-11-24 at 75 ms per verification on the development host against a budget of
+   250 ms and 64 MiB on the deploy host. Logins verify on the event loop one at a time, so the
+   memory budget is also the peak. The deploy host was not measured; `python -m app.auth` does it
+   there, before Switch 1. Tests run reduced parameters, marked test-only in `conftest.py`; one test
+   runs the production ones.
+4. **Legacy bcrypt** is verified by the bcrypt package directly, with the 72-byte truncation explicit,
+   against vectors passlib itself produced. An **exact** match — input of 71 bytes or fewer without a
+   NUL, so bcrypt saw every byte — is rehashed to Argon2id by a compare-and-swap on the verified hash,
+   without touching `auth_version` (same password, no session ends). A match for **72 bytes or more is
+   ambiguous**: the hash cannot tell the real password from its prefix plus anything, so the typed
+   value never becomes the new hash. During a window the login succeeds and the `Token` says
+   `password_change_required: true`; both UIs send the person to set a new password; after the window
+   it is refused and the operator reset in `docs/operations.md` is the recovery path.
+5. **No existence or scheme oracle.** Every login runs one Argon2id verification and one bcrypt check
+   at cost 12, against a dummy where the account has no hash of that kind; every failure is the same
+   401. Equal work, not a constant-time proof: the success path (rehash) differs, and only for
+   someone who knows the password.
+
+**Expand → switch → contract, by date from the first boot** (`site_settings.password_kdf_expand_at`,
+written once; missing fails closed to Argon2id and no ambiguous login):
+
+- *Expand (first boot):* both schemes verified; policy, limits and uniform work at once; **new hashes
+  still bcrypt for 7 days**, so the previous image can verify every hash if this one is rolled back.
+- *Switch 1 (+7 days):* new hashes Argon2id; rehash-on-login.
+- *Switch 2 (+67 days):* the ambiguous case refused.
+- *Contract (deferred, its own change):* remove bcrypt, the dummy, the row and the dependency once no
+  bcrypt hash remains (the rest reset by the operator). `SHIM-SEC-009`, expiring 2027-04-30.
+
+Rejected: **pre-hashing** (SHA-256 then bcrypt) — still bcrypt, and every stored hash would need the
+password to convert anyway; **rehashing the ambiguous input** — makes a guessed prefix plus junk the
+authoritative password and locks the owner out; **writing Argon2id from the first minute** — a
+rollback in the first days would then fail every changed or rehashed account; **environment knobs for
+the parameters or the dates** — the knob that gets turned, as Decision 3 says.
+
+Consequences: after Switch 1 the previous image cannot verify Argon2id hashes (passlib raises: 500 at
+login for those accounts), so the rollback target from then on is this image or later. Every login
+costs one Argon2id verification plus one cost-12 bcrypt check (about 250 ms on the development host)
+until the contract removes bcrypt. A lone surrogate in any JSON string field makes FastAPI's own 422
+renderer fail with 500 — pre-existing and not specific to passwords; recorded in brief 0067.
 
 ## Consequences
 

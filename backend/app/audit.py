@@ -61,6 +61,9 @@ REGISTERED = "auth.registered"
 # would make the audit vocabulary lie about what the event is. See rules/waivers.yaml,
 # justified_suppressions.
 PASSWORD_CHANGED = "auth.password.changed"  # noqa: S105
+# SEC-006 (ADR 0044 Decision 5): a login replaced a bcrypt hash, or an Argon2id hash at old
+# parameters, with an Argon2id hash of the same password. No session ends. Same noqa reason.
+PASSWORD_REHASHED = "auth.password.rehashed"  # noqa: S105
 APIKEY_DISCLOSED = "auth.apikey.disclosed"
 APIKEY_REGENERATED = "auth.apikey.regenerated"
 ROLE_CHANGED = "admin.role.changed"
@@ -82,6 +85,7 @@ EVENTS = frozenset(
         LOGIN_THROTTLED,
         REGISTERED,
         PASSWORD_CHANGED,
+        PASSWORD_REHASHED,
         APIKEY_DISCLOSED,
         APIKEY_REGENERATED,
         ROLE_CHANGED,

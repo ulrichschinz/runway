@@ -42,6 +42,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import client from '../api/client.js'
+import { landingAfterLogin } from '../shared/passwordPolicy.js'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -75,14 +76,16 @@ async function submit() {
   error.value = ''
   loading.value = true
   try {
-    if (mode.value === 'login') {
-      await auth.login(username.value, password.value)
-    } else {
-      await auth.register(username.value, password.value)
-    }
-    router.push('/')
+    const answer = mode.value === 'login'
+      ? await auth.login(username.value, password.value)
+      : await auth.register(username.value, password.value)
+    router.push(landingAfterLogin(answer, null))
   } catch (e) {
-    error.value = e.response?.data?.detail || 'Something went wrong'
+    // A 422 carries pydantic's list, not a sentence (SEC-006: the password rule).
+    const detail = e.response?.data?.detail
+    error.value = e.response?.status === 422
+      ? 'A new password needs 8 to 1024 bytes (an umlaut counts as two).'
+      : (typeof detail === 'string' && detail) || 'Something went wrong'
   } finally {
     loading.value = false
   }

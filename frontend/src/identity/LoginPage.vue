@@ -15,6 +15,7 @@ import EyebrowLine from '../layout/ui/EyebrowLine.vue'
 import PageHeading from '../layout/ui/PageHeading.vue'
 import PillButton from '../layout/ui/PillButton.vue'
 import { t } from '../shared/i18n.js'
+import { landingAfterLogin, passwordProblem } from '../shared/passwordPolicy.js'
 import { safeNext } from '../shared/returnPath.js'
 import { useAuthStore } from '../stores/auth.js'
 
@@ -47,6 +48,8 @@ function messageFor(e) {
   if (status === 429) return t('login.tooMany')
   if (status === 403) return t('login.closed')
   if (status === 400 && registering.value) return t('login.taken')
+  // 422: the password rule (SEC-006); 413: a body over the auth routes' limit.
+  if (status === 422 || status === 413) return t(registering.value ? 'login.pw.tooShort' : 'login.pw.tooLong')
   return t('login.failed')
 }
 
@@ -54,12 +57,19 @@ async function submit() {
   if (busy.value) return
   error.value = ''
   busy.value = true
+  const problem = passwordProblem(password.value, { isNew: registering.value })
+  if (problem) {
+    error.value = t(`login.${problem}`)
+    busy.value = false
+    return
+  }
   try {
-    if (registering.value) await auth.register(username.value, password.value)
-    else await auth.login(username.value, password.value)
+    const answer = registering.value
+      ? await auth.register(username.value, password.value)
+      : await auth.login(username.value, password.value)
     // A full load, not a router push: whatever the page still holds in memory (the task store of
     // an earlier session in this tab) must not be shown to the account that just logged in.
-    window.location.assign(safeNext(route.query.next) ?? '/')
+    window.location.assign(landingAfterLogin(answer, safeNext(route.query.next)))
   } catch (e) {
     error.value = messageFor(e)
   } finally {

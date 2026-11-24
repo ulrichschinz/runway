@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import create_access_token, hash_password
+from app.auth import create_access_token, hash_password, legacy_bcrypt_hash
 from app.config import settings
 from app.database import generate_api_key
 from app.logging_setup import (
@@ -251,9 +251,15 @@ def test_a_real_api_key_is_redacted_under_a_neutral_name():
     assert key not in stream.getvalue()
 
 
-def test_a_bcrypt_hash_is_redacted_under_a_neutral_name():
-    hashed = hash_password("correct horse battery staple")
-    assert hashed.startswith("$2")
+@pytest.mark.parametrize(
+    ("make", "prefix"),
+    [(legacy_bcrypt_hash, "$2b$"), (hash_password, "$argon2id$")],
+    ids=["bcrypt", "argon2id"],
+)
+def test_a_password_hash_is_redacted_under_a_neutral_name(make, prefix):
+    """Both stored shapes: the passlib-era bcrypt hash and, since brief 0067, Argon2id."""
+    hashed = make("correct horse battery staple")
+    assert hashed.startswith(prefix)
 
     with isolated_logger() as (logger, stream):
         logger.info("row was %s", hashed, extra={"detail": hashed})

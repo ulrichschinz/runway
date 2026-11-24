@@ -96,12 +96,19 @@ _SEGMENT_SPLIT = re.compile(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])")
 #   bcrypt   passlib's modular-crypt output — `$2b$<cost>$` plus 53 characters. A hash is a
 #            credential-equivalent here: it is offline-attackable, which is the whole
 #            argument in RISK-DEP-003 for keeping bcrypt's cost where it is
+#   argon2id the PHC string argon2-cffi writes since brief 0067 (SEC-006):
+#            `$argon2id$v=19$m=…,t=…,p=…$<salt>$<hash>`, both in unpadded standard base64 — the
+#            same offline-attackable argument as bcrypt, at a different shape
 #   api key  database.generate_api_key is secrets.token_urlsafe(32), which is exactly 43
 #            characters of the URL-safe base64 alphabet, bounded so a longer run is not a
 #            partial match
 _VALUE_SHAPES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("jwt", re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}")),
     ("bcrypt", re.compile(r"\$2[abxy]?\$\d{2}\$[./A-Za-z0-9]{53}")),
+    (
+        "argon2",
+        re.compile(r"\$argon2(?:id|i|d)\$v=\d+\$m=\d+,t=\d+,p=\d+\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+"),
+    ),
     ("api-key", re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])")),
 )
 

@@ -71,3 +71,96 @@ class RequestIdMiddleware:
             await self.app(scope, receive, send_with_request_id)
         finally:
             current_request_id.reset(context)
+
+
+# --- the request-body limit (finding SEC-006, brief 0067) ------------------------------------
+#
+# The earliest edge this repository controls in front of every route, and the only one in front
+# of a caller that reaches the backend directly on the shared Docker network rather than through
+# nginx. 1 MiB is nginx's default `client_max_body_size`, so nothing the SPA path could already
+# send is refused here; the auth routes carry a username and at most two 1024-byte passwords,
+# so 16 KiB is generous for them and small enough that a login cannot make the server parse a
+# large document. Uniform limits on the other fields are M8's (RISK-SEC-004).
+AUTH_BODY_LIMIT = 16 * 1024
+DEFAULT_BODY_LIMIT = 1024 * 1024
+
+
+def body_limit_for(path: str) -> int:
+    return AUTH_BODY_LIMIT if path == "/auth" or path.startswith("/auth/") else DEFAULT_BODY_LIMIT
+
+
+async def _refuse(send: Send, status: int, detail: str) -> None:
+    body = ('{"detail":"' + detail + '"}').encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+                (b"connection", b"close"),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+class BodyLimitMiddleware:
+    """Refuse a request body over its limit with 413 before any route, parser, hash or query runs.
+
+    A declared `Content-Length` over the limit is refused without reading a byte (the server
+    enforces that the body matches what was declared). A body without one — chunked — is read
+    here up to the limit and replayed to the application, and refused the moment it passes the
+    limit, so an oversized chunked body is never held in full.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit = body_limit_for(scope.get("path", ""))
+        declared = None
+        for name, value in scope.get("headers", []):
+            if name == b"content-length":
+                declared = value
+                break
+        if declared is not None:
+            try:
+                size = int(declared)
+            except ValueError:
+                await _refuse(send, 400, "Invalid Content-Length")
+                return
+            if size > limit:
+                await _refuse(send, 413, "Request body too large")
+                return
+            await self.app(scope, receive, send)
+            return
+
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                return  # the client went away while sending
+            chunk = message.get("body", b"")
+            total += len(chunk)
+            if total > limit:
+                await _refuse(send, 413, "Request body too large")
+                return
+            chunks.append(chunk)
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay() -> Message:
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay, send)

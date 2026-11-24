@@ -979,7 +979,8 @@ residual_risks:
       The runtime redaction filter in backend/app/logging_setup.py is the second half of a
       two-part control and it is bounded in the mirror image of the first. It removes a value
       by the field name it arrives under, and by the shapes it has been taught — a JWT, a
-      bcrypt hash, the 43-character token_urlsafe(32) an API key is, and the resolved
+      bcrypt hash, an Argon2id PHC string (added with brief 0067, when that format was
+      introduced), the 43-character token_urlsafe(32) an API key is, and the resolved
       JWT_SECRET matched literally. It is therefore blind to a credential that has neither: a
       user's password is an arbitrary string under an arbitrary name, so `logger.info("got",
       extra={"detail": password})` survives the filter and is caught only by RULE-OPS-002 at
@@ -1137,16 +1138,17 @@ residual_risks:
 
   - id: RISK-DEP-003
     statement: >
-      passlib 1.7.4 is the LATEST release and it is from 2020-10-08 — unmaintained rather than
-      merely pinned. It is the only thing hashing and verifying passwords here. bcrypt is held
-      at 4.0.1 because passlib reads an attribute bcrypt removed: bcrypt 5.0.0 does not warn,
-      it fails every hash with "password cannot be longer than 72 bytes" (tested 2026-08-26).
-      So the security-relevant dependency is frozen by a dead one, and Dependabot will keep
-      offering the bump that breaks every login. Replacing passlib means re-verifying stored
-      hashes against a different implementation, which is its own change with its own
-      migration evidence.
+      Narrowed on 2026-11-24 by brief 0067, whose password-hashing migration was this risk's
+      re-open trigger. passlib (unmaintained since 2020-10-08) is gone: new passwords are hashed
+      with Argon2id by argon2-cffi, and the bcrypt hashes passlib wrote are verified by the bcrypt
+      package directly, against vectors passlib itself produced (test_password_kdf.py). What
+      remains: bcrypt 4.0.1 stays pinned, now only to verify those legacy hashes until the
+      contract step of SHIM-SEC-009 removes it. The pin is no longer load-bearing — app/auth.py
+      truncates to 72 bytes itself, so bcrypt 5's refusal of longer input would not break a
+      login — but moving it is a change of its own. argon2-cffi-bindings is a native extension
+      pinned in the intent file to a release older than two weeks.
     owner: maintainer
-    re_open_trigger: "a passlib advisory is published, or the bcrypt pin blocks a fix, or a password-hashing migration is scheduled"
+    re_open_trigger: "a bcrypt or argon2-cffi advisory is published, the bcrypt pin blocks a fix, or SHIM-SEC-009's contract step removes bcrypt"
     decision_record: docs/adr/0021-supply-chain-pinning.md
 
   - id: RISK-DEP-002
@@ -1240,10 +1242,15 @@ residual_risks:
 
   - id: RISK-TEST-003
     statement: >
-      The suite runs bcrypt at its minimum cost factor so the gate stays inside its
-      runtime budget. The production cost factor is therefore covered by no test.
+      The suite runs Argon2id at reduced parameters (t=1, 8 KiB) and bcrypt at cost 4 so the
+      gate stays inside its runtime budget (backend/tests/conftest.py, marked test-only). Since
+      brief 0067 exactly one test hashes and verifies at the production Argon2id parameters,
+      so they are proven valid and consistent with the constants — but no test measures their
+      latency or memory on the deploy host, and the cost-12 bcrypt dummy runs in production only.
+      The latency budget (250 ms, 64 MiB) rests on the operator's measurement with
+      `python -m app.auth` on that host.
     owner: maintainer
-    re_open_trigger: "the password hashing scheme or its parameters change"
+    re_open_trigger: "the password hashing scheme or its parameters change, or a login is observed slower than the documented budget"
     decision_record: backend/tests/conftest.py
 
   - id: RISK-GOV-001
@@ -1444,13 +1451,13 @@ residual_risks:
 
   - id: RISK-SEC-004
     statement: >
-      No request field declares a length limit. backend/app/models.py constrains types and
-      nothing else — no Field(max_length=...), no constr, no annotated bound on any of the
-      string fields, and TaskCreate.description, AnnotationCreate.text and InboxItem.note
-      are the ones that matter, because they travel into the Taskwarrior argv and into that
-      user's task store. Neither uvicorn nor Starlette imposes a body-size limit by default,
-      so the bound on a single task description is whatever Traefik and the kernel happen to
-      allow. Two consequences, and their severity is deliberately not overstated: a very
+      Almost no request field declares a length limit. Since brief 0067 the password fields
+      are bounded (1024 UTF-8 bytes) and every request body is (16 KiB on /auth/*, 1 MiB
+      elsewhere — nginx's default, now enforced by the backend itself as well), but the other
+      string fields in backend/app/models.py constrain types and nothing else, and
+      TaskCreate.description, AnnotationCreate.text and InboxItem.note are the ones that
+      matter, because they travel into the Taskwarrior argv and into that user's task store.
+      So the bound on a single task description is now the 1 MiB body, not a field rule. Two consequences, and their severity is deliberately not overstated: a very
       large description is storage growth in a per-user data directory on the same partition
       as users.db and audit.db (the partition RISK-OPS-006 is already about), and an
       argument long enough to exceed the kernel's per-argument limit makes execve fail,

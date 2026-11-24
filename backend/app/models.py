@@ -1,7 +1,9 @@
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
+
+from app.auth import PASSWORD_MAX_BYTES, PASSWORD_MIN_BYTES, password_problem
 
 # A project name we write, filter on, or put into a URL path (D4, ADR 0038). What it excludes,
 # and why: control characters and newlines (they would split an argument vector or a log line);
@@ -148,19 +150,57 @@ class AnnotationCreate(BaseModel):
     text: str
 
 
+def _checked(new: bool):
+    def check(value: str) -> str:
+        problem = password_problem(value, new=new)
+        if problem:
+            raise ValueError(problem)
+        return value
+
+    return check
+
+
+# Password fields are bounded in UTF-8 bytes (finding SEC-006, ADR 0044 Decision 5). The schema's
+# `maxLength` counts characters, and 1024 bytes are never more than 1024 characters, so it is a
+# true (weaker) bound that pydantic checks first; the validator then counts bytes. A refusal is
+# 422, raised while the body is parsed — before any hash is computed or any row is read.
+_SET_RULE = f"{PASSWORD_MIN_BYTES} to {PASSWORD_MAX_BYTES} bytes in UTF-8 (counted in bytes, not characters)."
+NewPassword = Annotated[
+    str,
+    Field(max_length=PASSWORD_MAX_BYTES, description=f"The password to set: {_SET_RULE}"),
+    AfterValidator(_checked(new=True)),
+]
+GivenPassword = Annotated[
+    str,
+    Field(
+        max_length=PASSWORD_MAX_BYTES,
+        description=f"At most {PASSWORD_MAX_BYTES} bytes in UTF-8. No minimum: a password set "
+        "before the rule still works.",
+    ),
+    AfterValidator(_checked(new=False)),
+]
+
+
 class UserCreate(BaseModel):
     username: str
-    password: str
+    password: NewPassword
 
 
 class UserLogin(BaseModel):
     username: str
-    password: str
+    password: GivenPassword
 
 
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"  # noqa: S105  # OAuth token type name, not a credential
+    password_change_required: bool = Field(
+        default=False,
+        description="True when this login was accepted by a pre-2026-11 bcrypt hash for a "
+        "password of 72 bytes or more. bcrypt read only its first 72 bytes, so the stored hash "
+        "cannot be upgraded from it: set a new password (PUT /auth/password). After a "
+        "transition window such a login is refused.",
+    )
 
 
 class UserInfo(BaseModel):
@@ -176,8 +216,8 @@ class UserProfileUpdate(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    current_password: str
-    new_password: str
+    current_password: GivenPassword
+    new_password: NewPassword
 
 
 class SiteSettings(BaseModel):

@@ -1,16 +1,26 @@
 import logging
+import time
 
 from aiosqlite import Connection
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app import audit, rate_limit
-from app.auth import create_access_token, hash_password, verify_password
+from app.auth import (
+    KdfPhase,
+    check_password,
+    create_access_token,
+    hash_for,
+    hash_password,
+    kdf_phase,
+)
 from app.database import (
     create_account,
     delete_account,
     generate_api_key,
     get_allow_registration,
     get_db,
+    get_password_kdf_expand_at,
+    rehash_password,
     replace_password,
 )
 from app.dependencies import get_current_user
@@ -32,6 +42,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # The identity, never the proof of identity: a username says which account, and it is already
 # in the database in the clear. RULE-OPS-002 refuses the alternative at the call site.
 logger = logging.getLogger(__name__)
+
+
+async def _phase(db: Connection) -> KdfPhase:
+    """Where the password-hash timeline stands (ADR 0044 Decision 5)."""
+    return kdf_phase(await get_password_kdf_expand_at(db), time.time())
 
 
 @router.get(
@@ -73,7 +88,7 @@ async def register(request: Request, body: UserCreate, db: Connection = Depends(
         raise HTTPException(status_code=400, detail=problem)
     try:
         account = await create_account(
-            db, body.username, hash_password(body.password), generate_api_key()
+            db, body.username, hash_for(await _phase(db), body.password), generate_api_key()
         )
     except Exception as e:
         audit.record(
@@ -121,7 +136,11 @@ async def login(request: Request, body: UserLogin, db: Connection = Depends(get_
         "SELECT hashed_password, auth_version FROM users WHERE username = ?", (body.username,)
     ) as cur:
         row = await cur.fetchone()
-    if not row or not verify_password(body.password, row["hashed_password"]):
+    stored = row["hashed_password"] if row else None
+    # The same work whether or not the account exists and whichever scheme its hash is: one
+    # Argon2id verification and one bcrypt check, the missing one against a dummy (SEC-006).
+    check = check_password(body.password, stored, phase=await _phase(db))
+    if not check.ok or row is None or stored is None:
         # An unknown username counts too. Skipping it would turn the limiter into a user
         # enumeration oracle: throttled means "this account exists".
         rate_limit.record_failure(body.username)
@@ -129,18 +148,52 @@ async def login(request: Request, body: UserLogin, db: Connection = Depends(get_
         # response does not, and a log line that did would be the user-enumeration oracle the
         # limiter above was written to avoid, moved from the API to the log file.
         logger.warning("login rejected", extra={"username": body.username})
-        # Same reasoning as the log line above: the row does not distinguish "no such
-        # account" from "wrong password", because a record that did would be the user
-        # enumeration oracle the rate limiter exists to prevent, moved into a file.
-        audit.record(audit.LOGIN_FAILED, outcome=audit.FAILURE, actor=body.username, route=route)
+        # Same reasoning as the log line above, with one exception that leaks nothing: the
+        # legacy >=72-byte case after its window is reached only by a caller who has the
+        # password's first 72 bytes, and the operator needs the row to offer the reset.
+        audit.record(
+            audit.LOGIN_FAILED,
+            outcome=audit.FAILURE,
+            actor=body.username,
+            route=route,
+            detail=(
+                "bcrypt-era password of 72 bytes or more is no longer accepted; operator reset"
+                if check.legacy_refused
+                else None
+            ),
+        )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     rate_limit.clear(body.username)
+    if check.rehash:
+        # The same password under Argon2id; no session ends. A compare-and-swap on the hash that
+        # was verified: a password change in between wins, and nothing is written.
+        if await rehash_password(db, body.username, stored, hash_password(body.password)):
+            audit.record(
+                audit.PASSWORD_REHASHED,
+                outcome=audit.SUCCESS,
+                actor=body.username,
+                route=route,
+                detail="stored hash replaced by argon2id on login",
+            )
     logger.info("login succeeded", extra={"username": body.username})
-    audit.record(audit.LOGIN_SUCCEEDED, outcome=audit.SUCCESS, actor=body.username, route=route)
+    audit.record(
+        audit.LOGIN_SUCCEEDED,
+        outcome=audit.SUCCESS,
+        actor=body.username,
+        route=route,
+        detail=(
+            "bcrypt-era password of 72 bytes or more: a password change is required"
+            if check.change_required
+            else None
+        ),
+    )
     # The version read with the hash: a password change between the read and now raised it, and
     # this token is then refused on its first use — fail closed (ADR 0044).
-    return Token(access_token=create_access_token(body.username, auth_version=row["auth_version"]))
+    return Token(
+        access_token=create_access_token(body.username, auth_version=row["auth_version"]),
+        password_change_required=check.change_required,
+    )
 
 
 @router.get("/me", response_model=UserInfo, summary="Get current user profile")
@@ -197,7 +250,8 @@ async def change_password(
     route = audit.route_of(request)
     async with db.execute("SELECT hashed_password FROM users WHERE username=?", (username,)) as cur:
         row = await cur.fetchone()
-    if not row or not verify_password(body.current_password, row["hashed_password"]):
+    phase = await _phase(db)
+    if not row or not check_password(body.current_password, row["hashed_password"], phase=phase).ok:
         audit.record(
             audit.PASSWORD_CHANGED,
             outcome=audit.FAILURE,
@@ -211,7 +265,7 @@ async def change_password(
     # None means another change replaced the hash after it was verified above — the password
     # given as current is then no longer current, and the answer says exactly that.
     version = await replace_password(
-        db, username, row["hashed_password"], hash_password(body.new_password)
+        db, username, row["hashed_password"], hash_for(phase, body.new_password)
     )
     if version is None:
         audit.record(
@@ -232,8 +286,9 @@ async def change_password(
     # The session that made the change continues with a token at the new version; every other
     # one gets 401 on its next request. The API key is untouched: it has its own rotation.
     # The response stays untyped, so the OpenAPI document does not move.
+    # `password_change_required` is a login's answer; this response's body stays what it was.
     fresh = Token(access_token=create_access_token(username, auth_version=version))
-    return {"detail": "Password updated", **fresh.model_dump()}
+    return {"detail": "Password updated", **fresh.model_dump(exclude={"password_change_required"})}
 
 
 @router.get("/apikey", response_model=ApiKeyInfo)

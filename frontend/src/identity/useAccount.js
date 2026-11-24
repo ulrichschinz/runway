@@ -100,7 +100,10 @@ export function useAccount() {
         if (data?.access_token) auth.adoptToken(data.access_token)
         return { ok: true }
       } catch (e) {
-        return { error: e?.response?.status === 400 ? 'set.pw.wrong' : failure(e) }
+        const status = e?.response?.status
+        // 422: the server's password rule refused it (SEC-006) — never "wrong password".
+        if (status === 422) return { error: 'set.pw.rule' }
+        return { error: status === 400 ? 'set.pw.wrong' : failure(e) }
       }
     })
   }

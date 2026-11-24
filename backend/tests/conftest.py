@@ -23,24 +23,39 @@ from tests.fake_task import FakeTaskCLI  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def cheap_password_hashing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run bcrypt at its minimum cost factor for the duration of the tests.
+    """REDUCED, TEST-ONLY PASSWORD-HASH PARAMETERS — never production values.
 
-    Production hashing is deliberately slow, and the suite hashes or verifies a password
-    in almost every test. At the default cost that alone took ~36 seconds — long enough
-    that the gate would start getting skipped, which is the failure mode the runtime
-    budget exists to prevent.
+    The suite hashes or verifies a password in almost every test, and every login does one
+    Argon2id verification and one bcrypt check (SEC-006: uniform work). At the production
+    parameters (Argon2id t=3, 64 MiB; bcrypt cost 12) that is a quarter of a second per login,
+    which would push the gate over its budget — the failure mode the budget exists to prevent.
 
-    The algorithm is unchanged; only the work factor is. Nothing here asserts anything
-    about the cost factor, so no test is weakened by this — but note that the production
-    cost factor is consequently NOT covered by any test.
+    So for the duration of a test:
+    - Argon2id runs at t=1, m=8 KiB, p=1 (the library minimum region);
+    - the bcrypt dummy and the soak-time bcrypt writer run at cost 4;
+    - the 7-day soak is zero, so a fresh test database is already past Switch 1 and writes
+      Argon2id, which is production's steady state. `TestTheSoak` restores the real soak.
+
+    The algorithms are unchanged; only the work factors are. Exactly one test,
+    `test_password_kdf.py::TestKdfUnit::test_one_hash_at_production_parameters`, hashes at
+    the production parameters (RISK-TEST-003): it proves they are valid and verify, not how
+    long they take on the deploy host.
     """
-    from passlib.context import CryptContext
+    from datetime import timedelta
+
+    from argon2 import PasswordHasher, Type
 
     from app import auth
 
     monkeypatch.setattr(
-        auth, "pwd_context", CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=4)
+        auth,
+        "_argon2",
+        PasswordHasher(
+            time_cost=1, memory_cost=8, parallelism=1, hash_len=32, salt_len=16, type=Type.ID
+        ),
     )
+    monkeypatch.setattr(auth, "LEGACY_BCRYPT_COST", 4)
+    monkeypatch.setattr(auth, "KDF_SOAK", timedelta(0))
 
 
 @pytest.fixture

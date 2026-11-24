@@ -5,16 +5,21 @@ uvicorn[standard]==0.53.0
 # `alg: none` token still refused — on 2026-08-26.
 python-jose[cryptography]==3.5.0
 
-# passlib 1.7.4 is the LATEST release, and it is from 2020-10-08. Unmaintained, not merely
-# pinned. See ADR 0021 and RISK-DEP-003.
-passlib[bcrypt]==1.7.4
+# Argon2id for every new and changed password (finding SEC-006, ADR 0044 Decision 5, brief 0067).
+# argon2-cffi is maintained by the Argon2 reference binding's author and is used directly —
+# passlib, unmaintained since 2020-10-08 (RISK-DEP-003), was removed in the same change.
+argon2-cffi==25.1.0
+# The native binding, pinned in the intent rather than left to the resolver: the newest release
+# (26.2.0) was 11 days old on 2026-11-24, and a password-hashing C extension is the last place to
+# take a release nobody has had time to look at. 25.1.0 (2025-07-30) ships abi3 manylinux_2_28
+# wheels for amd64 and arm64, which python:3.12-slim (glibc 2.36) installs without a compiler.
+argon2-cffi-bindings==25.1.0
 
-# LOAD-BEARING PIN, and not for the reason it looks like. passlib reads
-# bcrypt.__about__.__version__, which bcrypt removed. Tested against bcrypt 5.0.0 on
-# 2026-08-26: it does not warn, it FAILS — `ValueError: password cannot be longer than 72
-# bytes` on every hash, because bcrypt 5 dropped the silent truncation passlib relies on.
-# Bumping this breaks every login. Dependabot will offer 5.0.0; do not take it without
-# replacing passlib first.
+# Only to VERIFY the bcrypt hashes passlib wrote before brief 0067 (SHIM-SEC-009), and to write
+# bcrypt during the 7-day soak after the first boot. app/auth.py truncates to 72 bytes itself,
+# so the passlib-era reason for this pin (passlib reads an attribute bcrypt 5 removed) is gone;
+# bcrypt 5 also refuses >72-byte input, which app/auth.py never passes. Kept at 4.0.1 so this
+# change moves one thing at a time; removed entirely by the contract step of brief 0067.
 bcrypt==4.0.1
 python-multipart==0.0.12
 pydantic-settings==2.15.0

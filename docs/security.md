@@ -171,6 +171,29 @@ cannot read the key back, rotate it, or reach an admin route through MCP, whatev
 role. The list fails closed — a router with a new tag is not a tool until it is added — and
 `backend/tests/unit/test_mcp_session.py` pins it as a client receives it. ADR 0037.
 
+## Passwords
+
+Since brief 0067 (finding SEC-006, ADR 0044 Decision 5):
+
+- **Hash: Argon2id** (argon2-cffi; t=3, 64 MiB, one lane — measured against a 250 ms / 64 MiB
+  budget). Hashes from before are passlib-era bcrypt and are still verified (`SHIM-SEC-009`).
+- **Limits, in UTF-8 bytes:** every password field at most **1024**; a password being set
+  (register, change) at least **8**. Outside the rule is **422**, before any hash or query. A login
+  has no minimum, so a password set before the rule still works.
+- **Body limit:** **16 KiB** on `/auth/*`, **1 MiB** elsewhere, **413** before routing — in the
+  backend itself and, for `/api/auth/`, at nginx.
+- **Migration:** an exact bcrypt login (input of 71 bytes or fewer) is rehashed to Argon2id by a
+  compare-and-swap on the old hash; no session ends. A bcrypt match for 72 bytes or more is never
+  rehashed from what was typed — bcrypt saw only the first 72 — so the login answers
+  `password_change_required: true`, both UIs send the person to Einstellungen, and after the window
+  such a login is refused and needs the operator reset (`docs/operations.md`).
+- **No oracle:** every login costs one Argon2id and one bcrypt operation whatever the account, and
+  every failure is the same 401 `Invalid credentials`. A NUL byte is a 401, no longer a 500.
+- **Timeline**, from the image's first boot (`site_settings.password_kdf_expand_at`): 7 days of
+  bcrypt writes (so a rollback can still verify), then Argon2id writes and rehash-on-login, and from
+  day 67 the ambiguous case refused. No deploy and no setting moves a step; a missing row fails
+  closed.
+
 ## Login throttling
 
 `POST /auth/login` allows `LOGIN_RATE_LIMIT` failed attempts per username per

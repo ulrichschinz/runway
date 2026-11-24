@@ -1,0 +1,150 @@
+# Change Impact Brief 0067 — Passwords are hashed with Argon2id
+
+| Field | Value |
+|---|---|
+| **Requested outcome** | Finding **SEC-006** (audit run `20261118T131510Z-claude`, upheld by the Codex review of 2026-11-24): passwords were hashed with bcrypt through passlib, which uses only the first 72 UTF-8 bytes, so two passwords with the same 72-byte prefix authenticated interchangeably; no password field and no request body had a size limit. Ordered by Uli on **2026-11-24** as milestone M2.2 of the security remediation plan (decision gate D2: Argon2id with measured server parameters and rehash-on-login). Closing criterion (plan §5): Argon2id, byte and body limits, safe legacy handling, the 72-byte test. |
+| **Owning unit** | `be/leaves` — `backend/app/auth.py` (the password policy, Argon2id, legacy bcrypt verification, uniform work), `backend/app/models.py` (byte-bounded password fields, `Token.password_change_required`), `backend/app/middleware.py` (the request-body limit). `be/adapters/db` — `backend/app/database.py` (the `password_kdf_expand_at` row, the KDF phase, `rehash_password`), `backend/app/audit.py` (one event, `auth.password.rehashed`). `be/routers` — `backend/app/routers/auth.py` (login, register, password change). `be/app` — `backend/app/main.py` (mounts the body limit). `fe/shared` — `frontend/src/shared/passwordPolicy.js` (new), `frontend/src/shared/settingsRules.js`, the message catalogues. `fe/identity` — `frontend/src/stores/auth.js`, `frontend/src/identity/useAccount.js`, `frontend/src/identity/LoginPage.vue`, `frontend/src/identity/SettingsPage.vue`, `frontend/src/views/LoginView.vue`, `frontend/src/views/SettingsView.vue`. `ops` — `backend/requirements.txt` and both locks (passlib out, argon2-cffi in), `frontend/nginx.conf` (a body limit on `/api/auth/`), `ops/surfaces/openapi.json`, `rules/shims.yaml` (`SHIM-SEC-009`), `rules/ledger.yaml` (risk statements whose re-open triggers this change fires). `docs` — this brief, ADR 0044 (new section), `docs/security.md`, `docs/threat-model.md`, `docs/operations.md`, `README.md`, `backend/AGENTS.md`. `tests`. |
+| **Applicable contracts** | [`AGENTS.md`](../../AGENTS.md) §2–§5 (REST through the migration pattern; SQLite schema forward-only and additive; locks regenerated, never hand-edited); [`backend/AGENTS.md`](../../backend/AGENTS.md) (only `be/adapters/db` opens a connection); [`frontend/AGENTS.md`](../../frontend/AGENTS.md) (pure rules in `fe/shared`, tested). No gate rule is added or changed, so the META-RULE is not engaged. |
+| **Governed by** | **Amended:** [ADR 0044 — Credential lifecycle: JWT, password and API key](../adr/0044-credential-lifecycle-jwt-password-and-api-key.md), new Decision 5. Respected: [ADR 0021](../adr/0021-supply-chain-pinning.md) and [ADR 0034](../adr/0034-the-lock-must-match-the-intent.md) (the lock workflow), [ADR 0037](../adr/0037-the-mcp-surface-is-an-allowlist.md) (auth routes are REST-only), [ADR 0024](../adr/0024-structured-logging.md) (value-shape redaction). |
+| **Rule IDs introduced** | None. Shim **`SHIM-SEC-009`** — bcrypt hashes from before this change are still verified, expiring 2027-04-30 (`RULE-SEC-002` enforces the date). |
+| **Entry points** | `POST /auth/login`, `POST /auth/register`, `PUT /auth/password`; the request-body limit sits in front of every route and `/mcp`. The boot path `init_db()`. |
+| **Affected public surfaces** | **REST/OpenAPI — changed, additive and restrictive:** the three password-carrying bodies declare `maxLength: 1024` and say the byte rule in their description; `Token` gains `password_change_required` (boolean, default false). A password outside the rule is **422** before any hashing or database query; a body over the limit is **413** (16 KiB on `/auth/*`, 1 MiB elsewhere — the nginx default the SPA path already had). `ops/surfaces/openapi.json` updated. **MCP tools — unchanged** (27; the auth routes are REST-only, `/me` is untouched). **DB schema — unchanged** (one `site_settings` row, no column). **Env vars — none.** **SPA** routes and `localStorage` keys unchanged (the login page passes `?password=change` to `/settings`, a query, not a route). |
+| **Known dependents** | From `./run impact` (index `current`, revision `85dec7f4fe71`, 1723 nodes / 2716 edges): `auth.py` → `dependencies.py`, `routers/auth.py` → every router and `main.py`; `models.py` and `database.py` reach every surface; `middleware.py` → `main.py`; `routers/auth.py` → `main.py`. `frontend/nginx.conf` is `ops`, no import edges (`BLIND-NGINX-001`: templated at start). Frontend: `stores/auth.js` and `useAccount.js` → the identity pages; `settingsRules.js` → `useAccount.js`. |
+| **Uncertain / dynamic areas** | `BLIND-TEST-001` — routers are exercised through the TestClient only. `BLIND-NGINX-001` — the effective nginx configuration is the templated one; the checked-in text is what is tested. The **target hardware** for the Argon2id parameters is the production host, which this repository cannot see; the parameters are measured here and the measurement on the host is a deferred operator step. Whether any stored password is 72 bytes or longer is unknowable from a bcrypt hash; the design does not need to know. |
+| **Analogous implementations** | `SHIM-SEC-008` / brief 0066: a date-driven switch anchored on the first boot of the image, in `site_settings`, failing closed when the row is missing. `replace_password`: a compare-and-swap on the stored hash. `conftest.cheap_password_hashing`: the reduced work factor in tests. |
+| **Delivery Pattern** | **Security or Operability Change** (failure scenario, control, adversarial red test first) **and Public-Surface or Data Migration** (expand → migrate → switch → contract) for the stored hashes and the REST bodies. |
+| **Required tests** | Unit: byte limits and the policy (`test_password_kdf.py`), KDF selection, legacy verification against hashes **passlib itself produced**, uniform work per login, production parameters exercised once. ASGI/REST: the 72-byte pair, 422 before KDF/DB, 413 before routing (declared and chunked), uniform login failures, rehash-on-login, the ambiguous legacy case before and after its window. DB integration: the phase row written once, the rehash compare-and-swap does not overwrite a concurrent change or bump `auth_version`. Parallel: login rehash racing a password change. Frontend pure logic: byte counting, the password rule, the 422 mapping, the login flag. Container: not applicable — no Taskwarrior path changes; the existing suite runs. |
+| **Intended scope** | Expand, the date-driven switch and the rehash migration. **Not** in scope: the login budget (M3.2, REV-003), uniform limits on non-password fields (M8, `RISK-SEC-004`), the contract step (removing bcrypt), any production action. |
+| **Base revision** | `85dec7f` (`security/m2-1-auth-version`) |
+
+## Failure scenario
+
+1. **The 72-byte alias.** Alice registers with an 80-byte passphrase. Mallory has watched or guessed its
+   first 72 bytes (a passphrase built from a long shared prefix, a password manager's long generated
+   string with a known structure). Mallory logs in with the prefix plus anything: bcrypt never saw byte
+   73, so she is Alice. Reproduced at `85dec7f` by `TestTheSeventyTwoBytePair`.
+2. **Unbounded input.** A client posts a 10 MB password to `/auth/login` or `/auth/register` directly on
+   the backend (a peer on the shared Docker network, `review.md` operational question 3): the whole body
+   is read and parsed, and passlib hashes it. Nothing refused it before work.
+3. **The enumeration timing.** An unknown username returned without any hash work, a known one after a
+   bcrypt verify: the response time said whether an account exists, the very oracle the identical 401
+   text and the uniform throttle were written to avoid.
+4. **A NUL byte.** passlib refuses a password with a NUL byte by raising — `/auth/login` answered 500 for
+   it, a different answer from 401.
+
+## Control
+
+1. **Policy in UTF-8 bytes** (`auth.py`, `models.py`): every password field at most **1024 bytes**; a new
+   password (register, change) at least **8 bytes**. Pydantic refuses with 422 before the handler runs —
+   no hash, no query. Login keeps no minimum, so an existing short password still logs in.
+2. **Body limit** at the earliest edge the repository controls: an ASGI middleware outermost after the
+   request id refuses a declared `Content-Length` over the limit without reading it and stops reading a
+   chunked body at the limit — **16 KiB** for `/auth/*`, **1 MiB** elsewhere; and nginx gets the same
+   16 KiB on `/api/auth/` (its 1 MiB default already covered the rest).
+3. **Argon2id** through `argon2-cffi` (`PasswordHasher`, type ID), with parameters measured on this host
+   against a documented budget (Results). passlib is removed; legacy bcrypt hashes are verified by the
+   `bcrypt` package directly, with the 72-byte truncation made explicit.
+4. **Rehash-on-login**: an exact bcrypt match (input of **71 bytes or fewer**, no NUL — bcrypt then saw
+   all of it) is rehashed to Argon2id by a compare-and-swap on the old hash, without touching
+   `auth_version`. An Argon2id hash with outdated parameters is rehashed the same way.
+5. **The ambiguous case** (bcrypt hash, input of 72 bytes or more): bcrypt cannot tell the real password
+   from its prefix plus anything, so the input is **never** written as the new hash. During a window the
+   login still succeeds and the response says `password_change_required: true`; the SPA sends the user to
+   Einstellungen. After the window it is refused (401) and the account needs the operator reset in
+   `docs/operations.md`.
+6. **Uniform work**: every login runs exactly one Argon2id verification and — while bcrypt is still
+   accepted — one bcrypt check at the production cost, against the stored hash where it is of that kind
+   and against a dummy otherwise. An unknown account, a wrong password, a bcrypt account and an Argon2id
+   account cost the same; the answer is the same 401.
+7. NUL bytes and any other malformed input are a 401, never a 500.
+
+## Expand → migrate → switch → contract
+
+| Step | What | State in this change |
+|---|---|---|
+| Expand | Verify both schemes; write `password_kdf_expand_at` on the first boot; policy, body limit and uniform work apply at once. New and changed passwords are **still bcrypt for 7 days**, so the previous image can still verify every hash if this one is rolled back. | **Done, deploys on merge.** |
+| Switch 1 | From `expand_at` + 7 days, new and changed passwords are Argon2id, and rehash-on-login starts. | **Automatic, by date** — no deploy, no setting. A missing row fails closed (Argon2id). |
+| Migrate | Every exact bcrypt account is rehashed on its next login; ambiguous ones are told to change the password. | Runs from Switch 1, per login. |
+| Switch 2 | From `expand_at` + 67 days (60 days after Switch 1) the ambiguous case is refused. | **Automatic, by date.** A missing row fails closed (refused). |
+| Contract | Remove bcrypt verification, the dummy, the row and the `bcrypt` dependency. | **Deferred**, own change, when no `$2…` hash is left in `users` (the rest reset by the operator); `SHIM-SEC-009` expires 2027-04-30. |
+
+Rollback: within the first 7 days the previous image reads every hash this one wrote. After Switch 1 an
+Argon2id hash cannot be verified by the previous image (passlib raises on an unknown hash: login 500 for
+those accounts) — roll forward or reset those accounts. The rollback target after Switch 1 is this image
+or later (`docs/operations.md`).
+
+## Test evidence
+
+Every result below was run on 2026-11-24/25 on an arm64 Mac. The red column is the new tests against the
+unchanged production code at `85dec7f` (passlib still installed), before any line of the control was written.
+
+| Tier | What | Before the control (`85dec7f`) | After |
+|---|---|---|---|
+| ASGI/REST | `TestTheSeventyTwoBytePair` — register with `x*72 + "-the-real-suffix"`, log in with `x*72 + "-anything-else"` and with the bare prefix | **red: `assert 200 == 401`** — the other suffix logged in | 401 for both; the two hashes are different Argon2id strings and neither verifies the other's password |
+| ASGI/REST | `TestPasswordLimitsInBytes` — 1025 bytes, 513 × `ä`, 7 bytes, the change route, an oversized login that must not reach `check_password` | **red: `assert 201 == 422`** — a 1025-byte password was registered | 422 before any hash or query; `ääää` (8 bytes) accepted; login keeps no minimum |
+| ASGI/REST | `TestTheBodyLimit` — a declared 20 KB and a chunked 41 KB `/auth/login` body; 1 MiB + 10 on `/tasks` | **red: `assert 401 == 413`** | 413 with an `X-Request-Id`; a 30 KB description still accepted |
+| ASGI/REST | `TestNulBytes` — a NUL byte against a legacy account | **red: `PasswordValueError` — a 500** | 401 |
+| Unit, uniform work | `TestUniformWork` — KDF calls per failed login for an unknown, a bcrypt and an Argon2id account | **red** (precondition: no Argon2id at all); a probe at `85dec7f` counted **0 hash calls for an unknown account, 1 for a known one** — the timing oracle | `["argon2", "bcrypt"]` for all three; the same `401 {"detail":"Invalid credentials"}` |
+| Migration | `TestRehashOnLogin` — passlib's own vectors (`short`, 71 bytes) log in, are rehashed once to Argon2id, `auth_version` unchanged, old token still valid, `auth.password.rehashed` audited | **red** (hash stays `$2b$`) | green |
+| Migration | `TestTheAmbiguousLegacyCase` — passlib vectors of 72 bytes, 83 ASCII, 40 × `ä`, 20 × 🔑: inside the window 200 with `password_change_required`, hash unchanged; a forged suffix never written; after day 67 401; exact accounts still migrate; the change route is the way out; a missing row fails closed | **red** (no flag; no window) | green |
+| Migration | `TestTheSoak` — real 7-day soak: new hashes are bcrypt that bcrypt itself verifies, nothing rehashed; after it Argon2id | **error** (no `KDF_SOAK`) | green |
+| Unit | `TestKdfUnit` — every passlib vector verifies (`rehash` iff < 72 bytes), the cost-12 vector, the 71-byte vector refuses a suffix, phase boundaries, `password_problem` table (incl. a lone surrogate), malformed hashes never verify (a truncated bcrypt hash made the Rust binding **panic** — a `BaseException` — found here and guarded by a shape check), constants | **red** (no such API) | green |
+| Unit, production parameters | `test_one_hash_at_production_parameters` — one hash and verify at t=3/64 MiB; the test hasher is genuinely reduced and flags a production hash for rehash; OWASP floor | **red** | green (the only test at production cost) |
+| DB integration / parallel | `TestRehashCompareAndSwap` — the timeline row written once across two `init_db`; `rehash_password` does not overwrite a changed hash; a login held between verification and rehash while the hash is changed underneath leaves the owner's new hash in place | **red** | green |
+| Recovery | `TestTheOperatorReset` — the runbook's statement recovers an account refused after day 67 and ends its old session | — (added after the control, with the runbook) | green |
+| Characterization | 15 existing tests registered with `pw`, `x`, `other`, `new` (under 8 bytes) | — | updated to synthetic passwords of 8+ bytes: the intended behaviour change, not a weakened test. One consequence pinned: a short password on a **closed** registration is now 422, not 403 (validation runs before the handler) |
+| Logging | `test_a_password_hash_is_redacted_under_a_neutral_name[bcrypt, argon2id]` | the Argon2id case is new | green; the filter learned the PHC shape (`RISK-OPS-005`'s trigger: a new credential format) |
+| Frontend pure logic | `passwordPolicy.test.js` (bytes, rule, landing after login), `settingsRules.test.js` (the rule on the new password), `useAccount.test.js` (422 → `set.pw.rule`) | **red**: module missing; the rule test; `expected { error: 'set.failed' } to deeply equal { error: 'set.pw.rule' }` | green |
+| Config pin | `nginxConf.test.js` — `/api/auth/` has `client_max_body_size 16k` and proxies to `/auth/` | **1 red** against the old `nginx.conf` | green. **A text pin, not a proxy test** (`BLIND-NGINX-001`; no nginx or Docker on this host) |
+| Container (host Taskwarrior 3.5.0) | whole `tests/container` suite — no Taskwarrior path changed | — | **94 passed** (host binary, not the image) |
+
+In all 53 of the first 60 new backend tests were red before the control; the 7 green ones assert what
+already held (a normal login works, a wrong password on a legacy account changes nothing, an old token
+survives, an unknown account with a NUL byte is 401, all failures already had the same text, a short
+password reaches verification on login, the normal-size body passes).
+
+## Results
+
+- **Argon2id parameters:** t=3, m=65536 KiB, p=1, hash 32 bytes, salt 16. Measured on the development
+  host (Apple M5, 2026-11-24, median of 15): t=2/19 MiB 12.6 ms, t=1/46 MiB 16.2 ms, t=2/64 MiB 49.0 ms,
+  **t=3/64 MiB 74.9 ms**, t=3/64 MiB/p=4 21.4 ms, t=4/64 MiB 100.7 ms; bcrypt cost 12 172.8 ms. Budget:
+  ≤ 250 ms and ≤ 64 MiB per verification on the deploy host, one at a time on the event loop. The deploy
+  host is **not** measured (deferred).
+- **Dependencies (lock workflow, `./run lock`):** `passlib` removed; `argon2-cffi==25.1.0` (2025-06-03, MIT)
+  and `argon2-cffi-bindings==25.1.0` (2025-07-30, MIT) added — the binding pinned in the intent because
+  the resolver chose 26.2.0, 11 days old. `cffi`/`pycparser` were already in the lock. `bcrypt==4.0.1`
+  kept for legacy verification only. The local venv was synced from `requirements-dev.lock`.
+- `./run surfaces`: **only `openapi.json` moved** — `maxLength`/description on the four password fields
+  and `Token.password_change_required`. The 27 MCP tools, the DB schema, the SPA snapshot and the env-var
+  table are unchanged.
+- Unit tier **951 passed**; frontend **764 passed**; container suite against the host binary **94 passed**.
+- `make check`: **GREEN** (29 s), after `make fix` rebuilt the index (revision `85dec7f4fe71`, 1744 nodes /
+  2774 edges). One earlier run in this session reported foreign failures (another workstream's brief and decision record, an
+  `edge-headers` step) that exist in none of this branch's files; sibling workflow worktrees live under
+  `.claude/worktrees/` in this checkout. Re-run after `make fix`: green.
+- Closed by this change against its plan criterion: **SEC-006** — Argon2id for new and changed
+  passwords (after the 7-day soak), byte limits and a body limit before any work, safe legacy handling
+  (exact → rehash; ambiguous → never rehashed, flagged, refused after the window), and the 72-byte test.
+  Honest limit: during the 7-day soak new passwords are still bcrypt, so the 72-byte alias exists for
+  passwords set in that week; those land in the ambiguous path and are told to change.
+- Registers: `RISK-DEP-003` narrowed (passlib gone, bcrypt verification-only), `RISK-TEST-003` narrowed
+  (one test at production parameters; latency still unmeasured), `RISK-OPS-005` (the Argon2id shape is
+  redacted), `RISK-SEC-004` narrowed (password fields and bodies bounded; other fields still M8). None
+  removed. New shim `SHIM-SEC-009`.
+- Noticed, not in scope: a lone UTF-16 surrogate in **any** JSON string field makes FastAPI's own 422
+  renderer fail with 500 (it cannot encode the echoed input); pydantic's 422 also echoes the rejected
+  input, so an over-long password is echoed back to its sender. Both belong to M8's uniform request
+  handling. `SHIM-SEC-006` expired on 2026-11-25 by its own date; this change does not touch it.
+
+## Deferred, with triggers
+
+| Step | Trigger / date | Owner |
+|---|---|---|
+| Measure Argon2id on the deploy host (`docker compose exec backend python -m app.auth`), lower `ARGON2_TIME_COST` if over 250 ms | after the first deploy, before Switch 1 (first boot + 7 days) | operator |
+| Post-deploy check with a synthetic account: 7-byte password 422, 20 KB login 413, after Switch 1 its hash starts `$argon2id$` | first deploy; again after day 7 | maintainer |
+| Tell the accounts listed by the "who must change a long password" query (`docs/operations.md`) | from Switch 1 until Switch 2 (first boot + 67 days) | operator |
+| Operator reset for accounts refused after Switch 2 | on request, after out-of-band confirmation | operator |
+| Contract: remove bcrypt verification, the dummy, the soak writer, `password_kdf_expand_at` and the `bcrypt` dependency | no `$2…` hash left in `users` and day 67 passed; before 2027-04-30 (`SHIM-SEC-009`) | maintainer |
+| nginx limit observed on the real proxy and the TLS terminator (only the text is tested here) | first deploy | operator |
+| Login budget before KDF work (REV-003), uniform limits on other fields (`RISK-SEC-004`), the 422 surrogate/echo issue | M3.2, M8 | maintainer |
+| Owner sign-off on `SHIM-SEC-009` and the ledger edits — written by the implementing agent (`RISK-GOV-001`) | before merge | maintainer |

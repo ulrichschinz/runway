@@ -22,6 +22,7 @@
  */
 import './texts.js'
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import AppFrame from '../layout/AppFrame.vue'
 import EyebrowLine from '../layout/ui/EyebrowLine.vue'
 import PageHeading from '../layout/ui/PageHeading.vue'
@@ -97,6 +98,12 @@ const pw = reactive({ current: '', next: '', confirm: '' })
 const pwStatus = ref('')
 const pwField = ref(null)
 const pwOpener = ref(null)
+// The login sent this person here (`landingAfterLogin`): a bcrypt-era hash accepted a password of
+// 72 bytes or more, which cannot be upgraded from what was typed (SEC-006). Say so, open the form.
+const pwRequired = useRoute().query.password === 'change'
+onMounted(() => {
+  if (pwRequired) openPassword()
+})
 
 function openPassword() {
   pwStatus.value = ''
@@ -206,6 +213,7 @@ function escape(event, close) {
         <form v-if="changing" class="form" @submit.prevent="changePassword" @keydown="escape($event, closePassword)">
           <!-- the account name, for the browser's password manager -->
           <input class="hidden" type="text" autocomplete="username" :value="auth.username" readonly tabindex="-1" aria-hidden="true">
+          <p v-if="pwRequired" class="status bad" role="status">{{ t('set.pw.required') }}</p>
           <p>{{ t('set.pw.hint') }}</p>
           <label class="field">
             <span>{{ t('set.pw.current') }}</span>

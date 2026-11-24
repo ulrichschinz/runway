@@ -12,7 +12,15 @@ describe('passwordError', () => {
   })
 
   it('lets a complete form through: the server checks the current password', () => {
-    expect(passwordError({ current: 'alt', next: 'neu', confirm: 'neu' })).toBeNull()
+    expect(passwordError({ current: 'alt', next: 'neu-lang-genug', confirm: 'neu-lang-genug' })).toBeNull()
+  })
+
+  it('applies the server rule to the new password, in UTF-8 bytes (SEC-006)', () => {
+    expect(passwordError({ current: 'alt', next: 'kurz', confirm: 'kurz' })).toBe('set.pw.tooShort')
+    const long = 'ä'.repeat(513)
+    expect(passwordError({ current: 'alt', next: long, confirm: long })).toBe('set.pw.tooLong')
+    // the current one may be short: it was set before the rule
+    expect(passwordError({ current: 'pw', next: 'ääää', confirm: 'ääää' })).toBeNull()
   })
 })
 

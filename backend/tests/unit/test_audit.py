@@ -193,7 +193,9 @@ class TestEvents:
     ):
         client.put("/admin/settings", json={"allow_registration": False}, headers=admin)
         assert (
-            client.post("/auth/register", json={"username": "bob", "password": "pw"}).status_code
+            client.post(
+                "/auth/register", json={"username": "bob", "password": "pw-long-enough"}
+            ).status_code
             == 403
         )
 
@@ -205,7 +207,9 @@ class TestEvents:
         self, client: TestClient, registered: dict[str, str]
     ):
         assert (
-            client.post("/auth/register", json={"username": "alice", "password": "x"}).status_code
+            client.post(
+                "/auth/register", json={"username": "alice", "password": "x-long-enough"}
+            ).status_code
             == 400
         )
         row = last(audit.REGISTERED)

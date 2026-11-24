@@ -401,7 +401,7 @@ concurrently, and a correlation id that correlates the wrong lines is worse than
 | | catches | misses |
 |---|---|---|
 | `RULE-OPS-002` (static) | anything named `password`, `token`, `api_key`, `jwt_secret`, … at a logging call in `backend/app/` | the same value under a neutral name; uvicorn, libraries, tracebacks |
-| the redaction filter (runtime) | a JWT, a bcrypt hash, a 43-character API key and the resolved `JWT_SECRET` **anywhere in the line**, whatever it is called, plus any field whose name says credential | a value with no recognised shape under a name that does not say credential — a plain password, for one |
+| the redaction filter (runtime) | a JWT, a bcrypt hash, an Argon2id hash, a 43-character API key and the resolved `JWT_SECRET` **anywhere in the line**, whatever it is called, plus any field whose name says credential | a value with no recognised shape under a name that does not say credential — a plain password, for one |
 
 What remains after both is recorded as `RISK-OPS-005`.
 
@@ -774,6 +774,83 @@ until it expires, and the old password logs in again. The monotone trigger canno
 a restore replaces the file and runs no `UPDATE`. **After every restore, run the global statement above
 once, before the app serves traffic**, and tell the users whose password changed after the backup that
 their old password is back.
+
+## Password hashing: Argon2id and the bcrypt migration
+
+Since brief 0067 (finding SEC-006, ADR 0044 Decision 5) new passwords are hashed with Argon2id; the
+bcrypt hashes passlib wrote before are still verified (`SHIM-SEC-009`) and replaced on login. Nothing in
+this section needs a setting or a deploy: every step is dated from the image's first boot.
+
+**When the timeline started** (UTC epoch seconds):
+
+```sh
+sqlite3 users.db "SELECT value FROM site_settings WHERE key = 'password_kdf_expand_at';"
+```
+
+| From | What happens |
+|---|---|
+| first boot | Policy (8–1024 bytes), body limits (16 KiB on `/auth/*`, 1 MiB elsewhere) and uniform login work apply. **New and changed passwords are still bcrypt** — the soak. |
+| + 7 days | **Switch 1.** New and changed passwords are Argon2id; an exact bcrypt login is rehashed (`auth.password.rehashed` in the audit log). |
+| + 67 days | **Switch 2.** A bcrypt login with a password of 72 bytes or more is refused; those accounts need the reset below. |
+
+**Before Switch 1, measure on this host** — the parameters were measured on a development machine, not here.
+The budget is 250 ms and 64 MiB per verification:
+
+```sh
+docker compose exec backend python -m app.auth
+```
+
+If the median is over budget, lower `ARGON2_TIME_COST` in `backend/app/auth.py` (never the memory below
+19 MiB or the time below 2 — the OWASP floor, held by a test) and deploy; hashes at the old parameters are
+rehashed on their next login, and nothing else moves.
+
+**How far the migration is** (counts only, no hashes in the output):
+
+```sh
+sqlite3 users.db "SELECT substr(hashed_password, 1, 4) AS scheme, COUNT(*) FROM users GROUP BY scheme;"
+sqlite3 data/audit.db "SELECT COUNT(*) FROM audit_events WHERE event = 'auth.password.rehashed';"
+```
+
+`$arg` is Argon2id, `$2b$` is bcrypt. **Who must change a long password** — every login accepted through a
+bcrypt hash for 72 bytes or more, before Switch 2; tell them, the app already does:
+
+```sh
+sqlite3 data/audit.db "SELECT DISTINCT actor FROM audit_events WHERE event = 'auth.login.succeeded' AND detail LIKE 'bcrypt-era password%';"
+```
+
+**Operator reset** — the recovery path for an account refused after Switch 2 (an `auth.login.failed` row
+whose detail starts `bcrypt-era password`), and for any account still on bcrypt at the contract step.
+Confirm the person out of band first. It sets a temporary password typed at a prompt — never on the
+command line, so it reaches no shell history — and ends every session of the account:
+
+```sh
+docker compose exec -it backend python - <<'PY'
+import getpass, sqlite3
+from app.auth import hash_password, password_problem
+from app.config import settings
+user = input("account: ")
+temporary = getpass.getpass("temporary password (8-1024 bytes): ")
+assert password_problem(temporary, new=True) is None, password_problem(temporary, new=True)
+con = sqlite3.connect(settings.db_path)
+n = con.execute("UPDATE users SET hashed_password = ?, auth_version = auth_version + 1 WHERE username = ?",
+                (hash_password(temporary), user)).rowcount
+con.commit()
+print(n, "account(s) reset")
+PY
+```
+
+Hand the temporary password over out of band and ask the person to change it in Einstellungen at once. The
+API key is untouched; rotate it as well if the account may be compromised.
+
+**Rollback.** Within the 7-day soak the previous image verifies every hash this one wrote. **After Switch 1
+it cannot verify an Argon2id hash**: passlib raises on an unknown hash, so those accounts get `500` at login
+on the previous image while bcrypt accounts keep working. Roll forward to this image or later — the
+rollback target after Switch 1 is this image's `:<commit-sha>`, not the one before it — or reset the
+affected accounts as above if a roll forward is impossible.
+
+**After a deploy**, with a **synthetic** account: register it with a password of 8 bytes or more; a
+7-byte one must get `422`; a 20 KB login body must get `413`; after Switch 1 its stored hash starts
+`$argon2id$`.
 
 ## The deploy host's topology
 

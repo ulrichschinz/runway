@@ -53,7 +53,7 @@ class TestSettings:
 
     def test_the_flag_actually_gates_registration(self, client, admin):
         client.put("/admin/settings", json={"allow_registration": False}, headers=admin)
-        r = client.post("/auth/register", json={"username": "late", "password": "pw"})
+        r = client.post("/auth/register", json={"username": "late", "password": "pw-long-enough"})
         assert r.status_code == 403
         assert r.json()["detail"] == "Registration is disabled"
 
@@ -67,16 +67,20 @@ class TestSettings:
         """
         client.put("/admin/settings", json={"allow_registration": False}, headers=admin)
         assert (
-            client.post("/auth/register", json={"username": "dana", "password": "pw"}).status_code
+            client.post(
+                "/auth/register", json={"username": "dana", "password": "pw-long-enough"}
+            ).status_code
             == 403
         )
 
         client.put("/admin/settings", json={"allow_registration": True}, headers=admin)
-        created = client.post("/auth/register", json={"username": "dana", "password": "pw"})
+        created = client.post(
+            "/auth/register", json={"username": "dana", "password": "pw-long-enough"}
+        )
         assert created.status_code == 201
         assert created.json()["role"] == "user"
 
-        token = client.post("/auth/login", json={"username": "dana", "password": "pw"})
+        token = client.post("/auth/login", json={"username": "dana", "password": "pw-long-enough"})
         assert token.status_code == 200
         me = client.get(
             "/auth/me", headers={"Authorization": f"Bearer {token.json()['access_token']}"}
@@ -92,7 +96,7 @@ class TestUserManagement:
 
     def test_promotes_and_demotes(self, client, admin, registered):
         client.put("/admin/settings", json={"allow_registration": True}, headers=admin)
-        client.post("/auth/register", json={"username": "carol", "password": "pw"})
+        client.post("/auth/register", json={"username": "carol", "password": "pw-long-enough"})
 
         r = client.put("/admin/users/carol/role", json={"role": "admin"}, headers=admin)
         assert r.status_code == 200

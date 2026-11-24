@@ -32,7 +32,7 @@ that chose the old interface earlier keeps it until it asks for `?ui=neu`.
 | Backend | Python 3.12 · FastAPI · aiosqlite |
 | Frontend | Vue 3 · Vite · Tailwind CSS · Pinia |
 | Task engine | Taskwarrior 3.x (TaskChampion / SQLite) |
-| Auth | JWT · bcrypt · per-user API keys |
+| Auth | JWT · Argon2id · per-user API keys |
 | Deploy | Docker Compose |
 
 ---
@@ -146,6 +146,16 @@ account issued before it, on every route and every MCP tool, and answers with a 
 caller (`{"detail": …, "access_token": …, "token_type": "bearer"}`); a client that keeps using its
 old token gets `401`. API keys are not affected by a password change — rotate them with
 `POST /api/auth/apikey/regenerate` if they may be compromised.
+
+**Passwords** are hashed with Argon2id and limited in **UTF-8 bytes**: at most 1024 in every
+password field (login included), at least 8 for a password being set (`POST /api/auth/register`,
+`PUT /api/auth/password`). A password outside the rule is refused with `422` before any work is
+done; a request body over 16 KiB on `/api/auth/*` (1 MiB elsewhere) with `413`. A login keeps no
+minimum, so an older short password still works. Passwords set before 2026-11 were hashed with
+bcrypt, which read only their first 72 bytes; a login with such a password of 72 bytes or more
+answers `"password_change_required": true` beside the token — set a new password then, because
+after a transition window that login is refused. Every failed login is the same
+`401 Invalid credentials`, whether or not the account exists.
 
 **API key** — permanent, per-user, managed in the app settings:
 ```

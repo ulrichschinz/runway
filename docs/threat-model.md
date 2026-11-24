@@ -238,9 +238,16 @@ The working default at [`backend/app/config.py:9`](../backend/app/config.py) is 
 `import app.main` succeeds with no environment, and it is inert: a serving process cannot hold it.
 That was finding SEC-1.
 
-**Password hashes** — bcrypt through passlib
-([`backend/app/auth.py:8`](../backend/app/auth.py)). A hash is treated as credential-equivalent
-throughout, because it is offline-attackable.
+**Password hashes** — Argon2id through argon2-cffi since brief 0067 (finding SEC-006, ADR 0044
+Decision 5), at parameters measured against a 64 MiB / 250 ms budget
+([`backend/app/auth.py`](../backend/app/auth.py)). Hashes written before it are passlib-era bcrypt,
+which read only the first 72 UTF-8 bytes; they are still verified (`SHIM-SEC-009`) and replaced by
+Argon2id on the next exact login. A bcrypt match for an input of 72 bytes or more is ambiguous —
+the hash cannot tell the real password from its prefix plus anything — so it is never written as
+the new hash: it is accepted for a window with `password_change_required` and refused after it.
+Every password field is bounded at 1024 UTF-8 bytes, a new one needs 8, and the body of an auth
+request at 16 KiB. A hash is treated as credential-equivalent throughout, because it is
+offline-attackable; the log redaction knows both shapes.
 
 **API keys** — `secrets.token_urlsafe(32)` at
 [`backend/app/database.py:138-147`](../backend/app/database.py), so guessing one is not the threat.
@@ -293,7 +300,10 @@ a literal.
   mitigation is observation, not prevention: `auth.apikey.disclosed` records that a key was handed
   out, which says nothing about a key read from the file directly.
 - Secret scanning is pattern-based and reads only the current tree. `RISK-DEP-002`.
-- `passlib` has been unmaintained since 2020 and holds `bcrypt` frozen at 4.0.1. `RISK-DEP-003`.
+- `bcrypt` 4.0.1 stays only to verify the hashes passlib wrote, until `SHIM-SEC-009`'s contract;
+  passlib itself is gone (brief 0067). `RISK-DEP-003`.
+- The Argon2id latency on the deploy host is the operator's measurement, not a test's.
+  `RISK-TEST-003`.
 
 ---
 
@@ -466,11 +476,9 @@ Everything that enters the running image is pinned by content, not by name.
 - `RULE-TI-002` — the runtime versions in `tools/versions.env` match what the Dockerfiles build on.
 
 **Asserted**
-- **`passlib` 1.7.4 is the latest release and it is from 2020-10-08** — unmaintained, not merely
-  pinned, and it is the only thing hashing passwords here. `bcrypt` is held at 4.0.1 because passlib
-  reads an attribute bcrypt removed; bcrypt 5.0.0 does not warn, it fails every hash. A
-  security-relevant dependency frozen in place by a dead one, and Dependabot will keep offering the
-  bump that breaks every login. `RISK-DEP-003`.
+- **passlib was removed in brief 0067.** Argon2id comes from `argon2-cffi`, whose native binding is
+  pinned in the intent file to a release older than two weeks; `bcrypt` 4.0.1 remains only to verify
+  legacy hashes, and its pin is no longer load-bearing. `RISK-DEP-003`.
 - The Arch archive snapshot is a date somebody must move deliberately. Nothing announces that a
   pinned date has aged, and a snapshot left alone accumulates unpatched packages. `RISK-DEP-001`.
 - Pinning is not provenance. Nothing here verifies image signatures or attestations, and a digest
@@ -492,7 +500,12 @@ locked-out username does not buy an attacker the bcrypt work as a lever
 default. An unknown username counts too, deliberately: skipping it would turn the limiter into a user
 enumeration oracle, and the log line and the audit row are written not to distinguish "no such
 account" from "wrong password" for exactly the same reason (lines 100-111). Every failure is an audit
-row.
+row. **Nor does the time** (since brief 0067): every login does one Argon2id verification and one
+bcrypt check at the production cost, against a dummy where the account has no hash of that kind, so
+an unknown account, a bcrypt account and an Argon2id account cost the same and answer the same 401
+(`test_password_kdf.py::TestUniformWork`). That is equal work, not a constant-time guarantee: the
+event loop, the database lookup and the rehash on a *successful* login still differ, and nothing
+measures response times.
 
 **Not stopped:** the limiter is keyed on **username, not IP**, which is a deliberate trade in both
 directions — an attacker rotating source addresses is unaffected by an IP limiter, and someone who
