@@ -114,6 +114,26 @@ test that was observed failing on `d66d831` first (26 new tests red, then green)
 | Brief listed `AGENTS.md` and "four events" | **Real** | Corrected above. |
 | Governance entries read as owner-approved | **Real** | `SHIM-SEC-007` carries the same "not independent, RISK-GOV-001" note as the baseline raise; owner sign-off is a deferred step below. |
 
+## Second review (2026-11-24, of `d6bf18a`) and what changed
+
+Both findings reproduced; each fix has a test observed failing on `d6bf18a` first (9 new tests red, then green).
+`./run impact backend/app/services/storage_migration.py` (index current at `d6bf18a`): unit `be/services`, governed by
+ADR 0043, protected by `test_storage_migration.py`; no public surface. `user_service.py` and `database.py` are not
+touched. The root check is one additive predicate in the resolver, `task_storage.data_root_is_directory()`
+(`./run impact backend/app/task_storage.py`: unit `be/leaves`, ADR 0043; nothing existing changes) — `RULE-SEC-003`
+flagged the first draft, which read `data_root` in the migration, and was right to. The migration calls it before
+reading an account and again before each `provision_store`.
+
+Results after this round: unit tier **792 passed**; container suite against the host's Taskwarrior 3.5.0 **94 passed**.
+
+| Finding | Verdict | Fix |
+|---|---|---|
+| `apply` against an unmounted or empty data root "provisioned" every legacy account onto an empty store, created the root itself, exited 0, and `rollback` then refused | **Real** (reproduced) | `plan`, `apply` and `rollback` stop with **exit 3** before reading an account when `DATA_ROOT` does not exist or is not a directory, and `apply` re-checks before each provisioning, so nothing in the tool can create the root. A legacy account without `data/<username>/` is **`blocked`** by default (every earlier image created that directory at registration); only `--provision-missing` provisions it. `rollback` undoes a *provisioned* account while its store is still the bare template. Red tests: missing root, root is a file, empty root, the flag, provisioned rollback before/after a write. |
+| An OSError in one account's tree (unreadable file, `ENOSPC` in the copy, a refused rename) aborted the whole run with exit 3 and printed an absolute path with the username | **Real** (reproduced) | Reading a tree turns any OSError into `Blocked("tree contains an unreadable entry")`; the copy turns one into `Blocked("copy failed: <ERRNO>")` and clears its staging directory; the account is recorded `blocked` and the loop goes on. The top-level handler prints only the exception type and errno name, never the message. Red tests: a mode-000 file in one of two stores (plan and apply), `ENOSPC` in one of two copies; neither output contains the temp path. |
+
+An *empty but present* root blocks every legacy account (exit 1, nothing switched) rather than exiting 3: each
+account is then named with its reason, and a root that holds some stores but lost others is caught the same way.
+
 ## Registration re-open condition
 
 Registration may be opened again once `tests/unit/test_storage_identity.py` and

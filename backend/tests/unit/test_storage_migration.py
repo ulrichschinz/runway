@@ -169,9 +169,9 @@ class TestApply:
         assert _tree(root) == tree
         assert _protocol() == protocol
 
-    def test_an_account_without_a_legacy_directory_is_provisioned(self, root, capsys):
+    def test_an_account_without_a_legacy_directory_is_provisioned_on_request(self, root, capsys):
         bob = _add("bob")
-        code, entries = _run(capsys, "apply")
+        code, entries = _run(capsys, "apply", "--provision-missing")
         assert code == EX_OK
         assert _by_user(entries)[bob]["status"] == "provisioned"
         assert (root / _row(bob)["storage_id"] / ".taskrc").is_file()
@@ -522,3 +522,166 @@ class TestMigratingAgainAfterARollback:
         assert code == EX_BLOCKED
         assert "compat" in entry["reason"]
         assert _row(alice)["storage_layout"] == "storage_id"
+
+
+def _layouts() -> list[tuple[int, str]]:
+    con = sqlite3.connect(settings.db_path)
+    try:
+        return list(con.execute("SELECT id, storage_layout FROM users ORDER BY id"))
+    finally:
+        con.close()
+
+
+class TestAnEmptyTargetNeverStandsInForTheSource:
+    """Review of SEC-001: an `apply` against an unmounted or wrong data root must not switch
+    every account to an empty store it cannot roll back."""
+
+    def test_a_missing_data_root_stops_the_run_and_changes_nothing(
+        self, root, capsys, monkeypatch, tmp_path
+    ):
+        _add("alice")
+        _store(root / "alice")
+        _add("bob")
+        _store(root / "bob")
+        before = _layouts()
+        unmounted = tmp_path / "not-mounted"
+        monkeypatch.setattr(settings, "data_root", unmounted)
+
+        for command in ("plan", "apply"):
+            assert storage_migration.main([command]) == storage_migration.EX_TOOLING
+            captured = capsys.readouterr()
+            assert str(tmp_path) not in captured.out + captured.err
+
+        assert not unmounted.exists(), "the migration never creates the data root"
+        assert _layouts() == before
+        assert _protocol() == []
+
+    def test_a_data_root_that_is_a_file_stops_the_run(self, root, capsys, monkeypatch, tmp_path):
+        _add("alice")
+        not_a_dir = tmp_path / "a-file"
+        not_a_dir.write_text("")
+        monkeypatch.setattr(settings, "data_root", not_a_dir)
+        assert storage_migration.main(["apply"]) == storage_migration.EX_TOOLING
+        assert _layouts() == [(1, "legacy")]
+
+    def test_an_empty_data_root_blocks_every_legacy_account(self, root, capsys):
+        _add("alice")
+        _add("bob")
+        before = _layouts()
+
+        code, entries = _run(capsys, "apply")
+
+        assert code == EX_BLOCKED
+        assert {e["status"] for e in entries} == {"blocked"}
+        assert {e["reason"] for e in entries} == {
+            "no legacy directory; pass --provision-missing to give it an empty store"
+        }
+        assert _layouts() == before
+        assert not [p for p in root.iterdir() if not p.name.startswith("audit.db")]
+
+    def test_provisioning_a_missing_store_takes_an_explicit_flag(self, root, capsys):
+        bob = _add("bob")
+        code, entries = _run(capsys, "plan", "--provision-missing")
+        assert code == EX_OK
+        assert _by_user(entries)[bob]["status"] == "provision"
+
+    def test_a_provisioned_account_rolls_back_while_its_store_is_untouched(self, root, capsys):
+        bob = _add("bob")
+        assert _run(capsys, "apply", "--provision-missing")[0] == EX_OK
+        sid = _row(bob)["storage_id"]
+
+        code, (entry,) = _run(capsys, "rollback", "--user-id", str(bob))
+
+        assert code == EX_OK, entry
+        assert entry["status"] == "rolled_back"
+        assert _row(bob)["storage_layout"] == "legacy"
+        assert not (root / sid).exists()
+        assert not (root / "bob").exists()
+
+    def test_a_provisioned_account_that_was_written_to_does_not_roll_back(self, root, capsys):
+        bob = _add("bob")
+        _run(capsys, "apply", "--provision-missing")
+        sid = _row(bob)["storage_id"]
+        (root / sid / "taskchampion.sqlite3").write_bytes(b"a real task")
+
+        code, (entry,) = _run(capsys, "rollback", "--user-id", str(bob))
+
+        assert code == EX_BLOCKED
+        assert (
+            entry["reason"]
+            == "the new store has been written to since the migration; restore instead"
+        )
+        assert _row(bob)["storage_layout"] == "storage_id"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 file")
+class TestAnUnreadableTreeBlocksOnlyItsAccount:
+    """Review of SEC-001: an OSError inside one account's tree is that account's `blocked`,
+    with a fixed reason and no path, and the run goes on to the next account."""
+
+    def _setup(self, root: Path) -> tuple[int, int, Path]:
+        alice = _add("alice")
+        _store(root / "alice")
+        bob = _add("bob")
+        _store(root / "bob")
+        locked = root / "bob" / "locked"
+        locked.write_bytes(b"x")
+        locked.chmod(0)
+        return alice, bob, locked
+
+    def test_plan_reports_both_accounts(self, root, capsys):
+        alice, bob, locked = self._setup(root)
+        try:
+            code = storage_migration.main(["plan", "--json"])
+            captured = capsys.readouterr()
+        finally:
+            locked.chmod(0o600)
+        assert code == EX_BLOCKED
+        entries = _by_user(json.loads(captured.out))
+        assert entries[alice]["status"] == "ready"
+        assert entries[bob]["status"] == "blocked"
+        assert entries[bob]["reason"] == "tree contains an unreadable entry"
+        assert str(root) not in captured.out + captured.err
+
+    def test_apply_migrates_the_other_account_and_records_the_block(self, root, capsys):
+        alice, bob, locked = self._setup(root)
+        try:
+            code, entries = _run(capsys, "apply")
+        finally:
+            locked.chmod(0o600)
+        assert code == EX_BLOCKED
+        assert _by_user(entries)[alice]["status"] == "migrated"
+        assert _by_user(entries)[bob]["status"] == "blocked"
+        assert _row(bob)["storage_layout"] == "legacy"
+        assert (bob, "blocked", "tree contains an unreadable entry") in _protocol()
+
+
+class TestAFailedCopyBlocksOnlyItsAccount:
+    def test_a_full_disk_during_one_copy(self, root, capsys, monkeypatch):
+        import errno
+        import shutil
+
+        alice = _add("alice")
+        _store(root / "alice")
+        bob = _add("bob")
+        _store(root / "bob")
+        real_copytree = shutil.copytree
+
+        def full(src, dst, *args, **kwargs):
+            if Path(src).name == "alice":
+                Path(dst).mkdir()
+                raise OSError(errno.ENOSPC, "No space left on device", str(dst))
+            return real_copytree(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(storage_migration.shutil, "copytree", full)
+        code = storage_migration.main(["apply", "--json"])
+        captured = capsys.readouterr()
+
+        assert code == EX_BLOCKED
+        entries = _by_user(json.loads(captured.out))
+        assert entries[alice]["status"] == "blocked"
+        assert entries[alice]["reason"] == "copy failed: ENOSPC"
+        assert entries[bob]["status"] == "migrated"
+        assert _row(alice)["storage_layout"] == "legacy"
+        assert not task_storage.staging_dir(_row(alice)["storage_id"]).exists()
+        assert str(root) not in captured.out + captured.err

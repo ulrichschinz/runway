@@ -117,6 +117,15 @@ def data_root() -> Path:
     return Path(settings.data_root).resolve()
 
 
+def data_root_is_directory() -> bool:
+    """Whether the data root exists and is a directory. Never creates it: the migration asks
+    first, so an unmounted volume is an error rather than a fresh, empty root."""
+    try:
+        return stat.S_ISDIR(os.stat(data_root()).st_mode)
+    except (OSError, ValueError):
+        return False
+
+
 def storage_dir(storage_id: str) -> Path:
     """`DATA_ROOT/<storage_id>`, for a well-formed id. Does not touch the filesystem."""
     if not is_storage_id(storage_id):

@@ -643,8 +643,14 @@ docker compose run --rm --no-deps backend python -m app.services.storage_migrati
 
 One line per account: `user <id>  <status>  <files> files <bytes> bytes  <legacy path> -> <storage id>`, paths
 relative to `DATA_ROOT`, no task text. Statuses: `done` (already in the new layout), `ready` (will be copied),
-`provision` (no legacy directory: an empty store is created), `blocked` with a reason. Exit 1 when anything is
-blocked. **`blocked: alias of another account's directory` is a possible incident** — two account names open
+`blocked` with a reason. Exit 1 when anything is blocked. **Exit 3 when `DATA_ROOT` does not exist or is not a
+directory** — the tool never creates it, so an unmounted volume cannot be "migrated" onto an empty root. **A legacy
+account without `data/<username>/` is `blocked`** (`no legacy directory; pass --provision-missing …`): every earlier
+image created that directory at registration, so its absence means a wrong root or a lost volume — check the mount
+and the backup first. Only once you know the store is really gone, `plan --provision-missing` reports it as
+`provision` and `apply --provision-missing` gives it an empty store. An error reading one account's tree (an
+unreadable file: `tree contains an unreadable entry`) or copying it (`copy failed: ENOSPC`) blocks that account
+only, with no path in the output; the others go on. **`blocked: alias of another account's directory` is a possible incident** — two account names open
 the same directory (compared by inode, so `ALICE`/`alice` on a case-insensitive filesystem counts, and so does a
 legacy name equal to another account's storage id), so one account may have read or written the other's tasks. Lock the accounts concerned,
 keep the originals untouched, and follow the incident process; do not "fix" the directory. Every other blocked
@@ -678,6 +684,9 @@ deleted; it goes with the contract step. The account is served from `data/<usern
 migrated again later**: the next `apply` copies the legacy store afresh, including whatever was written to it
 after the rollback. (A copy a rollback could not set aside is recognised by its recorded manifest and replaced
 the same way; any other existing `data/<storage_id>/` still blocks.)
+
+An account `apply --provision-missing` provisioned rolls back the same way while its store is still the bare
+`.taskrc` template (nothing written); it is then a legacy account without a directory again, as `plan` found it.
 
 **After a write to a migrated store, rollback refuses**, and the way back is the backup from step 1 or a
 forward fix. **Redeploying the previous image after a migration serves the frozen legacy copy**: every task

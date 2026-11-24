@@ -20,7 +20,18 @@ Three commands:
               while the new store is byte-for-byte what was copied, and only in ``compat``
               mode. After a write it refuses; the way back is then the backup or a forward
               fix. The copy it no longer serves is renamed to ``.<id>.rolled-back.<stamp>``,
-              so a later ``apply`` copies the legacy store afresh.
+              so a later ``apply`` copies the legacy store afresh. A *provisioned* account
+              rolls back the same way while its store is still the untouched template.
+
+**An empty store never stands in for an existing one.** The data root must already exist and
+be a directory, or the run stops with exit 3 before it reads a single account — the tool never
+creates it, so an unmounted volume cannot be "migrated" into a fresh empty root. A legacy
+account without a ``DATA_ROOT/<username>/`` is ``blocked``: every earlier image created that
+directory at registration, so its absence is an anomaly (wrong root, lost volume), not a new
+account. Only ``--provision-missing`` turns such an account into ``provision``, deliberately.
+
+Any error reading or copying one account's tree — an unreadable file, a full disk — blocks that
+account with a fixed reason and no path, and the run goes on to the next.
 
 **What a copy must survive before it counts.** Source, target, owner, type and collisions are
 checked first, and each of these stops that account, visibly, with nothing moved: a name that
@@ -42,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import hashlib
 import json
 import os
@@ -55,7 +67,7 @@ from pathlib import Path
 
 from app import audit, database, task_storage
 from app.config import settings
-from app.services.user_service import provision_store
+from app.services.user_service import TASKRC_TEMPLATE, provision_store
 from app.task_storage import LAYOUT_LEGACY, LAYOUT_STORAGE_ID, Account, StorageRefused
 
 EX_OK, EX_BLOCKED, EX_USAGE, EX_TOOLING = 0, 1, 2, 3
@@ -98,6 +110,25 @@ class Blocked(Exception):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+class DataRootUnusable(Exception):
+    """The data root does not exist or is not a directory: exit 3, nothing read or written."""
+
+
+NO_SOURCE = "no legacy directory; pass --provision-missing to give it an empty store"
+UNREADABLE = "tree contains an unreadable entry"
+
+
+def _errno_name(failure: OSError) -> str:
+    return errno.errorcode.get(failure.errno or 0, type(failure).__name__)
+
+
+def _require_data_root() -> None:
+    """Refuse to run against a data root that is not there. Never creates it: an unmounted
+    volume would otherwise become a fresh empty root every account is switched onto."""
+    if not task_storage.data_root_is_directory():
+        raise DataRootUnusable
 
 
 # --- reading a tree ------------------------------------------------------------------------
@@ -146,9 +177,27 @@ def manifest(root: Path) -> Manifest:
             _check_entry(info, uid)
             rows.append(["f", path.relative_to(root).as_posix(), info.st_size, _sha256(path)])
             total += info.st_size
+    return _fold(rows, total)
+
+
+def _fold(rows: list[list[object]], total: int) -> Manifest:
     rows.sort(key=lambda row: str(row[1]))
     digest = hashlib.sha256(json.dumps(rows, separators=(",", ":")).encode()).hexdigest()
     return Manifest(files=sum(1 for row in rows if row[0] == "f"), bytes=total, digest=digest)
+
+
+def readable_manifest(root: Path) -> Manifest:
+    """`manifest`, with any OSError inside the tree turned into a pathless `Blocked`."""
+    try:
+        return manifest(root)
+    except OSError as failure:
+        raise Blocked(UNREADABLE) from failure
+
+
+def fresh_store_manifest() -> Manifest:
+    """What `provision_store` leaves behind: the `.taskrc` template and nothing else."""
+    size = TASKRC_TEMPLATE.stat().st_size
+    return _fold([["f", task_storage.TASKRC_NAME, size, _sha256(TASKRC_TEMPLATE)]], size)
 
 
 # --- planning ------------------------------------------------------------------------------
@@ -199,7 +248,10 @@ def _legacy_text(account: Account) -> str:
 
 
 def _plan_one(
-    account: Account, aliased: set[int], copied_before: str | None = None
+    account: Account,
+    aliased: set[int],
+    copied_before: str | None = None,
+    provision_missing: bool = False,
 ) -> tuple[Entry, Manifest | None, bool]:
     """One account's entry, the manifest to copy against, and whether an existing target is a
     stale copy this tool made and a rollback left behind (`copied_before` is the manifest of
@@ -234,12 +286,15 @@ def _plan_one(
         if os.path.lexists(target):
             entry.reason = "target exists and there is no source"
             return entry, None, False
+        if not provision_missing:
+            entry.reason = NO_SOURCE
+            return entry, None, False
         entry.status = PROVISION
         return entry, None, False
 
     try:
         task_storage.checked_legacy_directory(source)
-        found = manifest(source)
+        found = readable_manifest(source)
     except (StorageRefused, Blocked) as refused:
         entry.reason = refused.reason
         return entry, None, False
@@ -252,7 +307,7 @@ def _plan_one(
         # target is still exactly what the last migration recorded, and is replaced.
         try:
             existing: Manifest | None = manifest(task_storage.checked_directory(target))
-        except (StorageRefused, Blocked):
+        except (StorageRefused, Blocked, OSError):
             existing = None
         stale = (
             existing is not None
@@ -267,7 +322,10 @@ def _plan_one(
     return entry, found, stale
 
 
-async def plan(db) -> list[tuple[Account, Entry, Manifest | None, bool]]:
+async def plan(
+    db, provision_missing: bool = False
+) -> list[tuple[Account, Entry, Manifest | None, bool]]:
+    _require_data_root()
     accounts = await database.list_accounts(db)
     aliased = _aliases(accounts)
     planned = []
@@ -275,7 +333,7 @@ async def plan(db) -> list[tuple[Account, Entry, Manifest | None, bool]]:
         copied_before = None
         if await database.last_storage_action(db, account.id) == ROLLED_BACK:
             copied_before = await database.last_migration_manifest(db, account.id)
-        planned.append((account, *_plan_one(account, aliased, copied_before)))
+        planned.append((account, *_plan_one(account, aliased, copied_before, provision_missing)))
     return planned
 
 
@@ -296,7 +354,17 @@ def _set_aside(storage_id: str) -> None:
 
 
 def _copy(source: Path, storage_id: str, expected: Manifest, stale: bool = False) -> Path:
-    """Copy `source` into place under `storage_id`; return the target. Raises `Blocked`."""
+    """Copy `source` into place under `storage_id`; return the target. Raises `Blocked`, and
+    only `Blocked`: an OSError on the way (a full disk, a rename refused) becomes one with the
+    errno's name and no path, after the staging copy is cleared away."""
+    try:
+        return _copy_unguarded(source, storage_id, expected, stale)
+    except OSError as failure:
+        shutil.rmtree(task_storage.staging_dir(storage_id), ignore_errors=True)
+        raise Blocked(f"copy failed: {_errno_name(failure)}") from failure
+
+
+def _copy_unguarded(source: Path, storage_id: str, expected: Manifest, stale: bool) -> Path:
     target = task_storage.storage_dir(storage_id)
     if stale and os.path.lexists(target):
         _set_aside(storage_id)  # verified by the plan to be this tool's own earlier copy
@@ -310,7 +378,7 @@ def _copy(source: Path, storage_id: str, expected: Manifest, stale: bool = False
     shutil.copytree(source, staging, symlinks=True, copy_function=shutil.copy2)
     try:
         copied = manifest(staging)
-    except Blocked:
+    except (Blocked, OSError):
         copied = None
     if copied != expected:
         shutil.rmtree(staging, ignore_errors=True)
@@ -322,14 +390,17 @@ def _copy(source: Path, storage_id: str, expected: Manifest, stale: bool = False
     return target
 
 
-async def apply(db, user_id: int | None = None) -> list[Entry]:
+async def apply(db, user_id: int | None = None, provision_missing: bool = False) -> list[Entry]:
     results: list[Entry] = []
-    for account, entry, found, stale in await plan(db):
+    for account, entry, found, stale in await plan(db, provision_missing):
         if user_id is not None and account.id != user_id:
             continue
         if entry.status == PROVISION:
             try:
+                _require_data_root()  # again, so provisioning can never create the root
                 provision_store(account)
+            except DataRootUnusable:
+                raise
             except (OSError, StorageRefused) as failure:
                 entry.status, entry.reason = (
                     BLOCKED,
@@ -345,7 +416,7 @@ async def apply(db, user_id: int | None = None) -> list[Entry]:
             source = task_storage.legacy_dir(account.username, allow_storage_id_shape=True)
             try:
                 target = _copy(source, account.storage_id, found, stale)
-                if manifest(target) != found or manifest(source) != found:
+                if readable_manifest(target) != found or readable_manifest(source) != found:
                     raise Blocked("source changed during the copy; stop the backend and retry")
             except Blocked as blocked:
                 entry.status, entry.reason = BLOCKED, blocked.reason
@@ -377,6 +448,7 @@ async def apply(db, user_id: int | None = None) -> list[Entry]:
 
 
 async def rollback(db, user_id: int) -> Entry:
+    _require_data_root()
     accounts = {a.id: a for a in await database.list_accounts(db)}
     account = accounts.get(user_id)
     if account is None:
@@ -392,16 +464,25 @@ async def rollback(db, user_id: int) -> Entry:
         # a 500 at once. Set TASK_STORAGE_MODE=compat first, deliberately.
         entry.reason = "rollback needs TASK_STORAGE_MODE=compat; strict refuses a legacy account"
         return entry
-    recorded = await database.last_migration_manifest(db, account.id)
-    if recorded is None:
+    last = await database.last_storage_action(db, account.id)
+    if last == PROVISIONED:
+        # No legacy source to return to: undone only while the store is the bare template,
+        # i.e. nothing was ever written to it. The account is then as `plan` found it.
+        recorded: str | None = fresh_store_manifest().digest
+    else:
+        recorded = await database.last_migration_manifest(db, account.id)
+    if recorded is None or last not in (MIGRATED, PROVISIONED):
         entry.reason = "account was not migrated by this tool; it has no legacy source"
         return entry
     try:
-        source = task_storage.checked_legacy_directory(
-            task_storage.legacy_dir(account.username, allow_storage_id_shape=True)
+        legacy = task_storage.legacy_dir(account.username, allow_storage_id_shape=True)
+        now = readable_manifest(
+            task_storage.checked_directory(task_storage.storage_dir(account.storage_id))
         )
-        now = manifest(task_storage.checked_directory(task_storage.storage_dir(account.storage_id)))
-        manifest(source)
+        if last == MIGRATED:
+            readable_manifest(task_storage.checked_legacy_directory(legacy))
+        elif os.path.lexists(legacy):
+            raise Blocked("a legacy directory appeared after provisioning; resolve by hand")
     except (StorageRefused, Blocked) as refused:
         entry.reason = refused.reason
         return entry
@@ -452,9 +533,10 @@ def _emit(entries: list[Entry], as_json: bool) -> None:
 async def _main(args: argparse.Namespace) -> int:
     async with database.users_connection() as db:
         if args.command == "plan":
-            entries = [entry for _account, entry, _found, _stale in await plan(db)]
+            planned = await plan(db, args.provision_missing)
+            entries = [entry for _account, entry, _found, _stale in planned]
         elif args.command == "apply":
-            entries = await apply(db, args.user_id)
+            entries = await apply(db, args.user_id, args.provision_missing)
         else:
             entries = [await rollback(db, args.user_id)]
     _emit(entries, args.json)
@@ -469,6 +551,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("command", choices=("plan", "apply", "rollback"))
     parser.add_argument("--user-id", type=int, default=None, help="limit to one account")
     parser.add_argument("--json", action="store_true", help="one JSON document on stdout")
+    parser.add_argument(
+        "--provision-missing",
+        action="store_true",
+        help="give a legacy account without a legacy directory an empty store (default: block)",
+    )
     try:
         args = parser.parse_args(argv)
     except SystemExit as exit_:
@@ -481,8 +568,15 @@ def main(argv: list[str]) -> int:
         return EX_TOOLING
     try:
         return asyncio.run(_main(args))
-    except (sqlite3.Error, OSError) as failure:
-        sys.stderr.write(f"  cannot run: {type(failure).__name__}: {failure}\n")
+    except DataRootUnusable:
+        sys.stderr.write("  the data root does not exist or is not a directory; is it mounted?\n")
+        return EX_TOOLING
+    except sqlite3.Error as failure:
+        sys.stderr.write(f"  cannot run: {type(failure).__name__}\n")
+        return EX_TOOLING
+    except OSError as failure:
+        # Never the message: it carries an absolute path, and with it a username.
+        sys.stderr.write(f"  cannot run: {type(failure).__name__} ({_errno_name(failure)})\n")
         return EX_TOOLING
 
 

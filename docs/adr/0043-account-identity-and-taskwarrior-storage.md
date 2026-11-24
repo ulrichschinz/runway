@@ -117,7 +117,10 @@ line in `_run` and watches the gate go red. It is a name-based static scan; what
   before this deploy. **An account registered after it** has `storage_layout='storage_id'` and a
   store only in `DATA_ROOT/<storage_id>/`; the previous image looks in `DATA_ROOT/<username>/`
   and answers its task routes with 500 until the new image is rolled forward again (its data is
-  untouched). The same holds for an account `apply` *provisioned* (it had no legacy directory).
+  untouched). The same holds for an account `apply --provision-missing` *provisioned* (it had no legacy
+  directory; without that flag such an account is `blocked`, and the tool refuses to run at all
+  — exit 3 — against a data root that does not exist, so an unmounted volume never becomes an
+  empty store; a provisioned account rolls back while its store is the untouched template).
   Together: `SELECT id FROM users WHERE storage_layout='storage_id' AND id NOT IN (SELECT user_id
   FROM storage_migrations WHERE action='migrated')`. Keeping registration closed (M0) keeps the
   first group empty. After `apply` and before any write, `rollback --user-id N`. After a write to a migrated store, the previous image would serve the frozen
