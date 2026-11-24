@@ -8,9 +8,9 @@
 | **Governed by** | New [ADR 0048](../adr/0048-container-hardening-and-the-browser-edge.md). Builds on ADR 0032 (the compose file is deployed from the image) and ADR 0006 (two test tiers). |
 | **Rule IDs introduced** | `RULE-OPS-004` (container hardening floor: deploy compose + final-stage `USER`), `RULE-OPS-005` (browser headers declared at the nginx edge). `RULE-TEST-002` is widened: the container tier also runs the *runtime* images under the deploy hardening. Two dated shims: `SHIM-OPS-001` (backend still uid 0 until the host volumes are migrated), `SHIM-WEB-001` (strict CSP still report-only). |
 | **Entry points** | Container start (`CMD` of both images), the compose service blocks, nginx `server {}`. Operator entry point: `python /opt/runway/volume_ownership.py` inside the backend image. |
-| **Affected public surfaces** | **Container images**: both now declare a numeric non-root `USER` (backend `10001:10001`, frontend `10002:10002`). **Deploy compose**: new `./db` bind mount, `DB_PATH` moves from `/app/users.db` to `/app/db/users.db` while the *same host file* `./users.db` is still mounted there (see *Migration*). **Env**: new compose-only variable `RUNWAY_BACKEND_USER` (not read by the application, so not a `Settings` field; documented in README beside `RUNWAY_SHA`). `DB_PATH`'s README default stays the application default `/app/users.db`; only the compose value changes. **HTTP**: every response through nginx gains six headers. No REST route, MCP tool, DB schema, SPA route or `localStorage` key changes, so `ops/surfaces/` is untouched. |
+| **Affected public surfaces** | **Container images**: the frontend now ends on a numeric non-root `USER 10002:10002`; the backend carries `10001:10001` but ends on `USER 0:0` until the contract step (see *Review amendments*). **Deploy compose**: new `./db` bind mount, `DB_PATH` moves from `/app/users.db` to `/app/db/users.db` while the *same host file* `./users.db` is still mounted there (see *Migration*). **Env**: new compose-only variable `RUNWAY_BACKEND_USER` (not read by the application, so not a `Settings` field; documented in README beside `RUNWAY_SHA`). `DB_PATH`'s README default stays the application default `/app/users.db`; only the compose value changes. **HTTP**: every response through nginx gains six headers. No REST route, MCP tool, DB schema, SPA route or `localStorage` key changes, so `ops/surfaces/` is untouched. |
 | **Known dependents** | From `./run impact` (index current at `5d85f6ee539e`, 1636 nodes): no import dependents for any file above; every one is `files_without_import_derived_test_protection`. Blind spots: `BLIND-OPS-001` (the host's compose is this file, but nothing observes the write), `BLIND-NGINX-001` (nginx.conf is templated at start), `BLIND-TEST-001`. `frontend/src/layout/lens/LensFlat.vue` was checked as a CSP risk (inline `style=` on SVG stops) and needs **no change**: the build compiles it to a CSSOM style object, not an attribute. Consumers of the edge: the SPA, MCP clients via `/api/mcp`, the webhook `/api/inbox`, CI's `verify-deploy`. |
-| **Uncertain / dynamic areas** | (1) **Host ownership is unknown** (plan M0): who owns `/opt/services/runway/users.db` and `data/**` was never read. That is why the backend's switch to uid 10001 is an operator step behind a dry-run, not part of this deploy, and why the transitional root keeps `DAC_OVERRIDE`. (2) **Traefik** terminates TLS and may add, strip or override headers; only `verify-deploy` against the public origin sees that. (3) **Arm64**: the container tier cannot run on this machine (`RISK-TEST-001`), so the runtime-image proofs run first in CI. (4) The strict CSP is proven against a local build and a local headless browser, not against every view in production — hence report-only first. |
+| **Uncertain / dynamic areas** | (1) **Host ownership is unknown** (plan M0): who owns `/opt/services/runway/users.db` and `data/**` was never read. That is why the backend's switch to uid 10001 is an operator step behind a dry-run, not part of this deploy, and why the transitional root keeps `DAC_OVERRIDE`. (2) **Traefik** terminates TLS and may add, strip or override headers; only `verify-deploy` against the public origin sees that. (3) **Arm64**: the container tier cannot run on this machine (`RISK-TEST-001`), so the runtime-image proofs run first in CI. (4) The strict CSP is proven against a local build and a local headless browser, not against every view in production — hence report-only first. (5) **How `/opt/scripts/deploy.sh` extracts the baked compose** (`docker create`+`docker cp`, or a `docker run` as the image's user) has never been read from the host (plan M0), and the extraction has silently not happened before (`RISK-OPS-002`). This change is therefore built to be safe under *either* compose for the backend. |
 | **Analogous implementations** | `RULE-OPS-003` in `tools/checks/deploy_compose.py` (bounds the deploy compose); `SHIM-SEC-006` (a dated compatibility shim with a removal step); the `verify-deploy` job (post-deploy evidence from the public origin). |
 | **Delivery Pattern** | **Security or Operability Change** for both findings, with **expand → migrate → switch → contract** for the backend's data mounts and user (a data-bearing surface). |
 | **Required tests** | See *Tests and evidence*. Red first: the two new static rules against today's tree; the volume-migration unit tests against a missing module; the CSP build scanner against a crafted inline script. |
@@ -35,7 +35,8 @@ sniffed into script.
 
 **Backend image.** A dedicated `runway` user, uid/gid `10001`, no login shell, no home. The code stays
 root-owned and is therefore read-only to the process. `/app/data` and the new `/app/db` are the only
-directories it owns. `USER 10001:10001`.
+directories it owns. The image still ends on `USER 0:0` until the contract step, so it behaves as before
+under the previous compose; the deploy compose names its user explicitly (amended after review).
 
 **Frontend image.** A dedicated `runway-web` user, uid/gid `10002`, no login shell. A main nginx
 config of our own puts the pid file, the temp paths and the generated server config under `/tmp`, so
@@ -81,10 +82,10 @@ re-checks its inode before `fchown`/`fchmod`. It also tightens modes to owner-on
 
 | Step | What | When | Rollback |
 |---|---|---|---|
-| **Expand** (this change) | Images carry the users; compose mounts `./db`, moves `DB_PATH`, read-only root, tmpfs, no-new-privileges, reduced capabilities. Backend still uid 0. Frontend fully switched (it holds no data). Migration tool shipped. | Deploys on merge. | Pin the previous `RUNWAY_SHA` **and restore that commit's compose** (extracted from its image): the old frontend image cannot start under the new compose's read-only root. Data needs nothing: the old compose mounts the same `./users.db`. |
+| **Expand** (this change) | Images carry the users; compose mounts `./db`, moves `DB_PATH`, read-only root, tmpfs, no-new-privileges, reduced capabilities. Backend still uid 0, and its image still *defaults* to uid 0, so the new image also runs under the previous compose if the host keeps it. Frontend fully switched (it holds no data). Migration tool shipped. | Deploys on merge — **after** the container tier's first green CI run and the maintainer's sign-off on the frontend rollback procedure. | Pin the previous `RUNWAY_SHA` **and restore that commit's compose** (extracted from its image): the old frontend image cannot start under the new compose's read-only root. Data needs nothing: the old compose mounts the same `./users.db`. |
 | **Migrate** | Operator: dry-run, review, `--apply`, dry-run again (must be clean). | Operator, after a backup; trigger = this change running in production. | Ownership change is harmless to uid 0, which still has `DAC_OVERRIDE`. |
-| **Switch** | Operator sets `RUNWAY_BACKEND_USER=10001:10001` in the host `.env`, `docker compose up -d`, runs the post-deploy checks. | Operator, after a clean dry-run. | Delete the line, `up -d`: back to uid 0. |
-| **Contract** | A later change: backend default `10001:10001`, `cap_drop: [ALL]`, the knob and `SHIM-OPS-001` removed. Optionally `users.db` moved physically into `./db`. | After the switch has run without incident for 14 days, **by 2027-02-28** (`SHIM-OPS-001` expires; `RULE-SEC-002` fails the gate on that date). | Forward-fix only for the capability change; the data layout is unchanged. |
+| **Switch** | Operator sets `RUNWAY_BACKEND_USER=10001:10001` in the host `.env`, `docker compose up -d`, runs the post-deploy checks. | Operator, after a clean dry-run. | Delete the line, `up -d`: back to uid 0. Switching to 10001 again repeats *Migrate* first: what uid 0 created meanwhile is root's. |
+| **Contract** | A later change: backend compose default and image `USER` `10001:10001`, `cap_drop: [ALL]`, the knob and `SHIM-OPS-001` removed — after the host's on-disk compose has been read and the `deploy.sh` extraction recorded (M0). Optionally `users.db` moved physically into `./db`. | After the switch has run without incident for 14 days, **by 2027-02-28** (`SHIM-OPS-001` expires; `RULE-SEC-002` fails the gate on that date). | Forward-fix only for the capability change; the data layout is unchanged. |
 
 CSP follows the same shape: **report-only** now; a later change moves the strict policy into the enforced
 header after a soak in which the maintainer has used every view with DevTools open and seen no violation,
@@ -96,11 +97,11 @@ header after a soak in which the maintainer has used every view with DevTools op
 |---|---|---|
 | Static gate | `RULE-OPS-004` against today's compose and Dockerfiles — red before the change (no `read_only`, no `user`, no `USER`), green after. | Observed red, then green. |
 | Static gate | `RULE-OPS-005` against today's `nginx.conf` — red before the change (no header at all), green after. | Observed red, then green. |
-| Negative fixtures | Four arms for `RULE-OPS-004` (writable root, root user, no `USER`, shim removed) and five for `RULE-OPS-005` (no `always`, per-location `add_header`, `'unsafe-inline'`, HSTS, shim removed). | All nine observed red in `make verify`: 48 of 51 executable rules proven able to fail. |
+| Negative fixtures | Six arms for `RULE-OPS-004` (writable root, root user, root spelled `00:00` in compose and Dockerfile, no `USER`, backend image switched to 10001 while the shim stands, shim removed) and five for `RULE-OPS-005` (no `always`, per-location `add_header`, `'unsafe-inline'`, HSTS, shim removed). | All eleven observed red in `make verify` (counts in *Review amendments*). The two new arms were first observed **green** against the pre-review check — i.e. the check missed them. |
 | Unit | `backend/tests/unit/test_volume_ownership.py`: dry-run changes nothing; apply converges and is idempotent; symlink, hard link, FIFO, foreign-depth entries refuse `--apply`; no path outside the two roots is touched; a swapped inode is refused. Written before the tool. | Observed red (module missing), then green. |
 | Build | `frontend/tests/cspBuild.test.js`: builds the SPA and refuses inline scripts, inline handlers, `style=` attributes, `eval`/`new Function`, `javascript:` URLs and any off-origin `src`/`href`/`url()`; a crafted inline script proves the scanner can fail. | Observed red on the crafted input, green on the build. |
 | Browser (local, one-off) | Built SPA behind a local proxy that **enforces** the strict policy, real Taskwarrior 3.5.0 backend, headless Chrome: login, every new-UI route, the old UI's main routes. | 0 violations over 16 page loads; positive control caught 2. Recorded below. |
-| Container (CI, amd64) | `RULE-TEST-002` tier, now two parts: the existing suite **as uid 10001 on a read-only root with `cap_drop ALL`**; then the runtime images under the deploy hardening — non-root uid, write refusal outside the mounts, legacy root-owned volume → dry-run → apply → clean, real Taskwarrior task created and read back as uid 10001, healthcheck, root fallback still works on migrated data, frontend non-root and read-only, headers on 200 `/`, SPA fallback, an asset, 405, proxied 404, 502. | **Not run locally** — arm64, no Docker daemon (`RISK-TEST-001`). First run is CI. |
+| Container (CI, amd64) | `RULE-TEST-002` tier, now two parts: the existing suite **as uid 10001 on a read-only root with `cap_drop ALL`**; then the runtime images — the new backend image under the **previous** compose (no user, writable root, `./users.db` at `/app`), then under the deploy hardening: non-root uid, write refusal outside the mounts, legacy root-owned volume → symlink refused → dry-run → apply → clean, real Taskwarrior task created and read back as uid 10001, healthcheck, root fallback on migrated data, a uid-0 registration → dry-run plans it → apply → both accounts work as 10001 again, frontend non-root and read-only, headers on 200 `/`, SPA fallback, an asset, 405, proxied 404, 502. | **Never executed** — arm64, no Docker daemon (`RISK-TEST-001`). Every runtime-image property in this brief and in docs/operations.md#container-hardening is **pending this run**. Its first green CI run is a merge precondition, since merging deploys a read-only frontend whose start has never been executed. |
 | Edge (post-deploy) | `verify-deploy` checks the public origin's headers on `/`, `/api/health` and a 404 after each deploy, and reports whether HSTS is present (informational). | Runs after the authorised deploy only. |
 
 ### The headless-browser pass, 2026-11-24
@@ -129,7 +130,48 @@ Extracted from `deploy.yml` and run against a stub `curl`: exit 0 with every hea
 hence the post-deploy check. Non-root is not tenant isolation. A green static rule is a declaration,
 not a response — hence the container tier.
 
+## Review amendments (2026-11-24)
+
+An independent review of the first commit raised seven points; each was checked against the tree.
+
+1. **New backend image under the previous compose** (important, upheld). With `USER 10001:10001` the
+   image would run as 10001 under any compose naming no user — the previous one included, which the
+   host keeps whenever `deploy.sh` does not extract the new file. There it could write neither
+   `users.db` nor a task, behind a green `/api/health`. Fixed: the image ends on `USER 0:0` while
+   `SHIM-OPS-001` stands; `RULE-OPS-004` requires exactly that (arm `OPS-004-early-user`, observed green
+   against the old check, red after); the container tier's new step 0 runs the image under the previous
+   compose's flags and mounts.
+2. **Frontend rollback needs the old compose** (minor, upheld as a trade, not fixed in code). No compose
+   shape starts both the old frontend image (root nginx: writes `/etc/nginx/conf.d`, needs `SETUID`,
+   `SETGID`, `CHOWN`; a tmpfs on `conf.d` would also hide its template) and the hardened one. The
+   alternative — frontend hardening one deploy later — ships it unhardened meanwhile. The procedure is
+   documented; **merge needs the maintainer's sign-off on it**.
+3. **Switching back to 10001 after an undo** (minor, upheld). Documented in docs/operations.md; container
+   step 5 now registers an account as uid 0 and proves the dry-run plans it and 10001 works after a
+   second apply.
+4. **Symlink fixture assumed the username layout** (minor, upheld). It is now planted in whichever account
+   directory exists, so it survives SEC-001's storage ids (brief 0065). **Merge-order note:** whichever of
+   SEC-001 and this lands second must re-run the container tier on the merged tree.
+5. **`00:00` passed as non-root** (minor, upheld). Root is now judged by integer value; arm
+   `OPS-004-zero-pad` (observed green against the old check, red after).
+6. **`/api/docs`, `/api/redoc` under the strict CSP** (minor, upheld). Recorded in `SHIM-WEB-001`'s
+   removal and evidence, docs/security.md and ADR 0048: the enforcing change must decide them.
+7. **Runtime claims stated as held** (minor, upheld). Scoped as *pending the first CI run* here, in
+   docs/operations.md, docs/threat-model.md, ADR 0048 and RULE-TEST-002's rationale.
+
+Gate after the amendments, this checkout (arm64): `make check` GREEN; `make verify` GREEN — 67 fixture
+arms passed, 48 of 51 executable rules proven able to fail (RULE-GATE-002, RULE-GOV-001, RULE-TEST-002
+declare no automated fixture), and **`py-test-container` skipped: no Docker daemon (`RISK-TEST-001`)**.
+
 ## What stays open
+
+- **Merge preconditions:** the container tier's first green run in CI on this tree, and the maintainer's
+  sign-off on the frontend rollback procedure. Neither can be produced in this checkout.
+- **Plan M0:** how `/opt/scripts/deploy.sh` extracts the baked compose, and whether the host's on-disk
+  compose is this repository's after the deploy. Required before the contract step flips the image's
+  default user.
+- **`/api/docs` and `/api/redoc`** break once the strict CSP is enforced; decided in the change that
+  removes `SHIM-WEB-001`.
 
 - **SEC-003 is not closed by this change.** Its criterion — the runtime is demonstrably non-root with
   minimal file rights — is met by the frontend now and by the backend only after the operator's

@@ -194,6 +194,13 @@ build.
 >
 > The data needs nothing: the older compose mounts the same `./users.db`. If the backend stopped
 > uncleanly, check that `./db/users.db-journal` does not exist first — the older compose would not see it.
+>
+> This is the one place the deploy of 2026-11-24 is not rollbackable by pinning `RUNWAY_SHA` alone, and it
+> is a choice, not an accident: the frontend is hardened on the deploy that ships the hardening, because no
+> compose shape both keeps the old image (root nginx that writes `/etc/nginx/conf.d` and needs `SETUID`,
+> `SETGID`, `CHOWN`) and is read-only without capabilities. The backend has no such step: its image still
+> defaults to uid 0 and runs under either compose. **Merging brief 0076 needs the maintainer's sign-off on
+> this procedure.**
 
 To roll back, pin the last good SHA on the deploy host:
 
@@ -274,6 +281,13 @@ silently failed deploy looks like, and a health probe alone cannot tell the two 
 
 ## Container hardening
 
+> **Pending the first CI run of the container tier.** What this section says the runtime images *do* — the
+> frontend starting as uid 10002 on a read-only root, the backend writing as uid 10001 with `cap_drop ALL`,
+> the nested `./users.db` mount, the migration tool on real volumes, the headers on a 502 — is designed and
+> asserted by `tools/checks/container_hardening.py`, which had not executed anywhere when this was written
+> (arm64, no Docker, `RISK-TEST-001`). Its first green CI run is the trigger for reading this section as
+> held; until then it is the intended behaviour. The static declarations (`RULE-OPS-004`) are checked now.
+
 Since 2026-11-24 ([ADR 0048](adr/0048-container-hardening-and-the-browser-edge.md), brief 0076, finding
 SEC-003) both services run on a **read-only root filesystem** with one capped `noexec,nosuid,nodev` tmpfs on
 `/tmp`, **`no-new-privileges`**, and an explicit `user:`. `RULE-OPS-004` fails the gate if a deploy service
@@ -281,7 +295,7 @@ loses any of that, or if its `user:` and its image's final-stage `USER` stop agr
 
 | | Frontend | Backend |
 |---|---|---|
-| Image user | `10002:10002` (`runway-web`) | `10001:10001` (`runway`) |
+| Image user | `10002:10002` (`runway-web`) | carries `10001:10001` (`runway`); **defaults to `0:0`** until the contract step |
 | Runs as | `10002:10002` | **uid 0 until the switch below**, then `10001:10001` |
 | Capabilities | none | every default except `DAC_OVERRIDE` until the contract step, then none |
 | Writable | `/tmp` | `/tmp`, `/app/data` (`./data`), `/app/db` (`./db`) |
@@ -294,6 +308,15 @@ placeholder `users.db` in it, under the mount. **Do not delete `./users.db` or m
 that is a later contract step.
 
 ### Handing the backend's volumes to uid 10001
+
+**Why the backend image still defaults to root.** The compose names the backend's user, so under it the image's
+`USER` decides nothing. It decides everything under a compose that names none — the previous deploy's file,
+which mounts `./users.db` at the root-owned `/app`, and which the host keeps whenever `deploy.sh` does not
+extract the new one (that has happened before, `RISK-OPS-002`). An image defaulting to uid 10001 would there
+fail every write behind a green `/api/health`. So it ends on `USER 0:0` until the contract step, and
+`RULE-OPS-004` requires exactly that while `SHIM-OPS-001` stands. How `deploy.sh` extracts the file
+(`docker create` + `docker cp`, or a `docker run` that runs as the image's user) has never been read from the
+host; it is a plan-M0 item and must be recorded before the contract step makes the image default to 10001.
 
 The backend's data was written by a root container. Until it belongs to uid 10001 the backend cannot run as
 that user, so the switch is three operator steps behind a dry-run. Stop the backend first, so nothing writes
@@ -333,7 +356,10 @@ sudo docker compose exec backend id -u      # 10001
 
 and run the post-deploy checks of the remediation plan by hand: `/api/health`, a login, reading and writing a
 task. **Undo** is deleting that line and `up -d` again: uid 0 still holds `DAC_OVERRIDE` and writes the migrated
-files. After 14 days on uid 10001 without a write failure, the contract step removes the fallback, the
+files. Everything it creates meanwhile — a new account's directory, its `.taskrc`, its Taskwarrior database —
+belongs to root, and without `CHOWN` it cannot hand them on. **Before setting `RUNWAY_BACKEND_USER` again, stop
+the backend and repeat `migrate`, `migrate --apply`, `migrate` until the last one exits 0**; otherwise those
+accounts answer 500 as uid 10001. After 14 days on uid 10001 without a write failure, the contract step removes the fallback, the
 variable and `SHIM-OPS-001`, which expires on **2027-02-28** — `RULE-SEC-002` fails the gate on that date.
 
 ### HSTS belongs on the TLS terminator

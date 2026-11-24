@@ -280,6 +280,12 @@ checked before the policy can break it. There is no reporting endpoint: violatio
 console as `[Report Only] Refused to …`. To move it to enforced, use every view with the console open for 14
 days of normal use, then change the header and remove `SHIM-WEB-001` in the same commit.
 
+**FastAPI's interactive docs do not fit the strict policy.** nginx proxies `/api/docs` and `/api/redoc`, and
+both load Swagger UI / ReDoc from `cdn.jsdelivr.net` and run an inline script. They report violations today
+and will break once the strict policy is enforced. The change that removes `SHIM-WEB-001` decides them —
+turned off (`docs_url=None`, a public-surface change through the migration pattern) or their breakage accepted
+in writing. Their violations during the soak are expected and are not SPA violations.
+
 **What this does not establish.** No script-injection sink is known; this adds the missing layer, it fixes no
 exploit. The headers the public origin sends are read only after a deploy, by `verify-deploy`, because Traefik
 sits in front (`RISK-OPS-008`).

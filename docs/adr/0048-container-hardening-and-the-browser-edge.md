@@ -36,6 +36,15 @@ the same principal and a name can resolve to anything — root included. Dedicat
 base image's `nginx` (101), so the uid is one this repository chose. Code stays root-owned and so
 read-only to the process; each image owns only the directories it must write.
 
+The frontend image ends on `USER 10002:10002`. The backend image carries its user but ends on
+`USER 0:0` until the contract step (amended after review, still 2026-11-24): the compose names the
+backend's user, so under it the image default decides nothing — but under the *previous* compose,
+which names none and mounts `./users.db` at the root-owned `/app`, an image defaulting to 10001
+could write nothing. The host keeps that compose whenever its deploy script does not extract the
+new one (`RISK-OPS-002`), and how it extracts has never been read (plan M0). An expand step must
+not depend on the compose changing with it; RULE-OPS-004 requires exactly `USER 0:0` while
+`SHIM-OPS-001` stands.
+
 ## Decision 2 — read-only root, tmpfs, no new privileges, capabilities dropped
 
 Both services: `read_only: true`, one size-capped `noexec,nosuid,nodev` tmpfs on `/tmp`,
@@ -67,7 +76,12 @@ The user cannot switch on the same deploy, because the files belong to root. So:
 3. **Switch** (operator): `RUNWAY_BACKEND_USER=10001:10001` in the host's `.env`. Undo is deleting
    the line: uid 0 with `DAC_OVERRIDE` still writes the migrated files.
 4. **Contract** (its own change, after 14 days on uid 10001, **by 2027-02-28**): the compose default
-   becomes `10001:10001`, `cap_drop: [ALL]`, the variable and `SHIM-OPS-001` go.
+   and the image's `USER` become `10001:10001`, `cap_drop: [ALL]`, the variable and `SHIM-OPS-001`
+   go — after the host's on-disk compose has been read and found to be this repository's, and the
+   way `deploy.sh` extracts it recorded.
+
+Rolling the switch back (step 3's undo) leaves whatever uid 0 creates meanwhile owned by root, so
+switching to uid 10001 again repeats step 2 first.
 
 The variable lives in the host's `.env`, like `RUNWAY_SHA`, rather than in a merge, because the
 switch has to follow an operator step on the host that no commit can observe. `SHIM-OPS-001` puts a
@@ -108,7 +122,10 @@ the TLS terminator, after confirming every host under the name is permanently HT
   same-origin, no reporting, no HSTS, strict policy enforced once the shim is gone.
 - **RULE-TEST-002**'s tier now runs the suite as uid 10001 on a read-only root, then the runtime
   images under the deploy flags: legacy mode, the migration including a refused symlink, switched
-  mode, rollback of the switch, and the headers on 200, fallback, asset, 405, proxied 404 and 502.
+  mode, rollback of the switch and switching again after a uid-0 registration, the backend image
+  under the previous compose, and the headers on 200, fallback, asset, 405, proxied 404 and 502.
+  Not executed anywhere when this was written (`RISK-TEST-001`): its first CI run, before merge,
+  is what turns these from design into evidence.
 - **`verify-deploy`** reads the headers from the public origin after every deploy.
 
 Each one says only what it can: a static rule is a declaration, the container tier is our image,
@@ -116,8 +133,16 @@ and only the post-deploy step sees Traefik (`RISK-OPS-008`).
 
 ## Consequences
 
-- **Rollback across this change needs the old compose too.** The old frontend image writes its
-  config into `/etc/nginx` and cannot start read-only. The data needs nothing.
+- **Rollback across this change needs the old compose too — for the frontend only.** The old
+  frontend image runs nginx as root, writes its config into `/etc/nginx` and needs `SETUID`,
+  `SETGID` and `CHOWN`, so no read-only, capability-free compose starts it. Hardening the frontend
+  one deploy later would keep `RUNWAY_SHA` rollback plain at the price of shipping it unhardened
+  meanwhile; the frontend holds no data, the restore is three documented commands, and the merge
+  needs the maintainer's sign-off on that trade. The backend needs no restore: its image still
+  defaults to uid 0 and runs under either compose. The data needs nothing.
+- FastAPI's `/api/docs` and `/api/redoc` load from `cdn.jsdelivr.net` and run inline script: they
+  report violations under the report-only policy and will break under the enforced one. The change
+  that removes `SHIM-WEB-001` decides them (off, through the migration pattern, or accepted).
 - Backups gain nothing to copy but lose nothing either: `./users.db` is still the database, and
   `./db` holds only the placeholder Docker leaves and, while a write is in flight, the journal.
 - SEC-003 is **not closed** until the switch has happened; SEC-004 is **not closed** until the

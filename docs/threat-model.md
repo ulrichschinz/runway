@@ -430,7 +430,11 @@ boundary is still `TASKDATA`.
   or restores one, and API keys in a backup are the second half of `WAIVER-SEC-003`.
 - **Whether the backend actually runs as uid 10001 in production** is a read on the host, not a gate:
   the switch is the operator's `RUNWAY_BACKEND_USER` line, and nothing here can see the host's `.env`
-  (`SHIM-OPS-001`, `RISK-OPS-002`). Until then it is uid 0 with `DAC_OVERRIDE`.
+  (`SHIM-OPS-001`, `RISK-OPS-002`). Until then it is uid 0 with `DAC_OVERRIDE`. The backend *image* also
+  still defaults to uid 0 until the contract step, so that it writes under the previous compose whenever
+  the host keeps it; under that compose it runs as root with Docker's default capabilities, as before.
+- **The runtime images' behaviour under the hardening** is asserted by the container tier, which had not
+  executed anywhere when brief 0076 was written (`RISK-TEST-001`); until its first CI run it is design.
 - **What the public origin sends** is read only after a deploy, by `verify-deploy`; Traefik in front of
   nginx could change any header and no gate sees it (`RISK-OPS-008`).
 

@@ -842,20 +842,57 @@ p.write_text(t.replace(anchor, '    user: "0:0"\n', 1))
 ROOTUSER
 expect_red "OPS-004-root-user" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
 
+# --- RULE-OPS-004 — root spelled with a leading zero -------------------------------
+# Docker parses "00" as uid 0. A check comparing strings to "0" would take `00:00` in both the
+# compose and the Dockerfile for a matching non-root pair, and the container would run as root
+# behind a green gate.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" "$SANDBOX/frontend/Dockerfile" <<'ZEROPAD'
+import pathlib
+import sys
+
+compose, dockerfile = (pathlib.Path(a) for a in sys.argv[1:3])
+t = compose.read_text()
+anchor = '    user: "10002:10002"\n'
+assert anchor in t, "the frontend's user is not where the fixture expects it"
+compose.write_text(t.replace(anchor, '    user: "00:00"\n', 1))
+t = dockerfile.read_text()
+anchor = "USER 10002:10002\n"
+assert anchor in t, "frontend/Dockerfile has no USER line where the fixture expects it"
+dockerfile.write_text(t.replace(anchor, "USER 00:00\n", 1))
+ZEROPAD
+expect_red "OPS-004-zero-pad" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
 # --- RULE-OPS-004 — the image loses its USER --------------------------------------
 # Without a USER in the final stage, any service whose compose line is later dropped runs as
-# root, and the image no longer says which uid owns /app/data.
-python3 - "$SANDBOX/backend/Dockerfile" <<'NOUSER'
+# root, and the image no longer says which uid owns what it writes.
+python3 - "$SANDBOX/frontend/Dockerfile" <<'NOUSER'
 import pathlib
 import sys
 
 p = pathlib.Path(sys.argv[1])
 t = p.read_text()
-anchor = "USER 10001:10001\n"
-assert anchor in t, "backend/Dockerfile has no USER line where the fixture expects it"
+anchor = "USER 10002:10002\n"
+assert anchor in t, "frontend/Dockerfile has no USER line where the fixture expects it"
 p.write_text(t.replace(anchor, "", 1))
 NOUSER
 expect_red "OPS-004-no-user" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — the backend image switches before its data has -----------------
+# While SHIM-OPS-001 stands, the backend image must default to the compose fallback's uid 0.
+# An image defaulting to 10001 works under the new compose and fails every write under the
+# previous one, which the host keeps whenever its deploy script does not extract the new file
+# (RISK-OPS-002) — behind a green /api/health.
+python3 - "$SANDBOX/backend/Dockerfile" <<'EARLYUSER'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "USER 0:0\n"
+assert anchor in t, "backend/Dockerfile has no transitional USER line where the fixture expects it"
+p.write_text(t.replace(anchor, "USER 10001:10001\n", 1))
+EARLYUSER
+expect_red "OPS-004-early-user" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
 
 # --- RULE-OPS-004 — the shim is removed and the root backend stays -----------------
 # The exception is only an exception while SHIM-OPS-001 is declared. Removing the shim and

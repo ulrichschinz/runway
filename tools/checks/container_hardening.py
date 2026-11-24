@@ -9,6 +9,10 @@ private network and only the frontend publishes a port, on 127.0.0.1.
 
 What it proves, in order (finding SEC-003 and SEC-004, brief 0076, ADR 0048):
 
+0. The previous deploy's compose — no `user:`, a writable root, Docker's default capabilities,
+   ./users.db at /app/users.db: the new backend image still registers a user and stores a task.
+   The host keeps that file whenever its deploy script does not extract the new one
+   (RISK-OPS-002), so the image's own default user has to work there (SHIM-OPS-001).
 1. Legacy mode — uid 0 with the transitional capability set (SHIM-OPS-001), read-only root:
    the backend starts on root-owned volumes, a user registers, the real Taskwarrior stores a
    task, and even root cannot write the image.
@@ -19,7 +23,9 @@ What it proves, in order (finding SEC-003 and SEC-004, brief 0076, ADR 0048):
 4. Switched mode — uid 10001, `cap_drop ALL`: healthy; no effective capability; every write
    outside /app/data, /app/db and /tmp refused; the task from step 1 is still there and a new
    one is stored; the files Taskwarrior writes belong to 10001.
-5. Rolling the switch back to uid 0 on migrated data still works.
+5. Rolling the switch back to uid 0 on migrated data still works — and an account registered
+   meanwhile is root's, so switching to uid 10001 again needs the migration again: the dry-run
+   plans that change, the apply converges, and both accounts work as uid 10001 afterwards.
 6. Frontend — uid 10002, `cap_drop ALL`, read-only root: healthy, cannot write its own content,
    and every response carries the browser headers: 200 at /, the SPA fallback, an asset and the
    favicon, 405 from nginx, the proxied API's 200 and 404, and 502 with the backend absent. None
@@ -67,6 +73,8 @@ TRANSITIONAL_DROPS = [
     "SYS_CHROOT",
 ]
 LEGACY = ["--user", "0:0", *[a for c in TRANSITIONAL_DROPS for a in ("--cap-drop", c)]]
+# The deploy compose before brief 0076: no user (the image decides), no hardening at all.
+PREVIOUS_COMPOSE: list[str] = []
 SWITCHED = ["--user", "10001:10001", "--cap-drop", "ALL"]
 
 EXPECTED_HEADERS = {
@@ -92,7 +100,8 @@ def call(method, path, body=None, token=None):
             return r.status, json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()
-creds = {"username": "hardening-probe", "password": "a synthetic password, not a secret"}
+username = sys.argv[3] if len(sys.argv) > 3 else "hardening-probe"
+creds = {"username": username, "password": "a synthetic password, not a secret"}
 if sys.argv[1] == "register":
     status, body = call("POST", "/auth/register", creds)
     assert status == 201, (status, body)
@@ -146,6 +155,15 @@ class Scenario:
 
     # --- plumbing ---------------------------------------------------------------------------
 
+    def previous_mounts(self) -> list[str]:
+        """The previous deploy compose's mounts: the database file directly at /app."""
+        return [
+            "-v",
+            f"{self.tmp / 'data'}:/app/data",
+            "-v",
+            f"{self.tmp / 'users.db'}:/app/users.db",
+        ]
+
     def mounts(self) -> list[str]:
         return [
             "-v",
@@ -173,7 +191,7 @@ class Scenario:
             script,
         )
 
-    def backend(self, name: str, privileges: list[str]) -> str:
+    def backend(self, name: str, privileges: list[str], previous: bool = False) -> str:
         cname = f"{name}-{self.tag}"
         docker(
             "run",
@@ -182,15 +200,15 @@ class Scenario:
             cname,
             "--network",
             self.network,
-            *COMMON,
+            *([] if previous else COMMON),
             *privileges,
-            *self.mounts(),
+            *(self.previous_mounts() if previous else self.mounts()),
             "-e",
             f"JWT_SECRET={self.secret}",
             "-e",
             "DATA_ROOT=/app/data",
             "-e",
-            "DB_PATH=/app/db/users.db",
+            f"DB_PATH={'/app/users.db' if previous else '/app/db/users.db'}",
             "-e",
             "ALLOW_REGISTRATION=true",
             "-e",
@@ -226,8 +244,12 @@ class Scenario:
         docker("rm", "-f", cname, check_rc=False)
         self.containers.remove(cname)
 
-    def client(self, cname: str, mode: str, description: str) -> list[str]:
-        out = docker("exec", cname, "python", "-c", CLIENT, mode, description, check_rc=False)
+    def client(
+        self, cname: str, mode: str, description: str, username: str = "hardening-probe"
+    ) -> list[str]:
+        out = docker(
+            "exec", cname, "python", "-c", CLIENT, mode, description, username, check_rc=False
+        )
         check(out.returncode == 0, f"{cname}: the API round trip failed: {out.stderr[-600:]}")
         return json.loads(out.stdout) if out.returncode == 0 else []
 
@@ -297,12 +319,25 @@ class Scenario:
             "&& chmod 644 /x/users.db"
         )
 
+        print("  0. the previous deploy's compose: no user, writable root, default capabilities")
+        be = self.backend("previous", PREVIOUS_COMPOSE, previous=True)
+        check(self.backend_healthy(be), "the new image did not start under the previous compose")
+        tasks = self.client(be, "register", "stored under the previous compose")
+        check(
+            tasks == ["stored under the previous compose"],
+            f"the new image could not write under the previous compose: {tasks}",
+        )
+        self.stop(be)
+
         print("  1. legacy mode: uid 0, transitional capabilities, read-only root")
         be = self.backend("legacy", LEGACY)
         check(self.backend_healthy(be), "the backend did not become healthy as uid 0")
         check(docker("exec", be, "id", "-u").stdout.strip() == "0", "legacy mode is not uid 0")
-        tasks = self.client(be, "register", "stored as uid 0")
-        check(tasks == ["stored as uid 0"], f"legacy mode stored {tasks}")
+        tasks = self.client(be, "login", "stored as uid 0")
+        check(
+            tasks == ["stored as uid 0", "stored under the previous compose"],
+            f"legacy mode stored {tasks}",
+        )
         probe = self.writes(be, "/app/probe", "/etc/probe")
         check(all(v != "writable" for v in probe.values()), f"uid 0 could write the image: {probe}")
         self.stop(be)
@@ -331,13 +366,19 @@ class Scenario:
         )
 
         print("  3. the migration: refuses a symlink, dry-run, apply, clean")
-        self.as_root("ln -s /etc/passwd /x/data/hardening-probe/evil")
+        # Into whichever account directory exists, not a named one: the directory is the username
+        # on today's layout and a random storage id once SEC-001 lands (brief 0065), and the
+        # symlink must sit where an account's own files do either way.
+        self.as_root(
+            'd=$(find /x/data -mindepth 1 -maxdepth 1 -type d | head -n 1); '
+            '[ -n "$d" ] && ln -s /etc/passwd "$d/evil"'
+        )
         refused = self.migrate("--apply")
         check(
             refused.returncode == 2,
             f"a planted symlink did not refuse --apply ({refused.returncode})",
         )
-        self.as_root("rm /x/data/hardening-probe/evil")
+        self.as_root("find /x/data -mindepth 2 -maxdepth 2 -name evil -type l -delete")
         dry = self.migrate()
         plan = json.loads(dry.stdout or "{}")
         check(
@@ -388,19 +429,36 @@ class Scenario:
         check(all(v == "writable" for v in allowed.values()), f"a writable place is not: {allowed}")
         docker("exec", be, "rm", "-f", "/app/data/probe", "/app/db/probe", "/tmp/probe")
         tasks = self.client(be, "login", "stored as uid 10001")
-        check(tasks == ["stored as uid 0", "stored as uid 10001"], f"switched mode reads {tasks}")
+        check(len(tasks) == 3 and "stored as uid 10001" in tasks, f"switched mode reads {tasks}")
         owners = docker(
             "exec", be, "sh", "-c", "find /app/data /app/db -xdev ! -user 10001 -print"
         ).stdout.strip()
         check(owners == "", f"files not owned by 10001 after switched-mode writes: {owners}")
-        backend_for_frontend = be
+        self.stop(be)
 
-        print("  5. rolling the switch back: uid 0 on migrated data")
+        print("  5. rolling the switch back: uid 0 on migrated data, and switching again")
         rollback = self.backend("rollback", LEGACY)
         check(self.backend_healthy(rollback), "uid 0 could not start on migrated data")
         tasks = self.client(rollback, "login", "stored after rollback")
-        check(len(tasks) == 3, f"rollback reads {tasks}")
+        check(len(tasks) == 4, f"rollback reads {tasks}")
+        late = self.client(rollback, "register", "registered as uid 0", "hardening-late")
+        check(late == ["registered as uid 0"], f"registering as uid 0 stored {late}")
         self.stop(rollback)
+        pending = self.migrate()
+        check(
+            pending.returncode == 1,
+            f"the dry-run did not plan the uid-0 account's ownership ({pending.returncode}): "
+            f"{pending.stdout[-400:]}",
+        )
+        again = self.migrate("--apply")
+        check(again.returncode == 0, f"the second --apply did not converge: {again.stdout[-600:]}")
+        be = self.backend("switched-again", SWITCHED)
+        check(self.backend_healthy(be), "uid 10001 did not start after the second migration")
+        late = self.client(be, "login", "stored as uid 10001 again", "hardening-late")
+        check(len(late) == 2, f"the uid-0 account reads {late} as uid 10001")
+        tasks = self.client(be, "login", "stored after switching again")
+        check(len(tasks) == 5, f"the first account reads {tasks} after switching again")
+        backend_for_frontend = be
 
         print("  6. frontend: uid 10002, cap_drop ALL, read-only root, headers on every path")
         self.frontend_checks(backend_for_frontend)

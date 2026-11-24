@@ -104,7 +104,7 @@ beside the compose file and nowhere in `Settings`:
 | Variable | Default | Effect |
 |---|---|---|
 | `RUNWAY_SHA` | `latest` | Image tag to run; pin a commit sha to roll back ([docs/operations.md](docs/operations.md#rolling-back)). |
-| `RUNWAY_BACKEND_USER` | `0:0` | The `uid:gid` the backend runs as. The image's user is `10001:10001`; set it to that once the volumes have been handed over with the migration tool ([docs/operations.md](docs/operations.md#container-hardening)). Temporary: the contract step removes it (`SHIM-OPS-001`). |
+| `RUNWAY_BACKEND_USER` | `0:0` | The `uid:gid` the backend runs as. The image carries the unprivileged user `10001:10001` (and, until the contract step, still defaults to `0:0` so it also runs under the previous compose); set it to that once the volumes have been handed over with the migration tool ([docs/operations.md](docs/operations.md#container-hardening)). Temporary: the contract step removes it (`SHIM-OPS-001`). |
 
 > `PORT` used to be listed here and was read by nothing — the frontend's port is fixed in
 > `frontend/nginx.conf` and published by the compose file. Removed in Step 13, which is the

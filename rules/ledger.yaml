@@ -133,8 +133,9 @@ rules:
       cross-tenant isolation tests, running as uid 10001 on a read-only root with every
       capability dropped; and the runtime images built from backend/Dockerfile and
       frontend/Dockerfile MUST hold under the deploy compose's hardening — non-root, write
-      refusal outside the mounts, the volume-ownership migration, the healthcheck, and the
-      browser headers on success, error and fallback responses.
+      refusal outside the mounts, the volume-ownership migration (including again after a
+      rollback to uid 0), the healthcheck, the browser headers on success, error and fallback
+      responses — and the backend image MUST still write under the previous deploy's compose.
     class: executable
     check: tools/checks/py-test-container.sh
     fixture: >
@@ -153,6 +154,8 @@ rules:
       declare, but only a running image says whether Taskwarrior, SQLite and nginx actually
       work as an unprivileged user on a read-only root, and whether the headers survive a
       404 and a 502. Run as root, the suite answered yes to every file-permission question.
+      The image half had not executed anywhere when brief 0076 was written (arm64, no Docker,
+      RISK-TEST-001): until its first CI run, what it asserts is design, not evidence.
 
   - id: RULE-TEST-003
     statement: "Backend line coverage MUST NOT fall below the checked-in floor."
@@ -922,8 +925,9 @@ rules:
       Every service in the deploy compose file MUST run with `read_only: true`,
       `security_opt: [no-new-privileges:true]`, `cap_drop: [ALL]` and an explicit numeric
       non-root `user:` equal to the numeric non-root `USER` that ends its image's Dockerfile —
-      except for the exact transitional shape a declared shim names in
-      tools/checks/deploy_compose.py.
+      root judged by value, so `00:00` is root — except for the exact transitional shape a
+      declared shim names in tools/checks/deploy_compose.py, which also fixes the `USER` the
+      image must end on meanwhile.
     class: executable
     check: tools/checks/deploy-compose.sh
     fixture: tools/fixtures/negative.sh
@@ -940,7 +944,9 @@ rules:
       The image and the compose are checked together because each can silently undo the other:
       a compose `user:` overrides the image, and an image without USER makes an omitted compose
       line mean root. The one exception — the backend at uid 0 with DAC_OVERRIDE until the
-      host's volumes are migrated — is tied to SHIM-OPS-001, so the gate refuses it the day the
+      host's volumes are migrated, and its image defaulting to uid 0 meanwhile so that it still
+      writes under a compose that names no user (the previous deploy's, which the host keeps
+      whenever its deploy script does not extract the new one) — is tied to SHIM-OPS-001, so the gate refuses it the day the
       shim is removed and RULE-SEC-002 refuses the shim the day it expires. It is a
       declaration check: what the runtime images actually do under these flags is proven by
       the RULE-TEST-002 tier, and non-root is not tenant isolation.

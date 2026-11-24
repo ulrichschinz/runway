@@ -10,7 +10,7 @@ services:
     # The same hardening and the same mounts as ops/deploy/docker-compose.yml (ADR 0048), so a
     # change that only works with a writable root or as root fails here first. The user
     # defaults to 0:0 because on Linux ./data and ./users.db belong to whoever ran
-    # `make bootstrap`; RUNWAY_BACKEND_USER=10001:10001 runs it as the image's user once
+    # `make bootstrap`; RUNWAY_BACKEND_USER=10001:10001 runs it as the image's unprivileged user once
     # those are handed over (docs/operations.md#container-hardening).
     user: "${RUNWAY_BACKEND_USER:-0:0}"
     read_only: true

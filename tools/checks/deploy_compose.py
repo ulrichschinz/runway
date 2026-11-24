@@ -34,6 +34,9 @@ root with no capabilities:
   them is wrong about what runs;
 * that Dockerfile's final stage ends on a numeric, non-root `USER`.
 
+Root is judged by value, not by spelling: `00:00` and `0:000` are uid 0 to Docker, so every id is
+compared as an integer.
+
 A service may be held to less only while a dated shim in rules/shims.yaml names the exact
 transitional shape (TRANSITIONS below). The shim's expiry is RULE-SEC-002's to enforce; this
 check refuses the exception once the shim is gone, which is what makes the contract step
@@ -95,26 +98,42 @@ DOCKER_DEFAULT_CAPS = frozenset(
 
 @dataclass(frozen=True)
 class Transition:
-    """The one shape a service may have instead of the floor, while `shim` is declared."""
+    """The one shape a service may have instead of the floor, while `shim` is declared.
+
+    `image_user` is the `USER` the image must end on meanwhile. It is the compose fallback's own
+    user, so that the image behaves the same under a compose that sets no `user:` at all — the
+    previous deploy's file, which is what the host keeps whenever the deploy script does not
+    extract the new one (RISK-OPS-002). An expand step that only works if the compose changed
+    with it is not an expand step.
+    """
 
     shim: str
     user: str
     keeps: frozenset[str]
+    image_user: str
 
 
 # SHIM-OPS-001: the host's data was written by a root container and nobody has read who owns it
 # (plan M0). Until the operator has run ops/deploy/volume_ownership.py and set the variable, the
 # backend stays uid 0, and keeps DAC_OVERRIDE so that a file the root process could write
-# yesterday it can still write today. Every other default capability is gone already.
+# yesterday it can still write today. Every other default capability is gone already. The image
+# ends on `USER 0:0` meanwhile: under the previous compose, which names no user and mounts
+# ./users.db at the root-owned /app, an image defaulting to uid 10001 could write nothing.
 TRANSITIONS = {
     "backend": Transition(
         shim="SHIM-OPS-001",
         user="${RUNWAY_BACKEND_USER:-0:0}",
         keeps=frozenset({"DAC_OVERRIDE"}),
+        image_user="0:0",
     ),
 }
 
 NUMERIC_USER = re.compile(r"^(\d+):(\d+)$")
+
+
+def is_root(match: re.Match[str]) -> bool:
+    """Whether a numeric `uid:gid` names root in either half — by value, so `00` is root too."""
+    return any(int(part) == 0 for part in match.groups())
 
 problems: list[str] = []
 
@@ -185,8 +204,13 @@ def final_stage_user(dockerfile: Path) -> str | None:
     return user
 
 
-def _image_user(where: str, name: str) -> str | None:
-    """The image's declared non-root user, or None after reporting why there is none."""
+def _image_user(where: str, name: str, transition: Transition | None) -> str | None:
+    """The image's declared non-root user, or None after reporting why there is none.
+
+    While a transition stands the image must end on exactly its `image_user` instead, and None
+    is returned: the compose line is then the transition's, and there is no non-root user for
+    it to agree with yet.
+    """
     dockerfile = DOCKERFILES.get(name)
     if dockerfile is None:
         harden(f"{where} is not mapped to a Dockerfile in tools/checks/deploy_compose.py")
@@ -196,6 +220,15 @@ def _image_user(where: str, name: str) -> str | None:
         return None
     declared = final_stage_user(dockerfile)
     rel = dockerfile.relative_to(ROOT)
+    if transition is not None:
+        if declared != transition.image_user:
+            harden(
+                f"{rel} ends its final stage on `USER {declared}`, but while {transition.shim} "
+                f"stands it must end on `USER {transition.image_user}` — the user the compose "
+                "falls back to, so the image still works under a compose that names no user "
+                "(the previous deploy's, whenever the host keeps it)"
+            )
+        return None
     match = NUMERIC_USER.match(declared or "")
     if match is None:
         harden(
@@ -203,7 +236,7 @@ def _image_user(where: str, name: str) -> str | None:
             f"{declared!r}). A name can resolve to root; a number cannot hide it"
         )
         return None
-    if "0" in match.groups():
+    if is_root(match):
         harden(f"{rel} declares `USER {declared}`, which is root")
         return None
     return declared
@@ -235,7 +268,7 @@ def check_hardening(name: str, service: dict, shims: set[str]) -> None:
                 f"{transition.shim} stands, and `cap_drop: [ALL]` once it is removed"
             )
 
-    image_user = _image_user(where, name)
+    image_user = _image_user(where, name, transition)
 
     user = str(service.get("user", "")).strip()
     if transition is not None and user == transition.user:
@@ -243,7 +276,7 @@ def check_hardening(name: str, service: dict, shims: set[str]) -> None:
     match = NUMERIC_USER.match(user)
     if match is None:
         harden(f'{where} has no explicit numeric `user: "<uid>:<gid>"` (found {user!r})')
-    elif "0" in match.groups():
+    elif is_root(match):
         harden(f"{where} runs as `{user}`, which is root")
     elif image_user is not None and user != image_user:
         harden(

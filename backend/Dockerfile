@@ -120,10 +120,16 @@ RUN printf '%s\n' "$RUNWAY_COMMIT" > /app/BUILD_COMMIT
 # log_config.json is generated from app.logging_setup.dict_config and a unit test holds the
 # two together; edit the module, then regenerate, never the other way round.
 #
-# The image runs as uid 10001 by default. The deploy compose still overrides that to uid 0 until
-# the operator has migrated the host's volume ownership (SHIM-OPS-001) — the image is ready
-# before the data is, which is the order the migration needs. RULE-OPS-004 holds this line to a
-# numeric, non-root user that matches the compose.
-USER 10001:10001
+# The image carries the unprivileged user above, but still DEFAULTS to uid 0 — on purpose, and
+# only until the contract step of brief 0076 (SHIM-OPS-001). The deploy compose names the user
+# explicitly, so under it this line decides nothing. It decides everything under a compose that
+# names none: the previous deploy's file, which mounts ./users.db at the root-owned /app and
+# which the host keeps whenever its deploy script does not extract the new one (RISK-OPS-002).
+# An image defaulting to 10001 would there be unable to write the database or a single task,
+# behind a green /api/health. Root here keeps that case exactly as it ran before.
+#
+# RULE-OPS-004 requires exactly `USER 0:0` while SHIM-OPS-001 stands, and a numeric non-root USER
+# equal to the compose's once it is removed. The contract step makes this `USER 10001:10001`.
+USER 0:0
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
      "--log-config", "log_config.json"]

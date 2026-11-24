@@ -39,11 +39,12 @@ services:
     restart: unless-stopped
     # Container hardening (finding SEC-003, ADR 0048, docs/operations.md#container-hardening).
     #
-    # The image runs as uid 10001; this line keeps the backend at uid 0 until the operator has
-    # handed the host's data to that user with /opt/runway/volume_ownership.py and then sets
-    # RUNWAY_BACKEND_USER=10001:10001 in the .env beside this file. Unset, nothing changes for
-    # the data on the deploy that ships this. SHIM-OPS-001 dates the step that removes the
-    # fallback.
+    # The image carries the unprivileged uid 10001 (and still defaults to uid 0 until the contract
+    # step, so it also runs under the previous compose). This line keeps the backend at uid 0
+    # until the operator has handed the host's data to uid 10001 with
+    # /opt/runway/volume_ownership.py and then sets RUNWAY_BACKEND_USER=10001:10001 in the .env
+    # beside this file. Unset, nothing changes for the data on the deploy that ships this.
+    # SHIM-OPS-001 dates the step that removes the fallback.
     user: "${RUNWAY_BACKEND_USER:-0:0}"
     # Nothing in the image is writable: not the code, not /etc. The process writes three places
     # only — the two bind mounts below and a capped /tmp, which neither executes nor honours
