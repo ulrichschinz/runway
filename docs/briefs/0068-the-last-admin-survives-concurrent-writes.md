@@ -94,4 +94,8 @@ admin routes are REST-only (ADR 0037), and the snapshot is unchanged.
   `CHECK(role …)` constraint, which waits for the versioned migration mechanism (M8, `RISK-SEC-002`).
 - Rollback: reverting the commit restores the old (racy) guard; no stored data changed shape, so the
   previous deploy runs on the same database.
-- Gate: recorded below after the run.
+- `make check` on `7c0b434`: **GREEN** (33 s of 180 s), first run.
+- `make verify` on `7c0b434` in a clean, bootstrapped detached worktree: **GREEN** (246 s of 600 s) — unit
+  993 passed, frontend 767 passed, 57 fixture arms passed, 0 failed; 47 of 50 executable rules proven able
+  to fail. The **container tier was skipped** on this arm64 host (`RISK-TEST-001`: no arm64 archlinux
+  image); it runs in CI only and was not observed here. No Taskwarrior path changed in this package.
