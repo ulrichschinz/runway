@@ -21,6 +21,10 @@ services:
       # this line setting it in the host .env would not reach the container at all.
       # backend/tests/unit/test_task_storage.py pins it.
       - TASK_STORAGE_MODE=${TASK_STORAGE_MODE:-compat}
+      # Brief 0069: the proxies whose X-Forwarded-For the login limiter believes. Empty (the
+      # default) believes none and counts every login against the address that connected —
+      # here nginx — which is safe and coarse. Set in the host .env; see docs/operations.md.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
     network_mode: host
     restart: unless-stopped
     # The backend now writes a JSON line per request. Docker's default json-file driver has

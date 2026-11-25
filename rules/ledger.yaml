@@ -1164,16 +1164,23 @@ residual_risks:
 
   - id: RISK-SEC-003
     statement: >
-      Login rate limiting is in-process and per-worker: the counters live in a module dict,
+      Login rate limiting is in-process and per-worker: the counters live in module memory,
       reset on restart, and are not shared between processes. Under one host and one worker
       (decision F1) that is the whole population, so the limit is real; add a second worker
-      or a second host and the effective limit multiplies by the process count. Keying on
-      username rather than IP is also a deliberate trade: an attacker who knows a username
-      can deny it password login for the window. API keys are checked before any password
-      path, so agents, MCP clients and the webhook keep working through a lockout.
+      or a second host and every budget multiplies by the process count. Since brief 0069 the
+      budget is reserved before the account lookup and the KDF, in three tiers (normalised
+      username, network source behind TRUSTED_PROXIES, global), in a store bounded by TTL, a
+      clock-driven sweep and a hard key cap — that part of the risk (REV-003) is closed and
+      tested. What remains is the process boundary, and the lockout trade it was always paired
+      with: someone who knows a username can deny it password login for the window, and a spray
+      can deny every account password login for one window. API keys are not throttled, so
+      agents, MCP clients and the webhook keep working through a lockout — and a lockout does
+      nothing against a stolen key. The trigger is executable:
+      backend/tests/unit/test_login_budget.py::TestTheSingleWorkerAssumption fails when the
+      image or a compose file starts a second worker.
     owner: maintainer
-    re_open_trigger: "a second worker or host is introduced, or an account lockout is used against a real user"
-    decision_record: docs/adr/0018-cors-startup-refusal-and-the-inbox-shim.md
+    re_open_trigger: "a second worker or host is introduced (TestTheSingleWorkerAssumption goes red), or an account lockout is used against a real user"
+    decision_record: docs/security.md
 
   - id: RISK-SEC-001
     statement: >

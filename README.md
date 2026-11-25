@@ -78,9 +78,25 @@ BOOTSTRAP_ADMIN=
 # which is correct behind the bundled nginx proxy — the SPA is same-origin there.
 CORS_ORIGINS=
 
-# Failed logins allowed per username before the API answers 429, and the window in seconds.
+# The login budget. Failed (or still running) logins allowed per window before the API
+# answers 429: per username (spelling variants count as one), per network source, and in
+# total — the total is the emergency brake on password-hashing work. A correct password
+# clears its username's count only. The window is in seconds. API keys are never throttled.
 LOGIN_RATE_LIMIT=10
 LOGIN_RATE_WINDOW_SECONDS=300
+LOGIN_SOURCE_RATE_LIMIT=30
+LOGIN_GLOBAL_RATE_LIMIT=100
+
+# The most usernames, and separately the most sources, the limiter remembers at once. A new
+# one beyond that is refused with 429 rather than making room by forgetting another.
+LOGIN_RATE_MAX_KEYS=10000
+
+# Comma-separated addresses or CIDR networks of the proxies in front of the backend whose
+# X-Forwarded-For the login limiter believes (in the shipped setup: nginx and the TLS proxy in
+# front of it). Empty believes none: every login then counts against the address that
+# connected, which is safe but puts all clients behind a proxy into one source budget. A
+# malformed entry, or 0.0.0.0/0, is ignored and reported at startup. See docs/operations.md.
+TRUSTED_PROXIES=
 
 # JWT signing algorithm and token lifetime.
 JWT_ALGORITHM=HS256

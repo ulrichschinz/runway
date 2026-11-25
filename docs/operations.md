@@ -775,6 +775,66 @@ a restore replaces the file and runs no `UPDATE`. **After every restore, run the
 once, before the app serves traffic**, and tell the users whose password changed after the backup that
 their old password is back.
 
+## The login budget
+
+Since brief 0069 (findings SEC-8, REV-003; `docs/security.md`, *Login throttling*) `POST /auth/login`
+reserves a slot in three budgets — per username, per network source, in total — before any password work,
+and answers 429 when one is full. The counters are in the backend's memory: **a restart clears every
+lockout**, which is also the fastest way to lift one for a real user. API keys are never throttled.
+
+**What a lockout looks like in the audit log.** One `auth.login.throttled` row per locked key and window,
+not one per request; each says how many refused attempts it stands for. Account rows name the attempted
+username; source and global rows name nothing (no address is ever recorded).
+
+```sh
+# refused attempts by tier and account over the last day
+sqlite3 -header -column data/audit.db "
+  SELECT actor,
+         substr(detail, instr(detail, 'by the ') + 7,
+                instr(detail, ' budget') - instr(detail, 'by the ') - 7) AS tier,
+         SUM(CAST(substr(detail, instr(detail, 'refusals: ') + 10,
+                         length(detail) - instr(detail, 'refusals: ') - 10) AS INTEGER)) AS refused,
+         MAX(recorded_at) AS last_seen
+  FROM audit_events
+  WHERE event = 'auth.login.throttled' AND recorded_at >= strftime('%Y-%m-%dT%H:%M', 'now', '-1 day')
+  GROUP BY actor, tier ORDER BY refused DESC;"
+```
+
+Rows written before brief 0069 have the old detail `locked out, retry in Ns` and no count: one row per refusal.
+
+**`TRUSTED_PROXIES` in production** — not set by this repository, because which addresses Traefik and nginx
+have on `traefik-public` is a fact of the host. Until it is set, every login counts against nginx's address,
+so all clients share one source budget (30 per five minutes): safe, and a spray from one address locks every
+account out of password login for the window. To set it:
+
+1. On the host, list the network's members: `sudo docker network inspect traefik-public --format
+   '{{range .Containers}}{{.Name}} {{.IPv4Address}}{{"\n"}}{{end}}'`. Note the Traefik container's address
+   and the runway frontend's (nginx). Container addresses on a user-defined network can change on recreate;
+   if the network has a fixed subnet you may list the subnet instead, **but then every container on that
+   network is trusted to write `X-Forwarded-For`** — only do that if nothing else on it accepts traffic you
+   do not control.
+2. Add `TRUSTED_PROXIES=<traefik address>,<nginx address>` (or the subnet) to `/opt/services/runway/.env`.
+   The deploy compose passes it through (`TRUSTED_PROXIES=${TRUSTED_PROXIES:-}`).
+3. `sudo docker compose up -d backend`, then check the boot line: `startup complete` carries
+   `login_trusted_proxies` (how many entries were accepted), and an ignored entry logs an `ERROR`
+   `TRUSTED_PROXIES entries ignored`.
+4. Confirm Traefik sets `X-Forwarded-For` to the client address and does not forward a client's own
+   (`forwardedHeaders.insecure` off, no `trustedIPs` for the internet) — that is Traefik's configuration,
+   outside this repository.
+
+A wrong value fails safe in one direction only: an address that is not a proxy is never trusted unless
+listed, but a listed address is believed. Rolling back to an image before brief 0069 ignores the variable.
+
+**Recovery after a suspected credential compromise** needs both credentials: a password change (or the
+`auth_version` bump in *Ending sessions*) ends JWT sessions, and `POST /auth/apikey/regenerate` replaces the
+API key. The login budget protects neither once the attacker holds one.
+
+**The re-open trigger (`RISK-SEC-003`).** The budgets hold only while one backend process serves every login.
+`backend/tests/unit/test_login_budget.py::TestTheSingleWorkerAssumption` fails if the image's CMD gains
+`--workers` or either compose file sets `WEB_CONCURRENCY`, `replicas` or `scale`. If that test goes red, do
+not adjust it: a limiter shared by every worker — Traefik's rate-limit middleware at the edge, or a counter in
+a store all workers use — has to exist first.
+
 ## Password hashing: Argon2id and the bcrypt migration
 
 Since brief 0067 (finding SEC-006, ADR 0044 Decision 5) new passwords are hashed with Argon2id; the

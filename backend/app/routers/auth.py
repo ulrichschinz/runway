@@ -16,6 +16,7 @@ from app.auth import (
     keeps_the_ambiguous_prefix,
     new_password_problem,
 )
+from app.config import settings
 from app.database import (
     create_account,
     delete_account,
@@ -127,60 +128,93 @@ async def register(request: Request, body: UserCreate, db: Connection = Depends(
     return UserInfo(username=body.username)
 
 
-@router.post("/login", response_model=Token)
-async def login(request: Request, body: UserLogin, db: Connection = Depends(get_db)):
-    # Checked before the password is verified: a locked-out username must not buy an
-    # attacker the bcrypt work as a lever (finding SEC-8).
-    route = audit.route_of(request)
-    wait = rate_limit.seconds_until_retry(body.username)
-    if wait:
-        logger.warning("login throttled", extra={"username": body.username, "retry_after": wait})
+def _report_refusals(reports, route: str | None) -> None:
+    """Write what the limiter counted. One row per key and window, plus a summary when a key is
+    swept, so a hammered account or source cannot grow `audit.db` one row per request; every
+    row says how many refused attempts it stands for (brief 0069). A source row names no
+    address and no account — the address is a caller fingerprint (ADR 0026)."""
+    for report in reports:
+        logger.warning(
+            "login throttled",
+            extra={
+                "username": report.actor,
+                "tier": report.tier,
+                "refusals": report.refusals,
+                "retry_after": report.retry_after,
+            },
+        )
         audit.record(
             audit.LOGIN_THROTTLED,
             outcome=audit.REFUSED,
-            actor=body.username,
+            actor=report.actor,
             route=route,
-            detail=f"locked out, retry in {wait}s",
+            detail=report.detail,
         )
+
+
+def _source(request: Request) -> str:
+    """The network source the limiter counts: the socket peer, or behind a proxy listed in
+    TRUSTED_PROXIES the client address it forwarded (rate_limit.source_of)."""
+    return rate_limit.source_of(
+        request.client.host if request.client else None,
+        request.headers.getlist("x-forwarded-for"),
+        rate_limit.trusted_networks(settings.trusted_proxies),
+    )
+
+
+@router.post("/login", response_model=Token)
+async def login(request: Request, body: UserLogin, db: Connection = Depends(get_db)):
+    # Reserved before the account lookup and the KDF, atomically (REV-003, brief 0069): a
+    # refused attempt costs no work, and parallel requests cannot all pass a check that only
+    # counts finished failures.
+    route = audit.route_of(request)
+    decision = rate_limit.reserve(body.username, _source(request))
+    _report_refusals(decision.reports, route)
+    if decision.reservation is None:
         raise HTTPException(
             status_code=429,
             detail="Too many failed login attempts. Try again later.",
-            headers={"Retry-After": str(wait)},
+            headers={"Retry-After": str(decision.retry_after)},
         )
 
-    async with db.execute(
-        "SELECT hashed_password, auth_version FROM users WHERE username = ?", (body.username,)
-    ) as cur:
-        row = await cur.fetchone()
-    stored = row["hashed_password"] if row else None
-    # The same work whether or not the account exists and whichever scheme its hash is: one
-    # Argon2id verification and one bcrypt check, the missing one against a dummy (SEC-006).
-    check = check_password(body.password, stored, phase=await _phase(db))
-    if not check.ok or row is None or stored is None:
-        # An unknown username counts too. Skipping it would turn the limiter into a user
-        # enumeration oracle: throttled means "this account exists".
-        rate_limit.record_failure(body.username)
-        # Deliberately does not distinguish "no such account" from "wrong password". The
-        # response does not, and a log line that did would be the user-enumeration oracle the
-        # limiter above was written to avoid, moved from the API to the log file.
-        logger.warning("login rejected", extra={"username": body.username})
-        # Same reasoning as the log line above, with one exception that leaks nothing: the
-        # legacy >=72-byte case after its window is reached only by a caller who has the
-        # password's first 72 bytes, and the operator needs the row to offer the reset.
-        audit.record(
-            audit.LOGIN_FAILED,
-            outcome=audit.FAILURE,
-            actor=body.username,
-            route=route,
-            detail=(
-                "bcrypt-era password of 72 bytes or more is no longer accepted; operator reset"
-                if check.legacy_refused
-                else None
-            ),
-        )
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    # Leaving this block by any path but `succeed` counts as a failure — including an
+    # exception in the lookup or a cancelled request.
+    with decision.reservation as attempt:
+        async with db.execute(
+            "SELECT hashed_password, auth_version FROM users WHERE username = ?",
+            (body.username,),
+        ) as cur:
+            row = await cur.fetchone()
+        stored = row["hashed_password"] if row else None
+        # The same work whether or not the account exists and whichever scheme its hash is: one
+        # Argon2id verification and one bcrypt check, the missing one against a dummy (SEC-006).
+        check = check_password(body.password, stored, phase=await _phase(db))
+        if not check.ok or row is None or stored is None:
+            # An unknown username counts too. Skipping it would turn the limiter into a user
+            # enumeration oracle: throttled means "this account exists".
+            attempt.fail()
+            # Deliberately does not distinguish "no such account" from "wrong password". The
+            # response does not, and a log line that did would be the user-enumeration oracle
+            # the limiter above was written to avoid, moved from the API to the log file.
+            logger.warning("login rejected", extra={"username": body.username})
+            # Same reasoning as the log line above, with one exception that leaks nothing: the
+            # legacy >=72-byte case after its window is reached only by a caller who has the
+            # password's first 72 bytes, and the operator needs the row to offer the reset.
+            # One row per failure inside the budget, so at most LOGIN_GLOBAL_RATE_LIMIT a window.
+            audit.record(
+                audit.LOGIN_FAILED,
+                outcome=audit.FAILURE,
+                actor=body.username,
+                route=route,
+                detail=(
+                    "bcrypt-era password of 72 bytes or more is no longer accepted; operator reset"
+                    if check.legacy_refused
+                    else None
+                ),
+            )
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        attempt.succeed()
 
-    rate_limit.clear(body.username)
     if check.rehash:
         # The same password under Argon2id; no session ends. A compare-and-swap on the hash that
         # was verified: a password change in between wins, and nothing is written.

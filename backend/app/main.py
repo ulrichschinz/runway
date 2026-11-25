@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP
 
-from app import audit, startup_checks, task_storage
+from app import audit, rate_limit, startup_checks, task_storage
 from app.auth import prepare_dummies
 from app.config import cors_origin_list, settings
 from app.database import init_db
@@ -44,6 +44,14 @@ async def lifespan(app: FastAPI):
         outcome=audit.NOOP if bootstrap_reason.startswith("noop:") else audit.SUCCESS,
         detail=bootstrap_reason,
     )
+    # The login limiter's source tier trusts X-Forwarded-For only from these (brief 0069). A
+    # skipped entry trusts fewer hops, never more — but the operator meant something by it.
+    rejected = rate_limit.rejected_proxy_entries(settings.trusted_proxies)
+    if rejected:
+        logger.error(
+            "TRUSTED_PROXIES entries ignored: not an address or network, or prefix length 0",
+            extra={"ignored_entries": rejected},
+        )
     logger.info(
         "startup complete",
         # The storage mode as the resolver will apply it, so an operator can see the switch
@@ -52,6 +60,7 @@ async def lifespan(app: FastAPI):
             "log_level": resolve_level(),
             "registration_seed": settings.allow_registration,
             "task_storage_mode": task_storage.storage_mode(),
+            "login_trusted_proxies": len(rate_limit.trusted_networks(settings.trusted_proxies)),
         },
     )
     yield

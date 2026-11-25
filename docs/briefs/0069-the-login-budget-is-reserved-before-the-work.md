@@ -1,0 +1,149 @@
+# Change Impact Brief 0069 — The login budget is reserved before the work
+
+| Field | Value |
+|---|---|
+| **Requested outcome** | Finding **REV-003** (Codex review of audit run `20261118T131510Z-claude`, 2026-11-24) and the residual risk **`RISK-SEC-003`**: the login limiter checked the budget *before* the asynchronous account lookup and recorded a failure only *after* the password check, so any number of parallel requests passed the check before the first failure was counted; expired entries were removed only when the same name was used again, so new random names grew the module dict without bound. Ordered by Uli on **2026-11-24** as milestone M3.2 of the security remediation plan. Closing criterion (plan §5): pre-reservation, parallel budget and bounded store tested. Plan §4 M3.2 adds: a TTL, a global sweep and a hard maximum key count; at least three tiers (normalised account, the network source as seen at a trusted proxy, a global emergency budget), proxy headers accepted only from known proxies, otherwise the socket peer; the lockout balance and the API-key path documented; the multi-worker re-open trigger kept executable; failed logins not written to `audit.db` without bound. Acceptance: a synthetic parallel burst does not exceed the account budget, starts no KDF work once the budget is exhausted, and keeps the key count under the cap; the serial tests and the uniform error stay green. |
+| **Owning unit** | `be/leaves` — `backend/app/rate_limit.py` (rewritten: a lock-protected, three-tier, reservation-based limiter with a bounded store and aggregated refusal reporting; `source_of` for the trusted-proxy rule), `backend/app/config.py` (four new settings). `be/routers` — `backend/app/routers/auth.py` (`login` reserves before the lookup and closes the reservation on every path). `be/app` — `backend/app/main.py` (one startup line saying which source the limiter counts). `ops` — `backend/Dockerfile` (`--no-proxy-headers`: one trust decision, not two), `frontend/nginx.conf` (`X-Forwarded-For` appended, not passed through), `ops/deploy/docker-compose.yml` and `docker-compose.yml` (`TRUSTED_PROXIES` passed through). `docs` — this brief, `README.md`, `docs/security.md`, `docs/threat-model.md`, `docs/operations.md`, `backend/AGENTS.md`. `rules` — `rules/ledger.yaml` (`RISK-SEC-003` statement narrowed, not removed). `tests` — `backend/tests/unit/test_login_budget.py` (new), `backend/tests/unit/test_security_wave.py` (unchanged, must stay green). |
+| **Applicable contracts** | [`AGENTS.md`](../../AGENTS.md) §5 (REST through the migration pattern; env vars documented in README, `RULE-SURF-002`), §6 (`rules/ledger.yaml` needs owner approval — `RISK-GOV-001`), §10 (horizontal scaling out of scope); [`backend/AGENTS.md`](../../backend/AGENTS.md) (a leaf depends on nothing but leaves; an audit write never fails a request). No gate rule is added or changed, so the META-RULE is not engaged. |
+| **Governed by** | Respected: [ADR 0018](../adr/0018-cors-startup-refusal-and-the-inbox-shim.md) (the limiter is in-process and per-worker on purpose under F1 — kept), [ADR 0026 — The audit log](../adr/0026-the-audit-log.md) (no IP address or caller fingerprint in an audit row — kept: the source tier's refusals are recorded without the address), [ADR 0044](../adr/0044-credential-lifecycle-jwt-password-and-api-key.md) (uniform login work and the uniform 401 — kept). No new ADR: the design is the one plan §4 M3.2 prescribes; the two choices it leaves open (what happens at the key cap; how uvicorn's own proxy-header trust interacts) are recorded here under *Decisions* and are local to this module. |
+| **Rule IDs introduced** | None. |
+| **Entry points** | `POST /auth/login` (REST-only — the `auth` tag is not on the MCP allowlist, ADR 0037; `./run impact` lists `mcp_tools: ['login']`, which is the index's name-derived guess, not the surface: `ops/surfaces/mcp-tools.json` has no `login`). |
+| **Affected public surfaces** | **REST/OpenAPI: unchanged.** Same route, same statuses (200 / 401 / 422 / 429), same 401 detail `Invalid credentials`, same 429 detail and `Retry-After` header; `ops/surfaces/openapi.json` unchanged. A 429 can now also come from the source or global budget, not only the account one — the documented status and body are the same. MCP tools unchanged (27). DB schema unchanged (no column; the audit table is not touched — same event names, same columns). **Env vars: four added, additive, each with a default that keeps a deploy without them working:** `LOGIN_SOURCE_RATE_LIMIT` (30), `LOGIN_GLOBAL_RATE_LIMIT` (100), `LOGIN_RATE_MAX_KEYS` (10000), `TRUSTED_PROXIES` (empty: no proxy header is trusted). Documented in README (`RULE-SURF-002`). `LOGIN_RATE_LIMIT` keeps its name and meaning (the account budget). SPA routes and `localStorage` keys unchanged. |
+| **Known dependents** | From `./run impact` (index `current`, revision `2ca39f03c8b9`, 1767 nodes / 2845 edges): `rate_limit.py` → `routers/auth.py` → `main.py` (routes `POST /login`, the other `/auth` routes); `config.py` → `auth.py`, `database.py`, `dependencies.py`, `logging_setup.py`, `main.py`, `rate_limit.py`, `services/{password_reset,storage_migration}.py`, `startup_checks.py`, `task_storage.py`, transitively every router; `audit.py` → `dependencies.py`, `main.py`, `routers/{admin,auth,tasks}.py`, `services/{password_reset,storage_migration}.py`. `frontend/nginx.conf`, `backend/Dockerfile`, both compose files: unit `ops`, no import dependents. |
+| **Uncertain / dynamic areas** | `BLIND-TEST-001` — `routers/auth.py` has no import-derived test protection; it is exercised through the TestClient and `httpx.ASGITransport`. `BLIND-NGINX-001` — nginx.conf is templated at start; the effective header is the checked-in line only because `X-Forwarded-For` carries no `${…}`. `BLIND-OPS-001`/`RISK-OPS-002` — what Traefik in front of nginx sends, which addresses Traefik and nginx have on `traefik-public`, and whether any other peer on that network can reach nginx or the backend directly are **production facts this repository cannot see** (plan M0). The source tier is therefore correct only to the extent the operator's `TRUSTED_PROXIES` is; its default (empty) is the safe direction, not the precise one. |
+| **Analogous implementations** | `test_last_admin_concurrency.py` (brief 0068): a parallel ASGI burst on real connections with a barrier that proves the requests were in flight together. `startup_checks` / `logging_setup.resolve_level`: a configuration value that is wrong falls back to the conservative behaviour and says so at boot. |
+| **Delivery Pattern** | **Security or Operability Change** — failure scenario, control, adversarial red test written first and observed failing. The four env vars are an **additive** public-surface change (expand only): every one has a default under which the previous deploy's environment boots and behaves at least as safely. No stored data changes shape, so there is nothing to migrate or contract; stated rather than skipped. |
+| **Required tests** | Parallel (ASGI, one account, a burst of 40 wrong-password logins held together before the KDF): at most `LOGIN_RATE_LIMIT` reach the password check, the rest are 429 without KDF work. Parallel (threads against the limiter, a barrier): no tier hands out more reservations than its budget. Unit: in-flight reservations count; a success releases its reservation and clears the account tier only; an exception between reserve and close counts as a failure; TTL and a **global** sweep remove other names' expired entries; the key count never exceeds `LOGIN_RATE_MAX_KEYS` under a random-name flood, which is refused rather than evicting a victim's counter; the source and the global tier each stop a spray across many names; account keys are normalised (case, NFKC) so spelling variants share one budget; `source_of` ignores `X-Forwarded-For` from an untrusted peer, takes the right-most untrusted hop behind trusted ones, cannot be spoofed from the left, groups IPv6 by /64, and refuses `0.0.0.0/0` and malformed `TRUSTED_PROXIES` entries. ASGI/REST: the existing serial suite (`TestLoginIsRateLimited`) and the uniform 401 stay green; a locked account's refusals write a bounded number of `auth.login.throttled` rows that still carry the count; the source tier's rows carry no address. Ops: the Dockerfile CMD has `--no-proxy-headers` and no `--workers`, neither compose file sets `WEB_CONCURRENCY` or replicas (the executable form of `RISK-SEC-003`'s re-open trigger), nginx appends `X-Forwarded-For`, and the deploy compose passes `TRUSTED_PROXIES`. Container: not applicable — no Taskwarrior path changes; the existing suite runs. Frontend: not applicable — no response changes. |
+| **Intended scope** | REV-003 and the parts of `RISK-SEC-003` that are code. **Not** in scope: a shared limiter across workers or hosts (needed only when the re-open trigger fires); audit retention and the audit size budget (M8, `RISK-OPS-006`); request-body limits beyond the existing 16 KiB login limit (M8, `RISK-SEC-004`); MCP session budgets (M5, REV-004); any production action, including choosing the production `TRUSTED_PROXIES` value. |
+| **Base revision** | `2ca39f0` (`security/m3-1-last-admin`) |
+
+## Failure scenario
+
+1. **The parallel burst (REV-003).** Mallory knows Alice's username. She opens 50 connections and sends 50
+   `POST /auth/login` for `alice` at once. Each request runs `seconds_until_retry("alice")` — 0, no failure
+   recorded yet — and then awaits the account lookup. All 50 are past the check before the first one reaches
+   `record_failure`. Each then runs one Argon2id and one bcrypt operation and records its failure. The
+   account budget of 10 has been spent five times over, and the attacker got 50 guesses and 50 KDF
+   operations' worth of CPU for the price of one window. Repeat every 300 s.
+2. **The random-name flood.** Mallory sends logins for `u0001`, `u0002`, … Each records one failure under a
+   new dict key. An entry is removed only when the *same* name is tried again after its window, which never
+   happens, so `_failures` grows with every request until the process restarts. Each request also costs
+   the server the full KDF work and writes one `auth.login.failed` row to `audit.db`.
+3. **The spray.** Ten guesses per name, unlimited names: a password spray across every username Mallory can
+   guess is unthrottled, because the only tier is the account.
+
+## Decisions
+
+- **Reserve, then work, then close.** `rate_limit.reserve(username, source)` takes one slot in each tier
+  under one `threading.Lock` before the handler awaits anything. A tier is full when its failures *plus
+  in-flight reservations* reach its budget. The reservation is a context manager: `succeed()` releases the
+  slot and clears the account tier (the old behaviour: proving the password resets that account's budget),
+  `fail()` turns the slot into a recorded failure, and leaving the block any other way — an exception, a
+  cancelled request — counts as a failure. A slot cannot leak and a dropped connection cannot escape the
+  budget.
+- **Three tiers, each a hard ceiling:** account (`LOGIN_RATE_LIMIT`, key: NFKC + casefold of the name,
+  stored as a 16-byte BLAKE2b digest so a 16 KiB name costs the store 16 bytes), source
+  (`LOGIN_SOURCE_RATE_LIMIT`, key: the address `source_of` decides, IPv4 /32 or IPv6 /64), global
+  (`LOGIN_GLOBAL_RATE_LIMIT`, one key). A success clears only the account tier: an attacker with a valid
+  account of their own must not be able to reset their source counter by logging in between guesses.
+- **The key cap refuses, it does not evict.** When the account or source tier holds `LOGIN_RATE_MAX_KEYS`
+  live keys after a sweep, a new key is refused with 429. Evicting the oldest entry would let a flood of
+  random names flush the victim's counter — a bypass. With the defaults the cap is unreachable anyway: every
+  live key holds a failure or a reservation, and the global tier caps those at 100, so the store holds at
+  most ~200 keys; the cap is the guarantee that holds even if someone raises the global budget.
+- **Sweep globally, on a clock.** Every `reserve` runs a full sweep when the last one is older than
+  `min(window, 60 s)`, or when a tier reaches the cap. A sweep drops every key whose failures have all
+  expired and which has no reservation in flight.
+- **Proxy headers only from a known proxy.** `source_of(peer, x_forwarded_for)` starts at the socket peer. If
+  the peer is in `TRUSTED_PROXIES` it walks `X-Forwarded-For` from the right, skipping trusted hops, and
+  stops at the first address that is not a trusted proxy. Entries to the left of that — the ones a client can
+  write — are never read. An unparseable hop where an address should be is one shared key, not the string
+  itself. `TRUSTED_PROXIES` entries that do not parse, and any network of prefix length 0, are ignored and
+  reported at boot: a mistake there trusts fewer hops, never more.
+- **One trust decision, not two.** uvicorn rewrites the ASGI client address from `X-Forwarded-For` by
+  default when the peer is `127.0.0.1` — which in the development compose (host networking) is nginx and
+  every other local process. `--no-proxy-headers` in the Dockerfile CMD turns that off, so `TRUSTED_PROXIES`
+  is the only place a forwarded address is believed.
+- **nginx appends.** `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` makes nginx add the
+  address that connected to it. Before, nginx passed a client-supplied `X-Forwarded-For` through untouched,
+  so a peer that reached nginx without Traefik could have written any source it liked into the right-most
+  position.
+- **Refusals are reported, not written one per request.** Every failed login inside the budget still
+  writes its `auth.login.failed` row, unchanged; their number is now bounded by the global budget
+  (≤ `LOGIN_GLOBAL_RATE_LIMIT` per window). A refused attempt writes an `auth.login.throttled` row only for
+  the first refusal of a tier key in a window; later refusals are counted, and the count is carried by the
+  next row for that key or by a summary row when the key is swept. So the row count is bounded and the
+  number of refused attempts is still in the log. Source-tier rows carry no address (ADR 0026: no caller
+  fingerprint); account-tier rows carry the attempted name, exactly as before. The warning log line follows
+  the same rule.
+- **Lockout balance.** The account tier is unchanged: someone who knows a username can deny it password
+  login for the window, and the source and global tiers add one more lever — a spray from one source, or
+  from everywhere, can deny password login to every account for one window. That is the emergency brake
+  working as designed; it costs no KDF work and holds no state per attacker request. API keys are checked
+  before any password path and are not throttled, so agents, MCP clients and the webhook keep working
+  through any lockout — and so an incident that suspects a stolen API key is **not** contained by the
+  limiter; the recovery flow (`docs/operations.md`) names both credentials.
+
+## Control
+
+See *Decisions*. In code: `backend/app/rate_limit.py` (`reserve`, `Reservation`, `source_of`,
+`trusted_networks`, `sweep`, `key_count`), `backend/app/routers/auth.py::login`.
+
+## Test evidence
+
+Run on 2026-11-25 on an arm64 Mac. The red column is `backend/tests/unit/test_login_budget.py` copied into
+a detached worktree of the unchanged production code at `2ca39f0`. So that the HTTP-level tests fail on
+the *behaviour* and not on a missing name, that worktree's `Settings` was given the four new fields with
+their defaults and `rate_limit` a `key_count()` returning `len(_failures)` — knobs the old limiter does
+not read. Tests that call the new pure API (`reserve`, `source_of`, `trusted_networks`) are red there
+by its absence, which is recorded as such and is not evidence of anything else.
+
+| Tier | What | Before the control (`2ca39f0` + settings shim) | After |
+|---|---|---|---|
+| Parallel (ASGI, 40 requests for one account, held together before the KDF) | `TestAParallelBurst::test_the_account_budget_holds_under_a_burst` | **red: 40 × 401, `assert 40 == 10`** — every request passed the check and ran the KDF | 10 × 401, 30 × 429; exactly 10 KDF calls; 10 requests reached the hold point |
+| Parallel (regression pin) | `::test_after_the_burst_the_correct_password_is_refused_too` | green — once the old limiter had counted, it refused | green |
+| Parallel (64 threads, one barrier) | `TestTheReservation::test_threads_never_get_more_slots_than_the_budget` | red (no `reserve`) | exactly `LOGIN_RATE_LIMIT` slots granted |
+| Unit (bounded store) | `TestTheStoreIsBounded::test_expired_names_are_swept_without_being_tried_again` | **red: `assert 21 <= 3`** — twenty expired names still held | swept to ≤ 3 keys |
+| Unit (bounded store) | `::test_a_flood_of_new_names_cannot_grow_the_store_past_its_cap` | **red: `assert 60 <= 25`** | ≤ 25 account keys; names 26–60 refused with 429 |
+| Unit (regression pin) | `::test_a_full_store_does_not_forget_the_victim` | green — the old store never forgot anything, it only grew | green: the cap refuses, it does not evict |
+| ASGI (tiers) | `TestTheTiers::test_a_spray_from_one_source_is_stopped` | **red: `assert 35 == 30`** (35 × 401) | 30 × 401 then 429; 30 KDF calls |
+| ASGI (tiers) | `::test_a_spray_from_many_sources_meets_the_global_budget` | **red: `assert 20 == 12`** | 12 × 401 then 429 |
+| ASGI (tiers) | `::test_spelling_variants_share_one_account_budget` | **red: `assert 200 == 429`** — `ALICE`, `Alice`, `ａlice` were separate budgets | 429 |
+| ASGI (tiers) | `::test_a_success_does_not_reset_the_source_tier` | **red: `assert 401 == 429`** | 429 |
+| ASGI (source) | `TestTheSourceBehindAProxy` × 3 — spoofed `X-Forwarded-For` from an untrusted peer; two clients behind a trusted proxy; a spoofed left side of the chain | **red** (`[401]*5`, `(401, 401)`, `[401]*5`) — no source tier | `[401,401,401,429,429]`; `(429, 401)`; `[401,401,401,429,429]` |
+| Unit (pure rule) | `TestSourceOf` × 11 — peer without trust, right-most untrusted hop, several header lines, all-trusted chain, no header, garbage hop, IPv6 /64, IPv4-mapped, missing peer, `0.0.0.0/0` and `::/0` refused, malformed entries skipped | red (no API) | green |
+| Unit (reservation) | `TestTheReservation` × 6 — in-flight counts, success releases and clears the account only, leaving the block counts as a failure, closing twice counts once, threads (above), `Retry-After` counts down | red (no API) | green |
+| ASGI / audit | `TestRefusalsAreReportedNotWrittenOneByOne::test_a_hammered_account_writes_a_bounded_number_of_rows` — 210 attempts | **red: `assert 200 <= 2`** — one throttled row per refusal | 1 throttled row, 10 failed rows |
+| ASGI / audit | `::test_the_count_of_refusals_is_not_lost` | **red** (old rows carry no count) | first row (1) + sweep summary (49) = 50 |
+| ASGI / audit | `::test_a_source_refusal_row_carries_no_address` | **red: no row** (no source tier) | rows written; no address, no actor |
+| Ops | `TestTheSingleWorkerAssumption` — Dockerfile CMD has `--no-proxy-headers` and no `--workers`; deploy compose passes `TRUSTED_PROXIES`; nginx appends `X-Forwarded-For` twice | **red** × 3 | green |
+| Ops (regression pins) | `::test_no_compose_file_scales_the_backend` × 2 | green — neither file scales today; pins the re-open trigger | green |
+| ASGI/REST (existing) | `test_security_wave.py::TestLoginIsRateLimited` (serial lockout, `Retry-After`, unknown names, window expiry, API keys through a lockout), `test_audit.py` (lockout row with actor and `retry in`; the uniform failed row), `test_logging.py` (`login throttled` line, no secret in the stream), `test_password_kdf.py::TestUniformWork` | green | green, unchanged |
+| Container | not applicable — no Taskwarrior path changed; the existing suite runs in `make verify` | — | see Results |
+| Frontend | not applicable — no response changed | — | — |
+
+33 of the 37 new tests were red before the control; the 4 green ones are the regression pins named above.
+
+## Results
+
+- REV-003's closing criterion (plan §5: pre-reservation, parallel budget and bounded store tested) is met
+  and proved by tests observed red on the old code and green on the new; they run in every `make check`.
+- Plan M3.2 acceptance: the parallel burst stays within the account budget and starts no KDF work after it
+  (exactly 10 of 40); the key count stays under the cap; the serial suite and the uniform 401 are green.
+- `RISK-SEC-003` is **narrowed, not removed**: the in-process, per-worker limitation and the lockout trade
+  remain and are restated in `rules/ledger.yaml`; its re-open trigger is now a test.
+- Public surfaces: four additive env vars documented in README (`RULE-SURF-002` green); REST, MCP, DB, SPA
+  snapshots unchanged (`make surfaces`: no drift).
+- Rollback: reverting restores the old limiter; no stored data changed shape, and the previous image ignores
+  the new variables. `--no-proxy-headers` and the nginx header revert with it.
+
+### Deferred, with trigger
+
+- **Production `TRUSTED_PROXIES`** — operator, on the host (plan M0 class: production facts this repository
+  cannot see). Until set, every client behind nginx shares one source budget. Procedure in
+  `docs/operations.md`, *The login budget*. Trigger: the next deploy of this change.
+- **Traefik's forwarded-header configuration** — confirm on the host that Traefik overwrites rather than
+  forwards a client's `X-Forwarded-For`. Not visible here (`RISK-OPS-002`).
+- **A shared limiter** — only when `TestTheSingleWorkerAssumption` goes red (`RISK-SEC-003`).
+- **Audit retention and size budget** — M8 (`RISK-OPS-006`); this change bounds the *rate* of login rows
+  (≤ `LOGIN_GLOBAL_RATE_LIMIT` failed rows plus a few throttled rows per window), not the file's total size.
