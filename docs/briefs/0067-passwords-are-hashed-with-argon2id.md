@@ -239,6 +239,10 @@ SPA routes and `localStorage` keys unchanged.
   once `RULE-IDX-001` (the index was stale after the edits; `make fix` rebuilt it) and once
   `RULE-TYPE-001` (mypy could not narrow the row through the new check; restructured, no suppression) —
   then **GREEN** (28 s of 180 s).
+- `make verify` on `1ae00c4` in a clean, bootstrapped detached worktree: **GREEN** (218 s of 600 s) — unit
+  979 passed, frontend 767 passed, 57 fixture arms passed, 0 failed; 47 of 50 executable rules proven able
+  to fail (no rule added); live branch protection matched `ops/github/ruleset.json`.
+  **`py-test-container` was skipped** (arm64, `RISK-TEST-001`) and has to be observed in CI on amd64.
 
 Units touched in round 2: `be/leaves` (`auth.py`, `models.py`, `middleware.py` comment), `be/routers`
 (`routers/auth.py`), `fe/shared` (`passwordPolicy.js`, `settingsRules.js`, both message catalogues),
