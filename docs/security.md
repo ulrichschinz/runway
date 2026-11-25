@@ -149,7 +149,11 @@ Promotes an account directly, bypassing the API. `--db` has no
 default on purpose: this writes to a live database, and the path should be a deliberate
 keystroke rather than an inherited one. It does **not** bypass the last-admin invariant:
 `--role user` on the only admin is refused (exit 1) in the same serialised transaction the API
-uses, so it cannot race a request either.
+uses, so it cannot race a request either: a test holds a request's guard open mid-demotion while
+the CLI demotes the other admin, and the CLI waits for the lock and refuses
+(`test_last_admin_concurrency.py::TestTheOperatorCli::test_it_cannot_race_a_request`). Exit 1
+means only that refusal; a database error — a write lock held past the CLI's 5 s busy timeout, a
+file without a `users` table — exits 3 and changes nothing.
 
 Use it when an instance has no admin and restarting with `BOOTSTRAP_ADMIN` set is not
 practical.

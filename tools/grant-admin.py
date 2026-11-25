@@ -8,6 +8,8 @@ container is the more disruptive option.
 
 It does not bypass the last-admin invariant in the other direction: `--role user` on the
 instance's only admin is refused (exit 1), in the same serialised transaction the API uses.
+Exit 1 means only that; a database error (a write lock held past `BUSY_TIMEOUT`, a file without
+a `users` table) exits 3 and changes nothing.
 
 `--db` has no default. This writes to a live database, and the path should be a deliberate
 keystroke rather than one inherited from a config file that may point somewhere else.
@@ -25,6 +27,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 EX_OK, EX_RULE, EX_NEEDS_INPUT, EX_TOOLING = 0, 1, 2, 3
 
 VALID_ROLES = ("admin", "user")
+
+# Seconds to wait for another writer's lock (sqlite3's own default, stated rather than inherited).
+# A lock held longer than this is a tooling failure (exit 3), never a last-admin refusal (exit 1).
+BUSY_TIMEOUT = 5.0
 
 
 def _admins(con: sqlite3.Connection) -> int:
@@ -55,7 +61,7 @@ def main(argv: list[str]) -> int:
 
     try:
         # isolation_level=None: this script opens its transaction itself (BEGIN IMMEDIATE).
-        con = sqlite3.connect(path, isolation_level=None)
+        con = sqlite3.connect(path, isolation_level=None, timeout=BUSY_TIMEOUT)
         con.row_factory = sqlite3.Row
     except sqlite3.Error as exc:
         print(f"  cannot open {path}: {exc}", file=sys.stderr)
@@ -93,6 +99,14 @@ def main(argv: list[str]) -> int:
             print("  promote another account first", file=sys.stderr)
             return EX_RULE
         con.commit()
+    except sqlite3.Error as exc:
+        # A lock held past BUSY_TIMEOUT, a file that is not a runway users.db, a failed commit:
+        # nothing was changed, and exit 1 stays reserved for the last-admin refusal.
+        if con.in_transaction:
+            con.rollback()
+        print(f"  cannot change {args.username!r} in {path}: {exc}", file=sys.stderr)
+        print("  nothing was changed", file=sys.stderr)
+        return EX_TOOLING
     finally:
         con.close()
 

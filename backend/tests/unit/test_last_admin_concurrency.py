@@ -373,3 +373,57 @@ class TestTheOperatorCli:
         tool = _grant_admin()
         assert tool.main(["--db", settings.db_path, "alice"]) == tool.EX_OK
         assert _admins() == ["alice"]
+
+    def test_a_held_write_lock_is_a_tooling_failure_not_a_refusal(self, two_admins, monkeypatch):
+        """Exit 1 means "would remove the last admin" and nothing else (review of brief 0068).
+
+        A second connection holds the write lock past the CLI's busy timeout: the CLI must
+        answer 3 (tooling), not crash with a traceback that exits 1, and change nothing.
+        """
+        tool = _grant_admin()
+        monkeypatch.setattr(tool, "BUSY_TIMEOUT", 0.2)
+        holder = sqlite3.connect(settings.db_path, isolation_level=None)
+        try:
+            holder.execute("BEGIN IMMEDIATE")
+            code = tool.main(["--db", settings.db_path, "--role", "user", "bob"])
+        finally:
+            holder.rollback()
+            holder.close()
+        assert code == tool.EX_TOOLING
+        assert _admins() == ["alice", "bob"]
+
+    def test_a_database_without_a_users_table_is_a_tooling_failure(self, tmp_path):
+        tool = _grant_admin()
+        wrong = tmp_path / "not-users.db"
+        con = sqlite3.connect(wrong)
+        con.execute("CREATE TABLE something_else (x INTEGER)")
+        con.commit()
+        con.close()
+        assert tool.main(["--db", str(wrong), "--role", "user", "bob"]) == tool.EX_TOOLING
+
+    @pytest.mark.anyio
+    async def test_it_cannot_race_a_request(self, two_admins):
+        """The CLI's own transaction against a request's guard that is mid-write.
+
+        Connection 1 (the application's guard) has demoted alice and not yet committed. The
+        CLI then demotes bob from its own `sqlite3` connection. It must wait for the write
+        lock, see the committed state (bob the only admin) and refuse — not read the stale
+        count of two and leave none.
+        """
+        from app import database
+
+        tool = _grant_admin()
+        async with aiosqlite.connect(settings.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with database.admin_preserving_write(db):
+                await db.execute("UPDATE users SET role='user' WHERE username='alice'")
+                cli = asyncio.create_task(
+                    asyncio.to_thread(
+                        tool.main, ["--db", settings.db_path, "--role", "user", "bob"]
+                    )
+                )
+                await asyncio.sleep(0.5)
+                assert not cli.done(), "the CLI did not wait for the request's write lock"
+            code = await cli
+        assert code == tool.EX_RULE
+        assert _admins() == ["bob"]

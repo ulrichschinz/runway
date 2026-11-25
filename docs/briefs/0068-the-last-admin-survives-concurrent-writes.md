@@ -13,7 +13,7 @@
 | **Uncertain / dynamic areas** | `BLIND-TEST-001` — `admin.py` and `grant-admin.py` have no import-derived test protection; both are exercised by tests that call them (TestClient, and loading the CLI module by path), which the index cannot see. SQLite locking is the serialisation mechanism, so the guarantee holds for every writer of the same `users.db` file on one host — the application, the operator CLI and any second worker alike — but not for a database on a network filesystem whose locks do not work (not a supported deployment). |
 | **Analogous implementations** | `replace_password` / `rehash_password` (brief 0066/0067): a write whose correctness under concurrency is enforced **in the database**, not by a read in Python first. `test_password_kdf.py::TestRehashCompareAndSwap`: a parallel test that holds one request between its read and its write. |
 | **Delivery Pattern** | **Security or Operability Change** — failure scenario, control, adversarial red test written first and observed failing. Not a data or public-surface migration: no stored data and no surface changes shape, so expand → migrate → switch → contract has no step to take (stated rather than skipped). |
-| **Required tests** | Parallel (ASGI, two requests, two connections, a barrier): two admins demoted at the same time — exactly one 409, at least one admin left; demotion racing the deletion of the other admin. DB integration: the guard refuses a deletion of the only admin and keeps the row; a bulk demotion inside the guard is rolled back whole; a database with no admin at all is not blocked from ordinary writes; a non-admin write passes; the guard refuses to open inside a transaction already in progress. ASGI/REST: the existing serial 409, its audit row and its exact detail stay green. Ops CLI: `grant-admin --role user` on the last admin is refused and changes nothing; promotion still works. Container: not applicable — no Taskwarrior path changes; the existing suite runs. Frontend: not applicable — no response changes. |
+| **Required tests** | Parallel (ASGI, two requests, two connections, a barrier): two admins demoted at the same time — exactly one 409, at least one admin left; demotion racing the deletion of the other admin. DB integration: the guard refuses a deletion of the only admin and keeps the row; a bulk demotion inside the guard is rolled back whole; a database with no admin at all is not blocked from ordinary writes; a non-admin write passes; the guard refuses to open inside a transaction already in progress. ASGI/REST: the existing serial 409, its audit row and its exact detail stay green. Ops CLI: `grant-admin --role user` on the last admin is refused and changes nothing; promotion still works; the CLI run against a request's guard held open mid-write waits and refuses (parallel); a held write lock or a wrong database exits 3, not 1, and changes nothing (review round). Container: not applicable — no Taskwarrior path changes; the existing suite runs. Frontend: not applicable — no response changes. |
 | **Intended scope** | The atomic invariant for every path in this repository that can remove an admin: role change through the API, account deletion, the operator CLI, and a reusable guard for any future bulk path. **Not** in scope: the login budget (M3.2, REV-003); a `CHECK(role IN ('user','admin'))` constraint (needs the versioned migration mechanism of M8, `RISK-SEC-002`); any production action. |
 | **Base revision** | `c7132f6` (`security/m2-2-argon2id`) |
 
@@ -69,15 +69,34 @@ applied there.
 | Parallel | `test_one_admin_demotes_both_from_two_tabs` | **red: `[200, 200]`** | one 200, one 409, one admin |
 | Parallel / audit | `test_the_refusal_is_audited_as_a_refusal` | **red: `['success', 'success']`** | `refused` + `success`; detail `refused: this is the last admin` |
 | Parallel (two connections, barrier, no HTTP) | `test_demotion_racing_the_deletion_of_the_other_admin` — connection 1 deletes Bob, connection 2 demotes Alice | **red** (`delete_account` had no guard; `LastAdminError` absent) | exactly one `LastAdminError`, no other exception, one admin left |
-| DB integration | `TestDeletion` — the only admin cannot be deleted; a plain account still is | **red** (no guard) | green |
+| DB integration | `TestDeletion::test_the_only_admin_cannot_be_deleted` | **red** (no guard) | green |
+| DB integration (regression pin) | `TestDeletion::test_a_plain_account_is_still_deleted` | green — the old `delete_account` deleted plain accounts too; pins that the guard does not block them | green |
 | DB integration (bulk) | `TestTheGuardItself` — a bulk `UPDATE users SET role='user'` inside the guard is rolled back **whole** (an earlier statement in the same transaction too); a bulk write that keeps an admin commits; an instance with no admin is not blocked; an unknown account is `None` and leaves no open transaction; the guard refuses to open inside a transaction already in progress | **red** (no API) | green |
-| Ops CLI | `TestTheOperatorCli` — `grant-admin --role user` on the last admin exits 1 and changes nothing; demotion with another admin left still works; promotion unchanged | **red: `assert 0 == 1`** — the CLI demoted the last admin | green |
+| Ops CLI | `TestTheOperatorCli::test_it_refuses_to_demote_the_last_admin` — `grant-admin --role user` on the last admin exits 1 and changes nothing | **red: `assert 0 == 1`** — the CLI demoted the last admin | green |
+| Ops CLI (regression pins) | `TestTheOperatorCli::test_it_still_demotes_when_another_admin_remains`, `::test_promotion_the_escape_hatch_is_unchanged` | green — the old CLI did both; they pin behaviour that must not change | green |
 | ASGI/REST (existing) | `test_admin.py` incl. `TestLastAdminGuard` (serial 409, its audit row and detail) | green | green, unchanged |
 | Container | not applicable — no Taskwarrior path changed; the existing suite runs in `make verify` | — | see Results |
 | Frontend | not applicable — no response changed | — | — |
 
-13 of the 14 new tests were red before the control; the one green one,
-`test_promotion_the_escape_hatch_is_unchanged`, pins behaviour that must not change.
+11 of the 14 new tests were red before the control. The 3 green ones are regression pins, not evidence
+for the control: `TestDeletion::test_a_plain_account_is_still_deleted`,
+`TestTheOperatorCli::test_it_still_demotes_when_another_admin_remains` and
+`TestTheOperatorCli::test_promotion_the_escape_hatch_is_unchanged`. (An earlier version of this brief said
+13 of 14 and marked the first two red; a review re-ran the file on `c7132f6` and the count was wrong. It was
+re-run on 2026-11-25 with `git archive c7132f6` plus this test file: 11 failed, 3 passed.)
+
+### Review round (2026-11-25)
+
+Three review findings, each checked and fixed:
+
+| Finding | Verified | Fix | Red before the fix |
+|---|---|---|---|
+| R1 (minor): `grant-admin` exited 1, the documented "last admin" code, on any `sqlite3.Error` (a write lock held past the busy timeout, a file without a `users` table), as an uncaught traceback | reproduced | `except sqlite3.Error` around the transaction: roll back, print, exit 3 (`EX_TOOLING`); the busy timeout is stated as `BUSY_TIMEOUT = 5.0` (sqlite3's default) | `test_a_held_write_lock_is_a_tooling_failure_not_a_refusal`: **red, `sqlite3.OperationalError: database is locked`** (observed with the timeout attribute patched non-strictly, so the old code waited its default 5 s); `test_a_database_without_a_users_table_is_a_tooling_failure`: **red, `no such table: users`** |
+| R2 (important): the 13-of-14 claim above | reproduced: 11 of 14 | the count and the table rows above | — (documentation) |
+| R3 (minor): "the CLI cannot race a request" was stated, not tested | correct, no test ran the CLI against a concurrent writer | `test_it_cannot_race_a_request`: a request's `admin_preserving_write` has demoted alice and not committed; the CLI, in a thread, demotes bob; the test asserts the CLI is still waiting after 0.5 s, then commits; the CLI must exit 1 and bob stays the only admin | **red on the `c7132f6` CLI: `assert 0 == 1`** (it demoted bob, zero admins); green on `7c0b434` already — the control was right, only the proof was missing |
+
+No public surface, rule, budget or waiver changed in this round. The CLI's exit-code contract is narrowed to
+what `docs/task-interface.md` already promised (3 = tooling), so a caller relying on it gains, none loses.
 
 `./run impact` lists `mcp_tools: ['set_user_role']` against `PUT /users/{target}/role`; that is the
 index's name-derived guess, not the surface: `ops/surfaces/mcp-tools.json` has no `set_user_role`, the

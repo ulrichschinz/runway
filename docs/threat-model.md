@@ -74,8 +74,9 @@ API; and the last-admin guard answers `409` rather than removing the final admin
 `BEGIN IMMEDIATE` transaction with the admin count checked **after** the write, so two concurrent
 demotions cannot both pass it (REV-002, closed by
 [brief 0068](briefs/0068-the-last-admin-survives-concurrent-writes.md)); the role route, account
-deletion and `./run grant-admin --role user` all run through it, and a parallel two-connection test
-with a barrier (`backend/tests/unit/test_last_admin_concurrency.py`) runs on every gate. It holds for
+deletion and `./run grant-admin --role user` all run through it (the CLI with its own `BEGIN IMMEDIATE`
+on its own connection), and parallel tests — two connections with a barrier, and the CLI against a request's
+guard held open mid-write (`backend/tests/unit/test_last_admin_concurrency.py`) — run on every gate. It holds for
 every writer of the same `users.db` on one host; it relies on SQLite file locking, so a database on a
 filesystem without working locks would void it (not a supported deployment).
 

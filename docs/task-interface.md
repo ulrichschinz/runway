@@ -180,7 +180,8 @@ admin: that is refused with exit `1`, in one `BEGIN IMMEDIATE` transaction with 
 
 `--db` has no default on purpose: this writes to a live database, so the path should be a deliberate
 keystroke. It does not create accounts — register first. Exits `2` when the account does not exist and `3`
-when the database cannot be opened; `1` when the change would remove the last admin. See [`docs/security.md`](security.md).
+when the database cannot be opened or the change fails in it (a write lock held past the 5 s busy timeout,
+a file without a `users` table), with nothing changed; `1` only when the change would remove the last admin. See [`docs/security.md`](security.md).
 
 ### `make surfaces`
 Reports drift in the protected public surfaces, and with `--update` rewrites the snapshots in `ops/surfaces/`.
