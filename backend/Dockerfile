@@ -104,6 +104,8 @@ RUN printf '%s\n' "$RUNWAY_COMMIT" > /app/BUILD_COMMIT
 # believe from TRUSTED_PROXIES alone (brief 0069); two trust decisions would disagree.
 #
 # One worker, deliberately: the login limiter's state is this process's memory (RISK-SEC-003).
-# A --workers flag here multiplies every login budget; test_login_budget.py fails if one appears.
+# Pinned explicitly, because uvicorn otherwise takes the count from $WEB_CONCURRENCY, and an
+# explicit flag wins over the variable. test_login_budget.py fails if the pin changes, or if this
+# file sets WEB_CONCURRENCY, an ENTRYPOINT or a gunicorn wrapper.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--log-config", "log_config.json", "--no-proxy-headers"]
+     "--log-config", "log_config.json", "--no-proxy-headers", "--workers", "1"]

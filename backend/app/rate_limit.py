@@ -19,8 +19,15 @@ cancelled request — as a failure. A refused attempt costs no lookup and no KDF
   trade is unchanged since SEC-8 and stated in docs/security.md. A success clears this tier only.
 - *source* — the network address `source_of` decides: the socket peer, or, behind a proxy listed
   in `TRUSTED_PROXIES`, the right-most hop of `X-Forwarded-For` that is not a trusted proxy.
-  Stops a password spray across many names from one place. IPv6 is grouped by /64.
-- *global* — one key: the emergency brake on total KDF work, against a spray from everywhere.
+  Stops a password spray across many names from one place. IPv6 is grouped by /64. With
+  `TRUSTED_PROXIES` empty, a proxy-shaped peer (loopback, RFC 1918, link-local, IPv6 ULA) gets
+  no source key at all: it is almost certainly a proxy nobody declared, and counting it would
+  put every client behind it into one budget any one of them could exhaust (review R2).
+- *global* — one key: the emergency brake on the KDF work failed verifications cause, sized
+  from the measured cost of one (docs/security.md), against a spray from everywhere.
+
+Every password verification goes through `reserve` — `POST /auth/login` and the current-password
+check of `PUT /auth/password`, whatever credential authenticated the latter (review R1).
 
 **Bounded.** Every key's failures expire after the window, a full sweep runs on a clock rather
 than only when the same name comes back, and the account and source tiers hold at most
@@ -37,8 +44,11 @@ refused. A source report never carries the address (ADR 0026: no caller fingerpr
 **In-process and per-worker on purpose** (`RISK-SEC-003`). It resets on restart and does not
 coordinate across processes — the correct amount of machinery for one host and one worker (F1),
 and the wrong amount for anything larger: a second worker multiplies every budget by the process
-count. `tests/unit/test_login_budget.py::TestTheSingleWorkerAssumption` fails when the image or a
-compose file starts a second worker; a shared limiter is then a precondition, not a follow-up.
+count. `tests/unit/test_login_budget.py` (`TestTheSingleWorkerAssumption`,
+`TestTheSingleWorkerPinIsWholeFile`) fails when the Dockerfile's CMD stops pinning `--workers 1`,
+the Dockerfile sets `WEB_CONCURRENCY` or an `ENTRYPOINT` or uses gunicorn, or a compose file sets
+`WEB_CONCURRENCY`, `replicas`, `scale` or `--workers`; a shared limiter is then a precondition,
+not a follow-up. It reads files; it does not watch a running host.
 """
 
 from __future__ import annotations
@@ -132,7 +142,7 @@ class Reservation:
     """One login attempt's slot in every tier. Close it exactly once; a second close is a
     no-op. Used as a context manager, leaving the block without closing it is a failure."""
 
-    def __init__(self, keys: dict[str, object]) -> None:
+    def __init__(self, keys: dict[str, object]) -> None:  # a tier left out is not counted
         self._keys = keys
         self._open = True
 
@@ -236,18 +246,19 @@ def account_key(username: str) -> bytes:
     return hashlib.blake2b(canonical.encode("utf-8", "surrogatepass"), digest_size=16).digest()
 
 
-def reserve(username: str, source: str) -> Decision:
-    """Take one slot in every tier, or refuse without taking any. Never blocks on I/O."""
+def reserve(username: str, source: str | None) -> Decision:
+    """Take one slot in every tier, or refuse without taking any. Never blocks on I/O.
+
+    `source` None means no source tier for this attempt (`source_of` found no address worth
+    counting); the account and global tiers apply regardless."""
     global _swept
     with _lock:
         now = _now()
         window = settings.login_rate_window_seconds
         max_keys = settings.login_rate_max_keys
-        keys: dict[str, object] = {
-            ACCOUNT: account_key(username),
-            SOURCE: source,
-            GLOBAL: _GLOBAL_KEY,
-        }
+        keys: dict[str, object] = {ACCOUNT: account_key(username), GLOBAL: _GLOBAL_KEY}
+        if source is not None:
+            keys[SOURCE] = source
         if now - _last_sweep >= min(window, _SWEEP_EVERY) or any(
             len(_store[t]) >= max_keys for t in (ACCOUNT, SOURCE)
         ):
@@ -256,6 +267,8 @@ def reserve(username: str, source: str) -> Decision:
         refusal: tuple[str, int, Report | None] | None = None
         # Global first: when everything is refused, the report that matters is the brake.
         for tier in (GLOBAL, SOURCE, ACCOUNT):
+            if tier not in keys:
+                continue
             bucket = _store[tier].get(keys[tier])
             if bucket is None:
                 if tier != GLOBAL and len(_store[tier]) >= max_keys:
@@ -278,7 +291,7 @@ def reserve(username: str, source: str) -> Decision:
                 reports.append(report)
             return Decision(None, tier, retry, tuple(reports))
 
-        for tier in TIERS:
+        for tier in keys:
             bucket = _store[tier].get(keys[tier])
             if bucket is None:
                 bucket = _store[tier][keys[tier]] = _Bucket()
@@ -355,26 +368,55 @@ def _key_of(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str:
     return str(address)
 
 
+# The addresses a reverse proxy on this host or its container network has. Without
+# TRUSTED_PROXIES such a peer is counted as no source rather than as one source for everybody.
+_PROXY_SHAPED: tuple[Network, ...] = tuple(
+    ipaddress.ip_network(n)
+    for n in (
+        "127.0.0.0/8",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    )
+)
+
+
+def proxy_shaped(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Whether an address is one a local reverse proxy would connect from."""
+    return _is_trusted(address, _PROXY_SHAPED)
+
+
 def _is_trusted(
     address: ipaddress.IPv4Address | ipaddress.IPv6Address, trusted: Iterable[Network]
 ) -> bool:
     return any(address.version == net.version and address in net for net in trusted)
 
 
-def source_of(peer: str | None, forwarded_for: Sequence[str], trusted: Sequence[Network]) -> str:
-    """The source tier's key for one request.
+def source_of(
+    peer: str | None, forwarded_for: Sequence[str], trusted: Sequence[Network]
+) -> str | None:
+    """The source tier's key for one request, or None for no source tier.
 
     The socket peer, unless the peer is a trusted proxy: then `X-Forwarded-For` is read from the
     right, past every trusted hop, to the first address that is not one. What lies to the left of
     that address was written by the client and is never read. Every `X-Forwarded-For` line is one
     chain, in order.
+
+    With no trusted proxy configured, a proxy-shaped peer yields None: it is a proxy nobody has
+    declared, and its address would make every client behind it one budget (review R2).
     """
     if peer is None:
         return UNKNOWN_SOURCE
     current = _address(peer)
     if current is None:
         return UNPARSEABLE_SOURCE
-    if not trusted or not _is_trusted(current, trusted):
+    if not trusted:
+        return None if proxy_shaped(current) else _key_of(current)
+    if not _is_trusted(current, trusted):
         return _key_of(current)
     hops = [hop for line in forwarded_for for hop in line.split(",") if hop.strip()]
     for hop in reversed(hops):

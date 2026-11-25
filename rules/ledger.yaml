@@ -1171,15 +1171,22 @@ residual_risks:
       budget is reserved before the account lookup and the KDF, in three tiers (normalised
       username, network source behind TRUSTED_PROXIES, global), in a store bounded by TTL, a
       clock-driven sweep and a hard key cap — that part of the risk (REV-003) is closed and
-      tested. What remains is the process boundary, and the lockout trade it was always paired
-      with: someone who knows a username can deny it password login for the window, and a spray
-      can deny every account password login for one window. API keys are not throttled, so
-      agents, MCP clients and the webhook keep working through a lockout — and a lockout does
-      nothing against a stolen key. The trigger is executable:
-      backend/tests/unit/test_login_budget.py::TestTheSingleWorkerAssumption fails when the
-      image or a compose file starts a second worker.
+      tested, for the login and for the current-password check of PUT /auth/password. What
+      remains is the process boundary, and the lockout trade it was always paired with, which
+      lasts as long as the attack (a spray is repeated every window): someone who knows a
+      username can deny it password login (10 failures per 5 minutes), and 300 failures per 5
+      minutes from anywhere (10 IPv4 sources, or one IPv6 /60) deny every account password
+      login. Until the operator sets TRUSTED_PROXIES the source tier is off behind nginx (a
+      proxy-shaped peer is not counted), so a spray is bounded by the global brake alone.
+      Requests with an API key are not throttled, so agents, MCP clients and the webhook keep
+      working through a lockout — and a lockout does nothing against what a stolen key can do,
+      except guess the password. The trigger is executable but reads files only:
+      backend/tests/unit/test_login_budget.py (TestTheSingleWorkerAssumption,
+      TestTheSingleWorkerPinIsWholeFile) fails when the Dockerfile's CMD stops pinning
+      --workers 1, the Dockerfile sets WEB_CONCURRENCY, an ENTRYPOINT or gunicorn, or a compose
+      file sets WEB_CONCURRENCY, replicas, scale or --workers.
     owner: maintainer
-    re_open_trigger: "a second worker or host is introduced (TestTheSingleWorkerAssumption goes red), or an account lockout is used against a real user"
+    re_open_trigger: "a second worker or host is introduced (TestTheSingleWorkerAssumption or TestTheSingleWorkerPinIsWholeFile goes red), an account or global lockout is used against a real user, or the deploy runs with TRUSTED_PROXIES unset for longer than the rollout"
     decision_record: docs/security.md
 
   - id: RISK-SEC-001

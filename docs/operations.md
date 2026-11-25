@@ -803,9 +803,12 @@ sqlite3 -header -column data/audit.db "
 Rows written before brief 0069 have the old detail `locked out, retry in Ns` and no count: one row per refusal.
 
 **`TRUSTED_PROXIES` in production** — not set by this repository, because which addresses Traefik and nginx
-have on `traefik-public` is a fact of the host. Until it is set, every login counts against nginx's address,
-so all clients share one source budget (30 per five minutes): safe, and a spray from one address locks every
-account out of password login for the window. To set it:
+have on `traefik-public` is a fact of the host. **Set it on the host before the deploy that ships brief
+0069**, not after. Until it is set, nginx's address is a private one nobody declared, so it is not counted as
+a source at all: the source tier is off, the boot logs a `WARNING` (`TRUSTED_PROXIES is not set`), and a
+spray is bounded only by the account budget per name and the global brake (300 failures per five minutes,
+after which every account's password login is refused for as long as the spray continues). Counting nginx's
+address instead would have let any one client lock every account out with 30 wrong logins. To set it:
 
 1. On the host, list the network's members: `sudo docker network inspect traefik-public --format
    '{{range .Containers}}{{.Name}} {{.IPv4Address}}{{"\n"}}{{end}}'`. Note the Traefik container's address
@@ -829,9 +832,17 @@ listed, but a listed address is believed. Rolling back to an image before brief 
 `auth_version` bump in *Ending sessions*) ends JWT sessions, and `POST /auth/apikey/regenerate` replaces the
 API key. The login budget protects neither once the attacker holds one.
 
+**The budgets' other variables.** `LOGIN_RATE_LIMIT`, `LOGIN_RATE_WINDOW_SECONDS`, `LOGIN_SOURCE_RATE_LIMIT`,
+`LOGIN_GLOBAL_RATE_LIMIT` and `LOGIN_RATE_MAX_KEYS` are passed through by both compose files with the
+README defaults, so a value in `/opt/services/runway/.env` takes effect on `docker compose up -d backend`.
+During a sustained global lockout, raising `LOGIN_GLOBAL_RATE_LIMIT` buys real users room at the price of
+more guesses; an API key and `make grant-admin` on the host keep working throughout.
+
 **The re-open trigger (`RISK-SEC-003`).** The budgets hold only while one backend process serves every login.
-`backend/tests/unit/test_login_budget.py::TestTheSingleWorkerAssumption` fails if the image's CMD gains
-`--workers` or either compose file sets `WEB_CONCURRENCY`, `replicas` or `scale`. If that test goes red, do
+`backend/tests/unit/test_login_budget.py` (`TestTheSingleWorkerAssumption`, `TestTheSingleWorkerPinIsWholeFile`)
+fails if the Dockerfile's CMD stops pinning `--workers 1`, the Dockerfile sets `WEB_CONCURRENCY`, an
+`ENTRYPOINT` or gunicorn, or either compose file sets `WEB_CONCURRENCY`, `replicas`, `scale` or `--workers`.
+It reads the files; a host that starts the image some other way is outside what it can see. If that test goes red, do
 not adjust it: a limiter shared by every worker — Traefik's rate-limit middleware at the edge, or a counter in
 a store all workers use — has to exist first.
 

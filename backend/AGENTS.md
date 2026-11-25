@@ -59,4 +59,6 @@ Coverage floor is a ratchet, not a target — raise it, never lower it to fit a 
   `tests/conftest.py` resets it around every test. Every TestClient request comes from the same
   source (`testclient`), so a test that sends more than `LOGIN_SOURCE_RATE_LIMIT` (30) failed
   logins meets the source tier, not the account one — raise it in the test when that is not the
-  point (brief 0069).
+  point (brief 0069). A wrong `current_password` in `PUT /auth/password` spends the same budget.
+  An `httpx.ASGITransport` peer of `127.0.0.1` or a private address with `TRUSTED_PROXIES` empty
+  has no source tier at all; use a documentation address (`203.0.113.x`) to exercise it.

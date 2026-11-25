@@ -52,6 +52,14 @@ async def lifespan(app: FastAPI):
             "TRUSTED_PROXIES entries ignored: not an address or network, or prefix length 0",
             extra={"ignored_entries": rejected},
         )
+    if not rate_limit.trusted_networks(settings.trusted_proxies):
+        # Brief 0069, R2: behind an undeclared proxy every login arrives from the proxy's
+        # address. Such a peer is not counted as a source, so the source tier is off for it
+        # and only the account and global budgets apply until TRUSTED_PROXIES is set.
+        logger.warning(
+            "TRUSTED_PROXIES is not set: the login source budget does not apply to "
+            "loopback or private peers (a proxy); see docs/operations.md, The login budget"
+        )
     logger.info(
         "startup complete",
         # The storage mode as the resolver will apply it, so an operator can see the switch

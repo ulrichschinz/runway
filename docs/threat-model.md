@@ -509,8 +509,9 @@ Eight, each with what actually stops it and what does not.
 
 **Stopped by** a login budget **reserved before the account lookup and the KDF**, atomically, in
 three tiers (brief 0069, findings SEC-8 and REV-003): per normalised username (ten per five minutes by
-default), per network source (30), and in total (100) — `rate_limit.reserve`, called first thing in
-`routers/auth.py::login`. A tier is full when its failures *plus the attempts still in flight* reach
+default), per network source (30), and in total (300) — `rate_limit.reserve`, called first thing in
+`routers/auth.py::login` and before the current-password check of `change_password`, so an API key
+cannot guess the password either. A tier is full when its failures *plus the attempts still in flight* reach
 its budget, so a parallel burst cannot all pass a check that counts only finished failures, and a
 refused attempt costs no lookup and no KDF work (`test_login_budget.py::TestAParallelBurst`: 40
 parallel requests for one account, 10 reach the password check, 30 are 429). A spray across many
@@ -529,16 +530,20 @@ same and answer the same 401 (`test_password_kdf.py::TestUniformWork`). That is 
 constant-time guarantee: the event loop, the database lookup and the rehash on a *successful* login
 still differ, and nothing measures response times.
 
-**Not stopped:** someone who knows a username can deny it password login for the window, and a spray
-from one source or from everywhere can deny every account password login for one window — the
-emergency brake working as designed, at no KDF cost. API keys are not throttled, so agents keep
-working through any lockout, and for the same reason the limiter does nothing against a stolen API
-key. The source tier is only as precise as `TRUSTED_PROXIES`: empty (the default) counts every
-client behind a proxy as one source; listing a whole network trusts every peer on it to write
-`X-Forwarded-For`. Which addresses Traefik and nginx have in production is not visible from this
+**Not stopped:** someone who knows a username can deny it password login, and anyone who sends 300
+failures per five minutes (one a second, from ten addresses or one IPv6 /60) can deny every account
+password login — and either lasts **as long as the attack**, because the spray can be repeated every
+window. That is the emergency brake working as designed, at no KDF cost; the throttled rows count it.
+API-key requests are not throttled, so agents keep working through any lockout, and for the same
+reason the limiter does nothing against what a stolen key can do — except guess the password, which
+goes through the budget. The source tier is only as precise as `TRUSTED_PROXIES`: empty (the default)
+counts a public peer as itself and a proxy-shaped one (loopback, private) not at all, so behind an
+undeclared proxy only the account and global tiers apply; listing a whole network trusts every peer
+on it to write `X-Forwarded-For`. Which addresses Traefik and nginx have in production is not visible from this
 repository (`RISK-OPS-002`). The counters are in-process and per-worker, so they are the whole
-population only under one host and one worker (decision **F1**); a test fails if the image or a
-compose file starts a second worker. `RISK-SEC-003`.
+population only under one host and one worker (decision **F1**); a test fails if the Dockerfile
+stops pinning `--workers 1` or sets `WEB_CONCURRENCY`, an `ENTRYPOINT` or gunicorn, or a compose file
+scales the backend — it reads the files, not the running host. `RISK-SEC-003`.
 
 ### A stolen session token
 

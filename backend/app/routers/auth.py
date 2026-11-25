@@ -152,9 +152,9 @@ def _report_refusals(reports, route: str | None) -> None:
         )
 
 
-def _source(request: Request) -> str:
+def _source(request: Request) -> str | None:
     """The network source the limiter counts: the socket peer, or behind a proxy listed in
-    TRUSTED_PROXIES the client address it forwarded (rate_limit.source_of)."""
+    TRUSTED_PROXIES the client address it forwarded; None for no source tier (rate_limit.source_of)."""
     return rate_limit.source_of(
         request.client.host if request.client else None,
         request.headers.getlist("x-forwarded-for"),
@@ -300,20 +300,41 @@ async def change_password(
     route = audit.route_of(request)
     phase = await _phase(db)
     _refuse_new_password(phase, body.new_password, "new_password")
-    async with db.execute("SELECT hashed_password FROM users WHERE username=?", (username,)) as cur:
-        row = await cur.fetchone()
-    check = (
-        check_password(body.current_password, row["hashed_password"], phase=phase) if row else None
-    )
-    if row is None or check is None or not check.ok:
-        audit.record(
-            audit.PASSWORD_CHANGED,
-            outcome=audit.FAILURE,
-            actor=username,
-            route=route,
-            detail="the current password did not verify",
+    # The current password is a password verification like a login's, and this route accepts an
+    # API key: outside the budget it was an unlimited password oracle for a stolen key, also
+    # while the account's login was locked (brief 0069, R1). Same budget, same tiers, same
+    # aggregated refusal rows; reserved before the lookup and the KDF.
+    decision = rate_limit.reserve(username, _source(request))
+    _report_refusals(decision.reports, route)
+    if decision.reservation is None:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed password attempts. Try again later.",
+            headers={"Retry-After": str(decision.retry_after)},
         )
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    with decision.reservation as attempt:
+        async with db.execute(
+            "SELECT hashed_password FROM users WHERE username=?", (username,)
+        ) as cur:
+            row = await cur.fetchone()
+        check = (
+            check_password(body.current_password, row["hashed_password"], phase=phase)
+            if row
+            else None
+        )
+        if row is None or check is None or not check.ok:
+            attempt.fail()
+            # One row per failure inside the budget: at most LOGIN_RATE_LIMIT per account and
+            # window, LOGIN_GLOBAL_RATE_LIMIT in total.
+            audit.record(
+                audit.PASSWORD_CHANGED,
+                outcome=audit.FAILURE,
+                actor=username,
+                route=route,
+                detail="the current password did not verify",
+            )
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+        attempt.succeed()
     if check.change_required and keeps_the_ambiguous_prefix(
         body.current_password, body.new_password
     ):

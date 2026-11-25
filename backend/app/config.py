@@ -22,11 +22,14 @@ class Settings(BaseSettings):
     cors_origins: str = ""
     # The login budget (SEC-8, REV-003, brief 0069): failed or in-flight attempts allowed per
     # window before /auth/login answers 429 — per normalised username, per network source, and
-    # in total. A success clears the username's count only.
+    # in total. A success clears the username's count only. Covers every password verification:
+    # the login and the current-password check of PUT /auth/password.
     login_rate_limit: int = 10
     login_rate_window_seconds: int = 300
     login_source_rate_limit: int = 30
-    login_global_rate_limit: int = 100
+    # Sized from the KDF, not from the account budget: one failed verification measured 0.26 s
+    # of event-loop time, so 300 per 300 s window is about a quarter of it (brief 0069, R2).
+    login_global_rate_limit: int = 300
     # The most usernames, and separately the most sources, the limiter holds at once. A new one
     # beyond that is refused (429), never made room for by forgetting an old one.
     login_rate_max_keys: int = 10000

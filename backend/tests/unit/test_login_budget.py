@@ -537,7 +537,8 @@ class TestTheSingleWorkerAssumption:
     def test_the_image_runs_one_worker_and_trusts_no_proxy_header_itself(self):
         dockerfile = (REPO / "backend" / "Dockerfile").read_text()
         cmd = dockerfile[dockerfile.index("CMD [") :]
-        assert "--workers" not in cmd
+        # Pinned to one, not merely absent: absent lets $WEB_CONCURRENCY decide (review R3).
+        assert '"--workers", "1"' in cmd and cmd.count("--workers") == 1
         assert '"--no-proxy-headers"' in cmd
 
     @pytest.mark.parametrize("compose", ["ops/deploy/docker-compose.yml", "docker-compose.yml"])
@@ -553,3 +554,173 @@ class TestTheSingleWorkerAssumption:
     def test_nginx_appends_to_x_forwarded_for(self):
         nginx = (REPO / "frontend" / "nginx.conf").read_text()
         assert nginx.count("proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;") == 2
+
+
+# --- review round (brief 0069, R1–R4) ---------------------------------------------------------
+
+
+class TestThePasswordChangeIsBudgeted:
+    """R1: `PUT /auth/password` verifies the current password with the full KDF and accepts an
+    API key. Outside the budget, a stolen key was an unlimited password oracle — also while the
+    account's login was locked."""
+
+    def _change(self, client, registered, current: str):
+        return client.put(
+            "/auth/password",
+            headers={"X-Api-Key": registered["api_key"]},
+            json={"current_password": current, "new_password": "a brand new passphrase"},
+        )
+
+    def test_guesses_through_an_api_key_are_bounded(self, client, registered, kdf_calls):
+        statuses = [self._change(client, registered, WRONG).status_code for _ in range(30)]
+        assert statuses.count(400) == settings.login_rate_limit, statuses
+        assert set(statuses[settings.login_rate_limit :]) == {429}
+        assert len(kdf_calls) == settings.login_rate_limit
+        failed = [r for r in _audit_rows(audit.PASSWORD_CHANGED) if r["outcome"] == audit.FAILURE]
+        assert len(failed) == settings.login_rate_limit
+
+    def test_a_locked_login_also_locks_the_password_check(self, client, registered, kdf_calls):
+        for _ in range(settings.login_rate_limit):
+            client.post("/auth/login", json={"username": registered["username"], "password": WRONG})
+        before = len(kdf_calls)
+        r = self._change(client, registered, registered["password"])
+        assert r.status_code == 429 and "Retry-After" in r.headers
+        assert len(kdf_calls) == before, "a refused password check must cost no KDF work"
+        # And the password was not changed behind the lockout.
+        rate_limit.reset_all()
+        right = {"username": registered["username"], "password": registered["password"]}
+        assert client.post("/auth/login", json=right).status_code == 200
+
+    def test_the_right_current_password_still_changes_it(self, client, registered):
+        for _ in range(3):
+            self._change(client, registered, WRONG)
+        r = self._change(client, registered, registered["password"])
+        assert r.status_code == 200, r.text
+
+
+class TestAnUndeclaredProxyIsNotOneSourceForEveryone:
+    """R2: with TRUSTED_PROXIES empty, every login behind nginx arrives from nginx's address.
+    Counting that address as one source made 30 wrong logins from anybody a lockout of every
+    account."""
+
+    NGINX = "172.18.0.7"
+
+    def test_a_spray_through_the_proxy_does_not_lock_out_a_bystander(
+        self, client, registered, monkeypatch: pytest.MonkeyPatch
+    ):
+        from app.main import app
+
+        monkeypatch.setattr(settings, "trusted_proxies", "")
+        for i in range(settings.login_source_rate_limit + 5):
+            _post(app, {"username": f"x{i}", "password": WRONG}, peer=self.NGINX)
+        right = {"username": registered["username"], "password": registered["password"]}
+        assert _post(app, right, peer=self.NGINX).status_code == 200
+
+    def test_the_global_brake_still_holds_through_the_proxy(
+        self, client, monkeypatch: pytest.MonkeyPatch, kdf_calls
+    ):
+        from app.main import app
+
+        monkeypatch.setattr(settings, "trusted_proxies", "")
+        monkeypatch.setattr(settings, "login_global_rate_limit", 12)
+        statuses = [
+            _post(app, {"username": f"y{i}", "password": WRONG}, peer=self.NGINX).status_code
+            for i in range(20)
+        ]
+        assert statuses.count(401) == 12 and set(statuses[12:]) == {429}
+        assert len(kdf_calls) == 12
+
+    def test_four_full_sources_do_not_trip_the_global_brake(
+        self, client, registered, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The global brake is sized from the KDF, not a few times the account budget: four
+        addresses spending their whole source budget is not yet everyone's lockout."""
+        from app.main import app
+
+        for s in range(4):
+            for i in range(settings.login_source_rate_limit):
+                _post(app, {"username": f"z{s}-{i}", "password": WRONG}, peer=f"198.51.100.{s}")
+        right = {"username": registered["username"], "password": registered["password"]}
+        assert _post(app, right, peer="203.0.113.200").status_code == 200
+
+    @pytest.mark.parametrize(
+        "peer", ["127.0.0.1", "10.1.2.3", "172.18.0.7", "192.168.1.5", "::1", "fd00::5"]
+    )
+    def test_a_proxy_shaped_peer_without_trust_has_no_source_key(self, peer):
+        assert rate_limit.source_of(peer, ["192.0.2.1"], ()) is None
+
+    def test_a_public_peer_without_trust_is_still_counted(self):
+        assert rate_limit.source_of("203.0.113.5", [], ()) == "203.0.113.5"
+
+    def test_once_proxies_are_declared_a_private_peer_is_counted(self):
+        trusted = rate_limit.trusted_networks("172.18.0.7")
+        assert rate_limit.source_of("172.18.0.9", [], trusted) == "172.18.0.9"
+
+
+class TestTheSingleWorkerPinIsWholeFile:
+    """R3: uvicorn takes its worker count from WEB_CONCURRENCY too, and an ENTRYPOINT or a
+    gunicorn wrapper would replace the CMD. The trigger reads the whole Dockerfile."""
+
+    def test_the_cmd_pins_one_worker(self):
+        dockerfile = (REPO / "backend" / "Dockerfile").read_text()
+        cmd = dockerfile[dockerfile.index("CMD [") :]
+        assert '"--workers", "1"' in cmd
+        assert cmd.count("--workers") == 1
+
+    def test_nothing_else_in_the_dockerfile_can_start_more_workers(self):
+        lines = [
+            line.strip()
+            for line in (REPO / "backend" / "Dockerfile").read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        text = "\n".join(lines)
+        assert "WEB_CONCURRENCY" not in text
+        assert "gunicorn" not in text
+        assert not any(line.startswith("ENTRYPOINT") for line in lines)
+        assert sum(line.startswith("CMD") for line in lines) == 1
+
+
+LOGIN_VARS = {
+    "LOGIN_RATE_LIMIT": "login_rate_limit",
+    "LOGIN_RATE_WINDOW_SECONDS": "login_rate_window_seconds",
+    "LOGIN_SOURCE_RATE_LIMIT": "login_source_rate_limit",
+    "LOGIN_GLOBAL_RATE_LIMIT": "login_global_rate_limit",
+    "LOGIN_RATE_MAX_KEYS": "login_rate_max_keys",
+}
+
+
+@pytest.mark.parametrize("compose", ["ops/deploy/docker-compose.yml", "docker-compose.yml"])
+@pytest.mark.parametrize("var", sorted(LOGIN_VARS))
+def test_every_login_budget_variable_reaches_the_container(compose, var):
+    """R4: both compose files list `environment:` explicitly and have no env_file, so a variable
+    not listed there does nothing when set in the host .env. Each line's default must be the
+    Settings default: an empty value would not parse as an int and the backend would not boot."""
+    from app.config import Settings
+
+    text = (REPO / compose).read_text()
+    default = Settings.model_fields[LOGIN_VARS[var]].default
+    assert f"- {var}=${{{var}:-{default}}}" in text, f"{compose} does not pass {var}"
+
+
+@pytest.mark.parametrize(("configured", "warned"), [("", True), ("172.18.0.0/16", False)])
+def test_the_boot_says_when_the_source_tier_is_off_behind_a_proxy(
+    isolated_storage, monkeypatch: pytest.MonkeyPatch, configured, warned
+):
+    """R2: with TRUSTED_PROXIES empty, nginx's address is not counted as a source. The operator
+    must be able to see that the source tier is off, not infer it from the docs."""
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    seen: list[str] = []
+    real_warning = main.logger.warning
+
+    def capture(message, *args, **kwargs):
+        seen.append(message)
+        return real_warning(message, *args, **kwargs)
+
+    monkeypatch.setattr(settings, "trusted_proxies", configured)
+    monkeypatch.setattr(main.logger, "warning", capture)
+    with TestClient(main.app):
+        pass
+    assert any(m.startswith("TRUSTED_PROXIES is not set") for m in seen) is warned
