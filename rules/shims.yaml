@@ -150,3 +150,30 @@ shims:
     expires: 2027-04-30
     re_open_trigger: "the expiry passes, a rollback to an image before brief 0067 happens after its soak, or the bcrypt pin blocks a fix"
     decision_record: docs/adr/0044-credential-lifecycle-jwt-password-and-api-key.md
+
+  - id: SHIM-SEC-010
+    what: >
+      `Settings.jwt_algorithm` (JWT_ALGORITHM) is still read, by `startup_checks.assert_jwt_algorithm_is_fixed`
+      only, which refuses to start on any value but "HS256". Tokens are signed and verified with
+      `config.JWT_SIGNING_ALGORITHM` and never with the setting (backend/app/config.py, auth.py).
+    why: >
+      README documented JWT_ALGORITHM=HS256 as a setting, so a .env may still carry it. pydantic-settings
+      refuses an unknown key in a dotenv file, so deleting the field in the same change would make every
+      such checkout fail at import with a validation error instead of starting (finding SEC-002, brief
+      0072). The shipped compose files do not pass it, and docs/operations.md records that the host .env
+      declares JWT_SECRET only, so production is not expected to depend on it.
+    removal: >
+      The contract step of brief 0072, its own change: delete the field, its README line and
+      `assert_jwt_algorithm_is_fixed`, after README has said for one release that the variable goes, and
+      after the operator has confirmed the host .env does not set it.
+    evidence: >
+      `grep -c '^JWT_ALGORITHM=' .env` beside the host's compose file is 0 — a check on the host, not
+      something this repository can see. Locally, `make bootstrap` writes a .env without it.
+    owner: maintainer
+    # Written by the implementing agent on the owner's order of 2026-11-24 to carry out M7.1;
+    # the owner has not yet reviewed this entry itself (RISK-GOV-001: no independent review).
+    # Explicit owner sign-off before merge is a deferred step of brief 0072.
+    approved_on: 2026-11-25
+    expires: 2027-05-31
+    re_open_trigger: "the expiry passes, or a deployment is found that sets JWT_ALGORITHM to anything"
+    decision_record: docs/adr/0046-the-jwt-library-and-the-signing-key.md

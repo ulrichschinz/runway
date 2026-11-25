@@ -808,6 +808,39 @@ account. A revoked key stays revoked (trigger `api_keys_revocation_is_final`). W
 `last_used_at` (to the minute); `auth.apikey.created` and `auth.apikey.revoked` in the audit log name the
 public key id, never the key.
 
+## The signing key: `JWT_SECRET`
+
+Tokens are HS256, always (ADR 0046); the key is `JWT_SECRET` from the host `.env`, and nothing in this
+repository ever holds a real one. **Generate it, never type it:**
+
+```sh
+openssl rand -base64 48
+```
+
+The backend refuses to start (finding SEC-002, brief 0072) on an empty value, fewer than 32 characters,
+any value published in this repository or one that reads like a placeholder, a public key in any form,
+one short unit repeated, or an estimated entropy under 80 bits — and on `JWT_ALGORITHM` set to anything
+but `HS256`. The refusal names the reason and never the value.
+
+**Before deploying an image with new startup checks** (brief 0072 is one), run them against the host's
+`.env` with that image, so a refusal is found before the deploy rather than by it. It prints `ok` or the
+reason, never the secret, and touches no data:
+
+```sh
+docker run --rm --env-file /opt/stack/.env ghcr.io/ulrichschinz/runway-backend:<sha> \
+  python -m app.startup_checks
+```
+
+(`/opt/stack/.env` stands for the `.env` beside the deployed compose file.) If it refuses, rotate (below)
+before the deploy. While there, remove a `JWT_ALGORITHM` line if the `.env` has one: it chooses nothing any
+more and goes with `SHIM-SEC-010`.
+
+**Rotating it** ends every session of every account at once — every JWT was signed with the old key — and
+leaves API keys, and so agents and MCP clients, untouched. Replace the value in the host `.env` with a newly
+generated one and recreate the backend container. Ending sessions without rotating is cheaper and usually
+what you want (next section); rotate when the key itself may be known — a leaked `.env`, a backup of it, a
+log line that should not exist.
+
 ## Ending sessions
 
 Since brief 0066 (finding REV-001, ADR 0044) every JWT carries the account's `users.auth_version`, and

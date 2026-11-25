@@ -20,10 +20,10 @@ from typing import Any
 
 import aiosqlite
 import httpx
+import jwt
 import pytest
-from jose import jwt
 
-from app.config import settings
+from app.config import JWT_SIGNING_ALGORITHM, settings
 
 OPENAPI = Path(__file__).resolve().parents[3] / "ops" / "surfaces" / "openapi.json"
 NEW_PASSWORD = "a brand new passphrase"  # secret-scan: allow — a synthetic test value
@@ -78,7 +78,12 @@ def _db() -> sqlite3.Connection:
 def _forge(claims: dict[str, Any]) -> str:
     """A token signed with the server's real secret — what the previous image issued, or what a
     test needs to probe the decoder. Not a forgery in the attack sense: it needs the secret."""
-    return jwt.encode(claims, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(claims, settings.jwt_secret, algorithm=JWT_SIGNING_ALGORITHM)
+
+
+def _unverified_claims(token: str) -> dict[str, Any]:
+    """The payload without verifying it — what python-jose's `get_unverified_claims` returned."""
+    return jwt.decode(token, options={"verify_signature": False})
 
 
 def _exp(hours: float) -> int:
@@ -305,7 +310,7 @@ class TestClaims:
         from app.auth import create_access_token
 
         token = create_access_token("alice", auth_version=3)
-        claims = jwt.get_unverified_claims(token)
+        claims = _unverified_claims(token)
         assert claims["sub"] == "alice"
         assert claims["auth_version"] == 3
         assert isinstance(claims["iat"], int)
@@ -315,8 +320,8 @@ class TestClaims:
     def test_two_tokens_in_the_same_second_differ_by_jti(self):
         from app.auth import create_access_token
 
-        a = jwt.get_unverified_claims(create_access_token("alice", auth_version=1))
-        b = jwt.get_unverified_claims(create_access_token("alice", auth_version=1))
+        a = _unverified_claims(create_access_token("alice", auth_version=1))
+        b = _unverified_claims(create_access_token("alice", auth_version=1))
         assert a["jti"] != b["jti"]
 
     def test_login_issues_the_current_version(self, client, registered):
@@ -328,7 +333,7 @@ class TestClaims:
             "/auth/login",
             json={"username": registered["username"], "password": registered["password"]},
         ).json()["access_token"]
-        assert jwt.get_unverified_claims(token)["auth_version"] == 7
+        assert _unverified_claims(token)["auth_version"] == 7
         assert client.get("/auth/me", headers=_bearer(token)).status_code == 200
 
     @pytest.mark.parametrize(

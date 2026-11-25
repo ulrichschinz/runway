@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     # Still a working default so `import app.main` succeeds without an environment — but
     # startup now refuses it. See startup_checks.assert_jwt_secret_is_safe (finding SEC-1).
     jwt_secret: str = "changeme-please-set-in-env"  # noqa: S105  # a known default, rejected at boot
+    # Read only to refuse it (finding SEC-002, brief 0072, ADR 0046): tokens are signed and verified
+    # with JWT_SIGNING_ALGORITHM below, never with this. Anything but "HS256" refuses to start. Kept so
+    # a .env that still sets it keeps booting — pydantic-settings refuses an unknown dotenv key —
+    # until the contract step of SHIM-SEC-010 removes it.
     jwt_algorithm: str = "HS256"
     jwt_expire_hours: int = 24
     data_root: Path = Path("/app/data")
@@ -65,6 +69,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# The one algorithm a token of this server is signed and verified with (SEC-002, ADR 0046). A constant,
+# not a setting: the verifier's algorithm must not be a function of the deployment's environment.
+JWT_SIGNING_ALGORITHM = "HS256"
 
 
 def cors_origin_list() -> list[str]:

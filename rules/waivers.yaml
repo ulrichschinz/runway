@@ -238,11 +238,11 @@ justified_suppressions:
 
   - rule: "ruff S105 — hardcoded password assigned to jwt_secret"
     scope: >
-      backend/app/config.py, tools/surfaces.py
+      backend/app/config.py
     reason: >
-      In tools/surfaces.py the assignment is a throwaway value that lets startup_checks
-      allow the capture to boot; capturing a public surface must not depend on an operator's
-      environment. In config.py the default is kept so that `import app.main` succeeds with
+      (tools/surfaces.py left this scope on 2026-11-25, brief 0072: it now generates its throwaway
+      capture key per run, because startup_checks refuses every value published in this repository.)
+      In config.py the default is kept so that `import app.main` succeeds with
       no environment — the
       import check (RULE-DEP-001), the unit tier and any tooling that reads the app object
       would otherwise all need a secret provisioned first. It is inert: startup_checks

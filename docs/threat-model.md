@@ -243,13 +243,23 @@ no name for a caller to supply and therefore nothing to traverse. What they *dis
 Four kinds, and each is handled differently because each fails differently.
 
 **`JWT_SECRET`** — the only thing standing between an attacker and a forged token for any account.
-[`backend/app/startup_checks.py:36-61`](../backend/app/startup_checks.py) refuses to start on an
-empty secret, on any of the five published defaults this repository has ever shipped (lines 18-26),
-or on one shorter than 32 characters. The check runs from the lifespan at
-[`backend/app/main.py:28`](../backend/app/main.py), *before* the database and before anything binds.
-The working default at [`backend/app/config.py:9`](../backend/app/config.py) is retained so
-`import app.main` succeeds with no environment, and it is inert: a serving process cannot hold it.
-That was finding SEC-1.
+`assert_jwt_secret_is_safe` in [`backend/app/startup_checks.py`](../backend/app/startup_checks.py)
+refuses to start on an empty secret; on any value this repository has published — the defaults, the
+examples in `.env.example` and README, former test and fixture values — or one that reads like a
+placeholder; on a public key (PEM, OpenSSH, JWK, base64 DER), which as an HMAC key is known to everyone
+who holds it (the CVE-2024-33663/CVE-2026-85394 precondition); on one shorter than 32 characters; on one
+short unit repeated; and on an estimated entropy (length × empirical Shannon entropy) under 80 bits
+(finding SEC-002, brief 0072, ADR 0046). `assert_jwt_algorithm_is_fixed` refuses `JWT_ALGORITHM` set to
+anything but `HS256`; tokens are signed and verified with the code's constant, never the setting. The
+checks run from the lifespan in [`backend/app/main.py`](../backend/app/main.py), *before* the database and
+before anything binds. The working default in [`backend/app/config.py`](../backend/app/config.py) is
+retained so `import app.main` succeeds with no environment, and it is inert: a serving process cannot hold
+it. That was finding SEC-1. The test suite and the surface capture generate their key per run, so no
+bootable key is written anywhere in the repository — `test_jwt_hardening.py` scans for one.
+
+What no check can do is prove a value random: a long memorable phrase passes the entropy estimate. The
+origin check covers what a reader of this repository knows; the runbook generates the key
+([`docs/operations.md`](operations.md#the-signing-key-jwt_secret)).
 
 **Password hashes** — Argon2id through argon2-cffi since brief 0067 (finding SEC-006, ADR 0044
 Decision 5), at parameters measured against a 64 MiB / 250 ms budget
@@ -515,6 +525,10 @@ Everything that enters the running image is pinned by content, not by name.
   multipart body sent to a JSON route reaches no multipart parser — both are tests, so the first upload
   route fails them and has to bring its own size, file and parser regressions.
 - `RULE-DEP-003` — no credential committed.
+- **The JWT library is PyJWT 2.15.1** (brief 0072, ADR 0046), a direct pin. python-jose 3.5.0, whose CVEs
+  (CVE-2024-33663/CVE-2026-85394, CVE-2026-120459) have no fixed release, is gone, and with it `ecdsa`
+  (CVE-2024-23342, unfixed), `rsa`, `pyasn1` and `six`. `test_jwt_hardening.py` refuses a pin or an import
+  of it.
 - `RULE-TI-002` — the runtime versions in `tools/versions.env` match what the Dockerfiles build on.
 
 **Asserted**
