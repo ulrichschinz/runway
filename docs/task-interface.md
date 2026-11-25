@@ -137,7 +137,7 @@ the slice as a unit:
 | `backend/tests/unit/test_<name>.py` | the slice is covered — a new module with no tests moves total coverage toward the `RULE-TEST-003` floor |
 | `backend/tests/container/test_<name>.py` | the module is proven present in the shipped image |
 | a `be/feature/<name>` unit in `architecture.toml` | `RULE-ARCH-001` has an edge list to check it against — one that withholds `be/adapters/task` |
-| a line in `rules/route-guards.toml` | `RULE-SEC-001` passes; a route with no declared guard fails the gate |
+| a line in `rules/route-guards.toml` | `RULE-SEC-001` passes; a route the booted app serves with no declared guard fails the gate, wherever it is declared |
 | the REST route count in `AGENTS.md` | `RULE-DOC-001` checks the REST count against the index and the MCP count against `ops/surfaces/mcp-tools.json`; a new route moves the REST count, and the MCP count only if its tag is on the allowlist (ADR 0037) |
 
 **`KIND=frontend-feature`** emits a view, its pure logic module and a vitest file, registers an `fe/<name>`

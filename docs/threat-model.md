@@ -81,22 +81,21 @@ every writer of the same `users.db` on one host; it relies on SQLite file lockin
 filesystem without working locks would void it (not a supported deployment).
 
 **Enforced**
-- `RULE-SEC-001` — every route in [`backend/app/routers/`](../backend/app/routers) declares its guard
-  in [`rules/route-guards.toml`](../rules/route-guards.toml), the declaration must match the guard the
-  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-nine
-  routes: thirty `user`, four `admin`, five `open`.
+- `RULE-SEC-001` — every route the booted application serves declares its guard in
+  [`rules/route-guards.toml`](../rules/route-guards.toml), the declaration must match the guard the
+  route's resolved dependency tree enforces, and an `open` route must carry a reason. Fifty routes:
+  thirty-three `user`, four `admin`, thirteen `open` (brief 0073).
 - `RULE-GOV-001` — the live branch protection matches [`ops/github/ruleset.json`](../ops/github/ruleset.json),
   so the rule that an unverified commit cannot reach `main` is itself checked-in state.
 - `RULE-TEST-001` and `RULE-TEST-002` — the bootstrap branches, the last-admin refusal and the
   cross-tenant isolation tests run on every gate, the second against the real Taskwarrior binary.
 
 **Asserted**
-- **The route-guard rule does not see the whole surface.** `tools/checks/route_guards.py` globs
-  `backend/app/routers/*.py` only. The served schema has **40** operations
-  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 39: the
-  odd one is `GET /health` at [`backend/app/main.py:91-93`](../backend/app/main.py), declared on the
-  app object. Harmless in itself, and the proof that the next route added there would need no guard
-  declaration. `RISK-SEC-005`.
+- **The route-guard rule sees what the application object serves, not what is in front of it.** Since
+  brief 0073 the inventory is the booted app (`GET /health`, `/mcp` and the documentation routes
+  included). What it cannot see: a path nginx answers itself, and a handler that authenticates inside
+  its body instead of by dependency (classified `open`, so it must be declared with a reason).
+  `RISK-SEC-005`.
 - The `role` column is `TEXT` with no database constraint, so a value written outside the application
   is not rejected — closed rather than open, since an unrecognised value is not `admin`. `RISK-SEC-002`.
 - One maintainer means no independent review of a change to the rules themselves. `RISK-GOV-001`.

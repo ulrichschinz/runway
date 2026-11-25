@@ -360,6 +360,43 @@ p.write_text(t)
 NEWROUTE
 expect_red "SEC-001-new" "tools/checks/route-guards.sh" "RULE-SEC-001"
 
+# --- RULE-SEC-001 — a route arrives outside the routers package ---------------
+# RISK-SEC-005, brief 0073: the checker used to glob backend/app/routers/*.py, so a route declared
+# on the app object beside GET /health was invisible and the gate stayed green. The inventory is
+# now the booted application; this arm is the one the old checker could not fail.
+python3 - "$SANDBOX/backend/app/main.py" <<'OUTSIDEROUTE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+t += '\n\n@app.get("/undeclared-beside-health")\ndef undeclared_beside_health():\n    return {}\n'
+p.write_text(t)
+OUTSIDEROUTE
+expect_red "SEC-001-outside" "tools/checks/route-guards.sh" "RULE-SEC-001"
+
+# --- RULE-SEC-001 — a router-level guard is dropped --------------------------
+# A guard can also be a dependency of the whole router, which no parameter default shows. Take the
+# admin guard off one handler and put a user guard on the router instead: the route still requires
+# a credential, just the wrong one, and only the resolved dependency tree says so.
+python3 - "$SANDBOX/backend/app/routers/admin.py" <<'ROUTERGUARD'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "username: str = Depends(get_current_admin), db: Connection = Depends(get_db)\n"
+assert old in t, "admin guard signature not found"
+t = t.replace(old, "db: Connection = Depends(get_db)\n", 1)
+old_router = 'APIRouter(prefix="/admin"'
+assert old_router in t, "admin router declaration not found"
+t = t.replace(old_router, 'APIRouter(dependencies=[Depends(get_current_user)], prefix="/admin"', 1)
+if "get_current_user" not in t.split("router =")[0]:
+    t = "from app.dependencies import get_current_user\n" + t
+p.write_text(t)
+ROUTERGUARD
+expect_red "SEC-001-router" "tools/checks/route-guards.sh" "RULE-SEC-001"
+
 # --- RULE-SEC-002 — a compatibility shim outlives its expiry -----------------
 # The contract step of a migration is the one that gets skipped: the old shape keeps
 # working, nothing fails, and "temporary" becomes permanent by default. Backdate the expiry

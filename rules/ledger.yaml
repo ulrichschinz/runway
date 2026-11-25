@@ -405,8 +405,10 @@ rules:
 
   - id: RULE-SEC-001
     statement: >
-      Every HTTP route MUST declare its required guard in rules/route-guards.toml, the
-      declaration MUST match the guard the handler enforces, and a route declared open
+      Every HTTP route the booted application serves — wherever it is declared, framework and
+      transport routes included — MUST declare its required guard in rules/route-guards.toml, the
+      declaration MUST match the guard the route's resolved dependency tree enforces, every
+      operation in the served OpenAPI schema MUST be in that inventory, and a route declared open
       MUST record why.
     class: executable
     check: tools/checks/route-guards.sh
@@ -422,7 +424,9 @@ rules:
       thirty handlers. Declaring the posture as checked-in state turns "did anyone think
       about authorization for this route" into a question the gate answers. Open routes
       carry a reason because a route anyone can reach is a decision, and a decision with no
-      recorded reason cannot be told apart from an oversight.
+      recorded reason cannot be told apart from an oversight. The inventory became the running
+      application on 2026-11-25 (brief 0073, ADR 0047): reading one directory left six served
+      routes undeclared, and a route beside GET /health would have shipped green (RISK-SEC-005).
 
   - id: RULE-SEC-002
     statement: >
@@ -1505,23 +1509,20 @@ residual_risks:
 
   - id: RISK-SEC-005
     statement: >
-      RULE-SEC-001 reads backend/app/routers/*.py and nothing else — tools/checks/route_guards.py
-      globs that one directory — so a route declared anywhere outside the routers package is
-      neither observed nor required to appear in rules/route-guards.toml. One route is outside
-      it today: GET /health, declared on the app object in backend/app/main.py, unauthenticated,
-      returning a fixed {"status": "ok"}. That route is harmless and it is also the proof of the
-      gap: the declaration file has thirty-nine entries and the application serves forty
-      routes, and nothing anywhere says so. The consequence is not the health check, it is the
-      next route someone adds beside it — a guard forgotten there fails exactly the way
-      RULE-SEC-001 was written to prevent, silently and for everybody, while the gate stays
-      green. The partial backstop is RULE-SURF-001: a new route changes the OpenAPI snapshot,
-      so it cannot arrive unnoticed, but regenerating that snapshot is a normal part of adding
-      a route and it demands no guard declaration. Closing this means widening the checker's
-      scope to every module that can hold a decorator, which also means deciding what an
-      infrastructure route like /health declares.
+      Narrowed 2026-11-25 by brief 0073 (plan M8). RULE-SEC-001 used to glob backend/app/routers/*.py,
+      so GET /health, the three methods of /mcp and the framework's documentation routes were served
+      and declared nowhere, and a route added beside them would have needed no guard decision. The
+      checker now boots the application and inventories fastapi.routing.iter_route_contexts(app.routes),
+      reads each guard from the resolved dependency tree (router-level dependencies included),
+      requires every served OpenAPI operation to be in the inventory and a Mount to be declared; the
+      eight routes are declared open with reasons, and a negative fixture puts a route in main.py.
+      What remains is outside the application object: a path the nginx in front answers itself
+      (the SPA and its fallback), and a handler that authenticates inside its body rather than by
+      dependency — the checker classifies it open, so it must be declared open with a reason, but
+      the checker cannot tell whether that reason is true.
     owner: maintainer
-    re_open_trigger: "a second route is declared outside backend/app/routers/, an authenticated or state-changing route is added to main.py, or the route-guard checker is given a wider scope"
-    decision_record: docs/adr/0027-the-threat-model.md
+    re_open_trigger: "a route authenticates without get_current_user/get_current_admin, nginx answers an API path itself, a sub-application is mounted, or fastapi.routing.iter_route_contexts changes meaning"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   # --- found by the Phase 4 audit, Step 16d (docs/adr/0031-the-phase-4-audit.md) ------
 
