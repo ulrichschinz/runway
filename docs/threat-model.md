@@ -486,8 +486,10 @@ and CORS is closed.
   `CHECK`), and `RULE-SURF-005` builds every historical baseline and compares it with a fresh one. A
   production database with a hand-written role refuses the step and stays at version 0 with an ERROR;
   `verify-deploy` fails on that. `RISK-SURF-001`, `RISK-SEC-002`.
-- **Nothing prunes `audit.db`**, and nothing measures it. Roughly one row per authenticated request,
-  on the same partition as `users.db` and the task data. `RISK-OPS-006`.
+- **Nothing prunes `audit.db`.** It is measured at boot and hourly, with a high-water mark and a WARNING
+  above `AUDIT_DB_WARN_BYTES` (brief 0073), but its growth — roughly one row per authenticated request, on
+  the same partition as `users.db` and the task data — is unbounded until the retention decision (D7,
+  ADR 0047). `RISK-OPS-006`.
 - There are now two files to back up. `users.db` alone is no longer a complete backup of this
   deployment's state.
 - Backups themselves are outside this repository entirely — nothing here creates, encrypts, verifies
@@ -712,8 +714,8 @@ the Taskwarrior call, so a hung binary is a failed request rather than a worker 
 `restart: unless-stopped` and healthchecks in both compose files; container log rotation at 50 MB per
 service, checked in; request bodies and fields bounded (briefs 0067 and 0073). What does not exist: a
 bound on how much one account writes (`RISK-SEC-004`), any pruning of
-`audit.db` (`RISK-OPS-006`), any capacity budget, and any measurement of the partition all three
-stores share.
+`audit.db` (`RISK-OPS-006`; it is measured and warned about since brief 0073), any capacity budget, and
+any measurement of the partition all three stores share.
 
 **The MCP endpoint is the exception** (finding REV-004, brief 0071, ADR 0045). It used to keep a session
 — a server transport and a task — for every `initialize`, anonymous ones included, with no expiry and no

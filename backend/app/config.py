@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # 429. A quarter of the total is the most that requests without a credential header may hold.
     mcp_max_inflight: int = 32
     mcp_source_max_inflight: int = 8
+    # The size of DATA_ROOT/audit.db (with its -wal and -shm) above which the hourly measurement
+    # logs a WARNING instead of INFO (RISK-OPS-006, brief 0073, ADR 0047). 100 MiB is the risk's own
+    # re-open trigger. A measurement only: nothing deletes audit rows until the retention decision
+    # (gate D7) is taken.
+    audit_db_warn_bytes: int = 100 * 1024 * 1024
     # How much of the JSON log stream is emitted. The *format* is not configurable and
     # neither is the redaction filter: a setting that turns a control off is the setting
     # that gets turned off at 3am. An unrecognised value falls back to INFO rather than

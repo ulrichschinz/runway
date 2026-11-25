@@ -116,6 +116,12 @@ API_KEY_LEGACY_CUTOFF=2027-01-15
 MCP_MAX_INFLIGHT=32
 MCP_SOURCE_MAX_INFLIGHT=8
 
+# The size in bytes of DATA_ROOT/audit.db (with its -wal and -shm files) above which the backend's
+# hourly measurement of it logs a WARNING ("audit store size") instead of INFO. 100 MiB by default.
+# Nothing deletes audit rows: how long they are kept is the operator's decision (ADR 0047). The
+# deploy compose passes it through. See docs/operations.md, "The size of the audit log".
+AUDIT_DB_WARN_BYTES=104857600
+
 # Comma-separated addresses or CIDR networks of the proxies in front of the backend whose
 # X-Forwarded-For the login limiter believes (in the shipped setup: nginx and the TLS proxy in
 # front of it). Empty believes none: a public peer is then counted as itself, and a loopback

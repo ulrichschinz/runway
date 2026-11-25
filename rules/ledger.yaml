@@ -1432,25 +1432,21 @@ residual_risks:
 
   - id: RISK-OPS-006
     statement: >
-      NOTHING PRUNES THE AUDIT DATABASE. `data/audit.db` grows for the lifetime of the
-      deployment and no retention period, no vacuum and no archival step exists — that is a
-      deliberate omission, not an oversight: a first cut that deletes rows is a first cut
-      that can delete the evidence `SHIM-SEC-006` is waiting on, and choosing what may be
-      forgotten is a decision with a legal and an operational half that has not been taken.
-      The growth is dominated by one row per SUCCESSFULLY authenticated request, roughly
-      150 bytes each, so a deployment serving ten thousand requests a day accumulates on the
-      order of half a gigabyte a year on the same partition that holds `users.db` and the
-      Taskwarrior data — the same partition whose exhaustion the container log rotation added
-      in Step 15a was written to prevent, now with a second unbounded writer on it that
-      Docker's log driver does not bound. There is a second, smaller
-      amplification: a login failure writes a row and the rate limiter is per-username, so a
-      caller cycling usernames can append faster than a legitimate one. Rejected credentials
-      deliberately write nothing at all, which is what keeps that bounded by the login route
-      rather than open to any unauthenticated request. Nothing measures the file, nothing
-      alerts on it, and the disk it shares is the one that takes the database down with it.
+      NOTHING PRUNES THE AUDIT DATABASE — but since 2026-11-25 (brief 0073, ADR 0047) something
+      measures it. `data/audit.db` grows for the lifetime of the deployment, about 150 bytes per
+      successfully authenticated request, on the partition that holds `users.db` and the Taskwarrior
+      data. The backend now stats the file (with -wal and -shm) at boot and hourly, keeps the largest
+      size seen as a high-water mark in the file's audit_meta table, and logs `audit store size` at
+      INFO, at WARNING above AUDIT_DB_WARN_BYTES (default 100 MiB). That makes the growth visible; it
+      does not bound it. Bounding it needs a retention period, and choosing what may be forgotten has
+      a legal and an operational half — SHIM-SEC-006's evidence, revocations, role changes and storage
+      migrations must outlive their own evidence period — that is the operator's decision (plan gate
+      D7), not taken. ADR 0047 Decision 1 records what the retention job must respect when it is
+      built. Nothing alerts outside the log stream, and nothing measures the partition's free space.
+      The amplification by login failures is bounded by the login budget (brief 0069).
     owner: maintainer
-    re_open_trigger: "audit.db exceeds 100 MB, a retention period is agreed, disk pressure is observed on the deploy host, or the SHIM-SEC-006 soak completes and the evidence is no longer needed live"
-    decision_record: docs/adr/0026-the-audit-log.md
+    re_open_trigger: "a WARNING 'audit store size' is logged, a retention period is agreed (D7), disk pressure is observed on the deploy host, or the SHIM-SEC-006 soak completes and the evidence is no longer needed live"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   - id: RISK-OPS-001
     statement: >

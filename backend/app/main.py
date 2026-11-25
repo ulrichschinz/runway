@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -6,7 +8,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app import audit, mcp_gate, rate_limit, startup_checks, task_storage
+from app import audit, database, mcp_gate, rate_limit, startup_checks, task_storage
 from app.auth import prepare_dummies
 from app.config import cors_origin_list, settings
 from app.database import init_db, legacy_cutoff, legacy_cutoff_problem
@@ -46,6 +48,10 @@ async def lifespan(app: FastAPI):
         outcome=audit.NOOP if bootstrap_reason.startswith("noop:") else audit.SUCCESS,
         detail=bootstrap_reason,
     )
+    # RISK-OPS-006 (brief 0073): the audit file's size, now and hourly; a WARNING above
+    # AUDIT_DB_WARN_BYTES. Measured, never pruned — retention is the operator's decision (ADR 0047).
+    audit.measure()
+    size_watch = asyncio.create_task(audit.watch_size(), name="audit.watch_size")
     # The login limiter's source tier trusts X-Forwarded-For only from these (brief 0069). A
     # skipped entry trusts fewer hops, never more — but the operator meant something by it.
     rejected = rate_limit.rejected_proxy_entries(settings.trusted_proxies)
@@ -79,9 +85,15 @@ async def lifespan(app: FastAPI):
             "legacy_key_cutoff": datetime.fromtimestamp(legacy_cutoff(), UTC).date().isoformat(),
             "mcp_max_inflight": settings.mcp_max_inflight,
             "mcp_source_max_inflight": settings.mcp_source_max_inflight,
+            "schema_version": database.applied_schema_version,
         },
     )
-    yield
+    try:
+        yield
+    finally:
+        size_watch.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await size_watch
 
 
 app = FastAPI(

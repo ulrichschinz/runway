@@ -33,14 +33,18 @@ columns so adding one later is one `ALTER TABLE`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import Request
 
 from app import database
+from app.config import settings
 from app.logging_setup import current_request_id, redact_text
 
 logger = logging.getLogger(__name__)
@@ -185,6 +189,17 @@ CREATE INDEX IF NOT EXISTS audit_events_event_time
 ON audit_events (event, recorded_at)
 """
 
+# One row per key: what the store knows about itself, never about an event (brief 0073). Created by
+# the same statement everywhere, like the table above.
+CREATE_AUDIT_META = """
+CREATE TABLE IF NOT EXISTS audit_meta (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+)
+"""
+
+HIGH_WATER_KEY = "high_water_bytes"
+
 INSERT_EVENT = """
 INSERT INTO audit_events
     (recorded_at, event, actor, subject, outcome, auth_shape, route, request_id, detail)
@@ -205,6 +220,7 @@ def init_store() -> None:
             connection.execute(CREATE_AUDIT_EVENTS)
             connection.execute(CREATE_SHAPE_INDEX)
             connection.execute(CREATE_EVENT_INDEX)
+            connection.execute(CREATE_AUDIT_META)
             connection.commit()
     except (sqlite3.Error, OSError) as failure:
         logger.error(
@@ -290,3 +306,79 @@ def route_of(request: Request | None) -> str | None:
     methods = sorted(getattr(route, "methods", None) or [])
     method = next((m for m in methods if m not in {"HEAD", "OPTIONS"}), None)
     return f"{method} {template}" if method else str(template)
+
+
+# --- the size of the store (RISK-OPS-006, brief 0073, ADR 0047 Decision 1) -------------------------
+#
+# Measured, warned about, remembered at its largest — and never pruned. How long rows must be kept is
+# the operator's decision (gate D7); until it is taken nothing here deletes, archives or vacuums.
+# The measurement stats three files and writes one integer: it never reads an event.
+
+SIZE_INTERVAL_SECONDS = 3600.0
+
+
+@dataclass(frozen=True)
+class StoreSize:
+    bytes: int
+    high_water_bytes: int
+    warn_bytes: int
+
+    @property
+    def over_threshold(self) -> bool:
+        return self.bytes > self.warn_bytes
+
+
+def _files_bytes() -> int:
+    path = database.audit_db_path()
+    return sum(
+        p.stat().st_size for p in (path, Path(f"{path}-wal"), Path(f"{path}-shm")) if p.exists()
+    )
+
+
+def measure() -> StoreSize | None:
+    """Stat the audit store, raise its high-water mark if exceeded, and log one line. Never raises."""
+    try:
+        size = _files_bytes()
+        with database.audit_connection() as connection:
+            connection.execute(CREATE_AUDIT_META)
+            connection.execute(
+                "INSERT INTO audit_meta (key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = MAX(value, excluded.value)",
+                (HIGH_WATER_KEY, size),
+            )
+            row = connection.execute(
+                "SELECT value FROM audit_meta WHERE key = ?", (HIGH_WATER_KEY,)
+            ).fetchone()
+            connection.commit()
+        measured = StoreSize(
+            bytes=size,
+            high_water_bytes=int(row[0]) if row else size,
+            warn_bytes=settings.audit_db_warn_bytes,
+        )
+    except (sqlite3.Error, OSError) as failure:
+        logger.error("the audit store could not be measured", extra={"audit_error": str(failure)})
+        return None
+    fields = {
+        "audit_db_bytes": measured.bytes,
+        "audit_db_high_water_bytes": measured.high_water_bytes,
+        "audit_db_warn_bytes": measured.warn_bytes,
+    }
+    if measured.over_threshold:
+        logger.warning(
+            "audit store size",
+            extra={
+                **fields,
+                "hint": "over AUDIT_DB_WARN_BYTES; nothing prunes it until the retention decision "
+                "(docs/operations.md, The size of the audit log)",
+            },
+        )
+    else:
+        logger.info("audit store size", extra=fields)
+    return measured
+
+
+async def watch_size(interval: float | None = None) -> None:
+    """Measure every `interval` seconds until cancelled (the lifespan cancels it at shutdown)."""
+    while True:
+        await asyncio.sleep(SIZE_INTERVAL_SECONDS if interval is None else interval)
+        await asyncio.to_thread(measure)

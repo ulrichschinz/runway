@@ -534,6 +534,31 @@ one `ALTER TABLE`.
 **Nothing prunes this file.** It grows for the life of the deployment, on the same partition as `users.db`
 and `data/`. Recorded as `RISK-OPS-006`, with the trigger to come back to it.
 
+### The size of the audit log
+
+Since brief 0073 the backend measures the file at boot and every hour and logs one line:
+
+```
+INFO    audit store size  audit_db_bytes=…  audit_db_high_water_bytes=…  audit_db_warn_bytes=104857600
+WARNING audit store size  …  hint="over AUDIT_DB_WARN_BYTES; nothing prunes it …"
+```
+
+`audit_db_bytes` is `audit.db` plus its `-wal` and `-shm` files; `audit_db_high_water_bytes` is the largest
+size ever measured, kept in the file's own `audit_meta` table, so it still says how large the store was after
+an archive or a `VACUUM`. The threshold is `AUDIT_DB_WARN_BYTES` (README). Watch for the WARNING:
+
+```sh
+# on the deploy host
+docker compose logs backend | grep '"audit store size"' | tail -1
+```
+
+**What to do at the warning is not automated, on purpose.** How long audit rows must be kept — and which
+must outlive that, because a revocation, a role change or a storage migration is evidence — is the
+operator's decision (gate D7 of the remediation plan, [ADR 0047](adr/0047-audit-retention-and-versioned-migrations.md)
+Decision 1, which also lists what the eventual retention job must respect). Until it is taken nothing in
+this repository deletes, archives or vacuums a row. Free space on the partition is the operator's to watch
+(`df -h /opt/services/runway`).
+
 ### Is anyone still using the Bearer-as-API-key shape?
 
 The question `SHIM-SEC-006` has been blocked on since Step 13, and the reason this table exists. Three
