@@ -65,8 +65,9 @@ something is always here.
 # Required. Generate one with: openssl rand -base64 48
 # The app refuses to start on an empty value, fewer than 32 characters, any value published in
 # this repository (the defaults, the examples on this page and in .env.example, or one that still
-# reads like a placeholder), a public key (PEM, OpenSSH, JWK or base64 DER), one short unit
-# repeated, or an estimated entropy under 80 bits. `python -m app.startup_checks` runs the same
+# reads like a placeholder), a public key (PEM, OpenSSH, a JWK or JWK set, DER or an uncompressed
+# EC point in hex or base64), one that is mostly repetition or a run, or an estimated entropy
+# under 80 bits. `python -m app.startup_checks` runs the same
 # checks against an environment and prints a verdict, never the value (brief 0072).
 JWT_SECRET=
 

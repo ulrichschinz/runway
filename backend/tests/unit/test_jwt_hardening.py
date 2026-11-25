@@ -18,9 +18,10 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import re
 import secrets
+import shutil
+import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -96,60 +97,35 @@ def _refused(monkeypatch, secret: str) -> UnsafeConfiguration:
 # --- origin: nothing published in this repository can sign --------------------------------------
 
 _LITERAL = [
-    re.compile(r"JWT_SECRET=([^\s$#\"'`]+)"),  # .env files, README, compose list form
+    # KEY=value and KEY: value, bare or quoted — .env files, shell `export`, README, compose list and
+    # mapping form, YAML. A quoted value runs to its closing quote; a bare one to whitespace or a comment.
+    re.compile(r"\bJWT_SECRET\s*[=:]\s*\"([^\"\n$]+)\""),
+    re.compile(r"\bJWT_SECRET\s*[=:]\s*'([^'\n$]+)'"),
+    re.compile(r"\bJWT_SECRET\s*[=:][ \t]*([^\s$#\"'`{}]+)"),
+    re.compile(r"\"JWT_SECRET\"\s*:\s*\"([^\"\n$]+)\""),  # JSON
     re.compile(r"JWT_SECRET:-([^}\s]+)\}"),  # compose defaults: ${JWT_SECRET:-…}
     re.compile(r"jwt_secret\b[^=\n]*=\s*\"([^\"]+)\""),  # Python: settings.jwt_secret = "…"
     re.compile(r"\"jwt_secret\",\s*\"([^\"]+)\""),  # Python: setattr(settings, "jwt_secret", "…")
 ]
 
-
-# Where this repository publishes text. An allowlist, never a walk of the checkout: the checkout also
-# holds the operator's own `.env`, `users.db` and `data/` (never read by a test), and untracked evidence.
-_PUBLISHED_FILES = (
-    ".env.example",
-    "README.md",
-    "AGENTS.md",
-    "docker-compose.yml",
-    "Makefile",
-    "run",
-)
-_PUBLISHED_DIRS = (
-    "backend/app",
-    "backend/tests",
-    "tools",
-    "ops",
-    "docs",
-    "integrations",
-    ".github",
-)
-_UNPUBLISHED = ("docs/security-audits", "docs/plan/security-remediation-2026-11.md")
-_TEXT_SUFFIXES = {
-    "",
-    ".md",
-    ".py",
-    ".sh",
-    ".yml",
-    ".yaml",
-    ".toml",
-    ".json",
-    ".txt",
-    ".conf",
-    ".env",
-}
+# Everything this repository publishes is what git tracks. The checkout also holds the operator's own
+# `.env`, `users.db` and `data/` and the untracked review evidence; none of them is tracked, so `git
+# ls-files` never names them and this test never opens them.
+_UNPUBLISHED = ("docs/security-audits/", "docs/plan/security-remediation-2026-11.md")
 
 
 def _published_paths():
-    for name in _PUBLISHED_FILES:
-        if (ROOT / name).is_file():
-            yield ROOT / name
-    for top in _PUBLISHED_DIRS:
-        for directory, subdirs, names in os.walk(ROOT / top):
-            subdirs[:] = [d for d in subdirs if d not in {"__pycache__", "node_modules", ".venv"}]
-            for name in names:
-                path = Path(directory) / name
-                rel = path.relative_to(ROOT).as_posix()
-                if path.suffix in _TEXT_SUFFIXES and not rel.startswith(_UNPUBLISHED):
-                    yield path
+    git = shutil.which("git")
+    assert git, "git is needed to know what this repository publishes"
+    listed = subprocess.run(  # noqa: S603  # absolute git, fixed argv, no input
+        [git, "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True
+    ).stdout.decode()
+    names = [name for name in listed.split("\0") if name and not name.startswith(_UNPUBLISHED)]
+    assert len(names) > 500, "git ls-files listed almost nothing — the scan would be vacuous"
+    for name in names:
+        path = ROOT / name
+        if path.is_file() and not path.is_symlink():
+            yield path
 
 
 def published_secret_literals() -> set[str]:
@@ -175,6 +151,25 @@ class TestTheSecretIsRefusedByOrigin:
         assert "changeme-set-in-.env" in found  # docker-compose.yml
         assert "changeme-please-set-in-env" in found  # config.py
         assert "your-secret-here" in found  # README
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            'JWT_SECRET="{}"',
+            "export JWT_SECRET='{}'",
+            "JWT_SECRET: {}",
+            '  JWT_SECRET: "{}"',
+            '{{"JWT_SECRET": "{}"}}',
+            "- JWT_SECRET={}  # an example",
+        ],
+        ids=["dq", "export-sq", "yaml", "yaml-dq", "json", "compose-list"],
+    )
+    def test_the_scan_sees_every_way_a_value_is_written(self, template):
+        """A guard on the guard for each form (review round 1). The probe value is assembled here so
+        that it is not itself a literal in a tracked file."""
+        value = "-".join(["published", "example", "value", secrets.token_hex(8)])
+        line = template.format(value)
+        assert {m.group(1) for p in _LITERAL for m in p.finditer(line)} == {value}
 
     def test_every_secret_published_in_this_repository_is_refused(self, monkeypatch):
         accepted = []
@@ -239,6 +234,75 @@ class TestTheSecretIsRefusedByShape:
         jwk = json.dumps({"kty": "RSA", "e": "AQAB", "n": _b64(secrets.token_bytes(256))})
         assert "public key" in str(_refused(monkeypatch, jwk))
 
+    @pytest.mark.parametrize("form", ["hex", "HEX", "spaced hex"])
+    @pytest.mark.parametrize("kind", ["rsa", "ec"])
+    def test_a_hex_der_public_key_is_refused(self, monkeypatch, form, kind):
+        key = _rsa_key() if kind == "rsa" else ec.generate_private_key(ec.SECP256R1())
+        der = key.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        text = {"hex": der.hex(), "HEX": der.hex().upper(), "spaced hex": der.hex(" ", 16)}[form]
+        assert "public key" in str(_refused(monkeypatch, text))
+
+    @pytest.mark.parametrize(
+        "curve",
+        [ec.SECP256R1(), ec.SECP384R1(), ec.SECP521R1(), ec.SECP256K1()],
+        ids=lambda curve: curve.name,
+    )
+    @pytest.mark.parametrize("encode", ["hex", "base64", "base64url"])
+    def test_a_raw_uncompressed_ec_point_is_refused(self, monkeypatch, curve, encode):
+        point = (
+            ec.generate_private_key(curve)
+            .public_key()
+            .public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+        )
+        text = {
+            "hex": point.hex(),
+            "base64": base64.b64encode(point).decode(),
+            "base64url": _b64(point),
+        }[encode]
+        assert "public key" in str(_refused(monkeypatch, text))
+
+    def test_random_bytes_shaped_like_a_point_are_not_refused(self, monkeypatch):
+        """A 0x04 prefix and the right length are not enough: the point has to lie on the curve."""
+        for _ in range(200):
+            monkeypatch.setattr(settings, "jwt_secret", (b"\x04" + secrets.token_bytes(64)).hex())
+            startup_checks.run_all()
+
+    @pytest.mark.parametrize(
+        "document",
+        [
+            {"keys": [{"kty": "RSA", "e": "AQAB", "n": "x" * 40}]},  # a JWKS
+            [{"kty": "EC", "crv": "P-256", "x": "a" * 43, "y": "b" * 43}],  # a JWK array
+            {"issuer": "https://idp.example", "jwks": {"keys": [{"kty": "OKP", "x": "c" * 43}]}},
+            {"keys": []},
+        ],
+        ids=["jwks", "jwk-array", "nested", "empty-jwks"],
+    )
+    def test_a_jwk_set_or_array_is_refused(self, monkeypatch, document):
+        assert "public key" in str(_refused(monkeypatch, json.dumps(document)))
+
+    def test_boot_and_the_library_agree(self, monkeypatch):
+        """Whatever boots, PyJWT signs with: a secret that passes the startup check and then fails
+        every login is the worst of both (review round 1: a JWKS did exactly that)."""
+        rsa_key = _rsa_key()
+        candidates = [
+            json.dumps({"keys": [{"kty": "RSA", "e": "AQAB", "n": _b64(secrets.token_bytes(64))}]}),
+            json.dumps([{"kty": "oct", "k": _b64(secrets.token_bytes(32))}]),
+            _public_pem(rsa_key),
+            _public_der_b64(rsa_key),
+            "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ" + secrets.token_hex(24),
+            secrets.token_urlsafe(48),
+            secrets.token_hex(32),
+        ]
+        for secret in candidates:
+            monkeypatch.setattr(settings, "jwt_secret", secret)
+            try:
+                startup_checks.run_all()
+            except UnsafeConfiguration:
+                continue
+            auth.create_access_token("alice", auth_version=1)  # must not raise
+
     @pytest.mark.parametrize(
         "secret",
         ["x" * 32, "ab" * 16, "password" * 4, "0123456789abcdef" * 2, "Tr0ub4dor&3!" * 3],
@@ -252,6 +316,25 @@ class TestTheSecretIsRefusedByShape:
     )
     def test_a_tiny_alphabet_is_refused(self, monkeypatch, secret):
         assert "entropy" in str(_refused(monkeypatch, secret))
+
+    @pytest.mark.parametrize(
+        "secret",
+        [
+            "password" * 4 + "!",  # one character breaks the exact period (review round 1)
+            "Tr0ub4dor&3!" * 3 + "x",
+            "x" * 16 + "abcdefghijklmnop",
+            "abcdefghijklmnopqrstuvwxyz012345",  # a run: every difference is 1
+            "zyxwvutsrqponmlkjihgfedcba9876543210",
+            "0123456789abcdef" * 2 + "z",
+            "aB3$" * 8 + "Q",
+            "p@ssw0rd-p@ssw0rd-p@ssw0rd-2026!",
+        ],
+    )
+    def test_a_value_that_is_mostly_repetition_is_refused(self, monkeypatch, secret):
+        """Exact periodicity is not the property; redundancy is. Each of these holds about one word.
+        (`aB3$`×8+`Q` has five distinct characters, so the plain entropy floor already says so.)"""
+        reason = str(_refused(monkeypatch, secret))
+        assert "repeat" in reason or "entropy" in reason
 
     def test_an_empty_secret_is_refused(self, monkeypatch):
         """CVE-2026-120459's precondition."""

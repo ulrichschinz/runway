@@ -74,6 +74,6 @@ Coverage floor is a ratchet, not a target — raise it, never lower it to fit a 
   `mcp_gate.bind_mcp_target` is the app's first dependency on every route and is inert for REST requests.
 - **The test suite's `JWT_SECRET` is generated per run** (`tests/conftest.py::TEST_JWT_SECRET`, brief 0072).
   The backend refuses at boot every signing key published in this repository, and
-  `test_jwt_hardening.py` scans the repository's text for `JWT_SECRET` literals — a test that writes a
+  `test_jwt_hardening.py` scans every tracked file (`git ls-files`) for `JWT_SECRET` literals — a test that writes a
   fixed key down fails there. Tokens are PyJWT, HS256 only (`config.JWT_SIGNING_ALGORITHM`, ADR 0046);
   `settings.jwt_algorithm` chooses nothing.

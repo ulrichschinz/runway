@@ -73,26 +73,42 @@ That is the expand and switch of a public-surface migration; the contract is `SH
    (`changeme`, `replace-with`, `your-secret`, …). `test_jwt_hardening.py` scans the repository's published
    text for every `JWT_SECRET` literal and fails if one boots; the test suite and `tools/surfaces.py`
    generate their key per run, so nothing bootable is written down.
-3. **Key material**: a PEM block, an OpenSSH key, a JWK, or base64 whose bytes are a DER SEQUENCE spanning
-   exactly the value with a SEQUENCE or INTEGER first (SubjectPublicKeyInfo, PKCS#1, PKCS#8) — the
-   CVE-2024-33663/CVE-2026-85394 precondition. The installed PyJWT also refuses a PEM or DER public key as
-   an HMAC key (tested), as a second layer.
+3. **Key material**: a PEM block, an OpenSSH key, a JSON document with a `kty` or `keys` member anywhere
+   (a JWK, a JWK set, a JWK array), or hex, base64 or base64url whose bytes are a DER SEQUENCE spanning
+   exactly the value with a SEQUENCE or INTEGER first (SubjectPublicKeyInfo, PKCS#1, PKCS#8) or an
+   uncompressed EC point that lies on P-256, P-384, P-521 or secp256k1 — the CVE-2024-33663/CVE-2026-85394
+   precondition. And PyJWT's own `HMACAlgorithm.prepare_key` runs on the secret at boot: whatever the
+   library would refuse at the first login refuses the start instead (review round 1 — a JWKS booted and
+   then failed every login). *Not* recognised, deliberately: a raw Ed25519 key (any 32 bytes are one) and a
+   compressed EC point (about half of all 33-byte strings starting `02`/`03` decompress to one); refusing
+   them would refuse generated secrets.
 4. **Shorter than 32 characters** (unchanged).
 5. **A repeated unit**: the smallest period (KMP) at most half the length — `password` × 4,
    `0123456789abcdef` × 2.
 6. **Estimated entropy under 80 bits**: length × the empirical Shannon entropy per character. In 200 000
    draws of `openssl rand -hex 16`, the weakest form the runbook accepts, the minimum was 89.6; base64 of
    48 bytes scores about 330.
+7. **Mostly repetition** (review round 1: exact periodicity is bypassed by one appended character): the
+   per-character entropy charged only for the characters a greedy LZ77 parse (copies of ≥ 3) cannot
+   explain from earlier text — in the value or in its successive character differences, whichever explains
+   more — refused under 56 bits. `password`×4+`!` scores 26, `Tr0ub4dor&3!`×3+`x` 46, the alphabet in order
+   15; in 500 000 draws of `openssl rand -hex 16` the minimum was 65.4.
 
-**The limit, stated:** no check can prove a value random. A long memorable phrase passes steps 5 and 6.
+**The limit, stated:** no check can prove a value random. A long memorable phrase or a keyboard row passes
+steps 5 to 7.
 The origin check covers the values a reader of this repository knows; the runbook generates the secret
 (`openssl rand -base64 48`); `python -m app.startup_checks` lets the operator run these checks against the
-host's `.env` with the new image before a deploy.
+host's environment.
 
 *Rejected:* a date-driven soak for the new refusals (as `API_KEY_LEGACY_CUTOFF` has) — every value they
 refuse is either public or degenerate, i.e. a key someone else can sign with, which is the reasoning of
 SEC-1: a container that refuses to start is a louder signal than one that serves forgeable tokens quietly.
-The pre-deploy check is the mitigation for an operator who would be surprised.
+The cost is real: merging to `main` deploys with no manual gate, so a production key that fails a new check
+takes the backend down on the merge. The mitigation is a **pre-merge** check, not a pre-deploy one (review
+round 1 — the image a pre-deploy check needs exists only after the merge has started the deploy): the
+branch's `startup_checks.py` and `config.py`, mounted read-only over the deployed image's copies in a
+`docker compose run` from the service directory (`docs/operations.md`, *The signing key*). Running it is a
+merge blocker of brief 0072, an owner action on the host this repository cannot perform.
 
 ## Consequences
 
@@ -102,3 +118,10 @@ The pre-deploy check is the mitigation for an operator who would be surprised.
 - A PyJWT bump must re-run `test_jwt_hardening.py`, `test_session_revocation.py` and the MCP suites (`mcp`
   uses PyJWT too).
 - `SHIM-SEC-010` is owed: remove `JWT_ALGORITHM` once no `.env` sets it.
+- The runtime image's closure is checked automatically: `deploy.yml` runs `tools/installed_matches_lock.py`
+  inside the pushed backend image against its own `/app/requirements.lock` (every pin at its version,
+  `python-multipart` ≥ 0.0.31, no `jose`/`ecdsa` importable) and `deploy` needs that step.
+- **SEC-005 and this ADR ship on one branch.** The plan asks for SEC-005 as an isolated dependency PR; here
+  it is the isolated first commit (`fcdfdec`). Merged together, rolling M7.1 back (the likeliest rollback:
+  a production key that a new check refuses) also reinstates python-multipart 0.0.12. Whether to merge
+  `fcdfdec` first on its own or to accept the bundle is the owner's decision (brief 0072, merge blockers).

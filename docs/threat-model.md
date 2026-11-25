@@ -246,10 +246,13 @@ Four kinds, and each is handled differently because each fails differently.
 `assert_jwt_secret_is_safe` in [`backend/app/startup_checks.py`](../backend/app/startup_checks.py)
 refuses to start on an empty secret; on any value this repository has published — the defaults, the
 examples in `.env.example` and README, former test and fixture values — or one that reads like a
-placeholder; on a public key (PEM, OpenSSH, JWK, base64 DER), which as an HMAC key is known to everyone
-who holds it (the CVE-2024-33663/CVE-2026-85394 precondition); on one shorter than 32 characters; on one
-short unit repeated; and on an estimated entropy (length × empirical Shannon entropy) under 80 bits
-(finding SEC-002, brief 0072, ADR 0046). `assert_jwt_algorithm_is_fixed` refuses `JWT_ALGORITHM` set to
+placeholder; on a public key (PEM, OpenSSH, a JWK, JWK set or array, DER or an uncompressed EC point in
+hex, base64 or base64url — and on anything PyJWT itself refuses as an HMAC key), which as an HMAC key is
+known to everyone who holds it (the CVE-2024-33663/CVE-2026-85394 precondition); on one shorter than 32
+characters; on one short unit repeated; on an estimated entropy (length × empirical Shannon entropy) under
+80 bits; and on one whose characters are mostly a copy of earlier ones or step through a run (under 56
+bits charged only for what is new) (finding SEC-002, brief 0072, ADR 0046). A raw Ed25519 key and a
+compressed EC point are **not** recognised: they are indistinguishable from random bytes of that length. `assert_jwt_algorithm_is_fixed` refuses `JWT_ALGORITHM` set to
 anything but `HS256`; tokens are signed and verified with the code's constant, never the setting. The
 checks run from the lifespan in [`backend/app/main.py`](../backend/app/main.py), *before* the database and
 before anything binds. The working default in [`backend/app/config.py`](../backend/app/config.py) is
@@ -257,7 +260,8 @@ retained so `import app.main` succeeds with no environment, and it is inert: a s
 it. That was finding SEC-1. The test suite and the surface capture generate their key per run, so no
 bootable key is written anywhere in the repository — `test_jwt_hardening.py` scans for one.
 
-What no check can do is prove a value random: a long memorable phrase passes the entropy estimate. The
+What no check can do is prove a value random: a long memorable phrase or a keyboard row passes the
+entropy estimates. The
 origin check covers what a reader of this repository knows; the runbook generates the key
 ([`docs/operations.md`](operations.md#the-signing-key-jwt_secret)).
 
