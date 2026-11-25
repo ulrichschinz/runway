@@ -1,4 +1,4 @@
-"""REV-004 and RISK-MCP-002: what an MCP request may cost the server, and who may make one.
+"""REV-004: what an MCP request may cost the server.
 
 Before brief 0071 the transport was the stateful Streamable HTTP manager `fastapi-mcp` builds:
 every `initialize` — with or without a credential — created a server transport and a task,
@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -44,10 +43,6 @@ CALL_HEALTH = {
     "params": {"name": "health_health_get", "arguments": {}},
 }
 
-# A day inside the soak and a day after the default cutoff, so no test depends on today's date.
-SOAK = int(datetime(2026, 12, 1, tzinfo=UTC).timestamp())
-AFTER = int(datetime(2027, 2, 1, tzinfo=UTC).timestamp())
-
 
 @pytest.fixture(autouse=True)
 def _fresh_session_manager():
@@ -64,11 +59,10 @@ def _fresh_session_manager():
 
 @pytest.fixture(autouse=True)
 def _gate_state(monkeypatch):
-    """Clean counters and budget per test, and a clock inside the soak unless a test moves it."""
+    """Clean counters and budget per test."""
     from app import mcp_gate
 
     mcp_gate.reset_all()
-    monkeypatch.setattr(mcp_gate, "_clock", lambda: SOAK)
     yield
     mcp_gate.reset_all()
 
@@ -291,19 +285,18 @@ class TestCapacity:
         assert third.status_code == 503
         assert authed.status_code == 200
 
-    def test_a_refused_request_costs_no_credential_lookup(self, registered, monkeypatch):
-        from app import dependencies, mcp_gate
+    def test_a_refused_request_costs_no_transport_work(self, registered, monkeypatch):
+        from app import mcp_gate
 
         monkeypatch.setattr(settings, "mcp_max_inflight", 1)
-        calls = {"n": 0}
-        original = dependencies.identify
+        served = {"n": 0}
+        original = mcp_gate.BudgetedTransport._serve
 
-        async def counting(*a, **kw):
-            calls["n"] += 1
-            return await original(*a, **kw)
+        async def counting(self, request, *a, **kw):
+            served["n"] += 1
+            return await original(self, request, *a, **kw)
 
-        monkeypatch.setattr(dependencies, "identify", counting)
-        monkeypatch.setattr(mcp_gate, "identify", counting, raising=False)
+        monkeypatch.setattr(mcp_gate.BudgetedTransport, "_serve", counting)
         reservation = mcp_gate.BUDGET.reserve(None)
         try:
 
@@ -314,7 +307,8 @@ class TestCapacity:
         finally:
             reservation.release()
         assert r.status_code == 503
-        assert calls["n"] == 0
+        assert served["n"] == 0
+        assert mcp_gate.counters()["live_transports"] == 0
 
     def test_a_request_past_the_deadline_is_ended_and_frees_its_slot(self, registered, monkeypatch):
         from app import mcp_gate
@@ -406,10 +400,10 @@ class TestTheBudgetUnit:
         assert mcp_gate.BUDGET.source_count() == 0
 
 
-class TestTheAnonymousCutoff:
-    """RISK-MCP-002 / SHIM-MCP-001: anonymous discovery is served in the soak, refused after it."""
+class TestAnonymousDiscovery:
+    """RISK-MCP-002: the tool list is still served without a credential — statelessly, counted."""
 
-    def test_in_the_soak_an_anonymous_tool_list_is_served_and_counted(self, client):
+    def test_an_anonymous_tool_list_is_served_and_counted(self, client):
         from app import mcp_gate
 
         async def run(app, c):
@@ -418,73 +412,22 @@ class TestTheAnonymousCutoff:
         r = _arun(_with_app(run))
         assert r.status_code == 200, r.text
         assert mcp_gate.counters()["served_anonymous"] == 1
-
-    @pytest.mark.parametrize(
-        "headers",
-        [{}, {"X-Api-Key": "rwk_0000000000000000_" + "x" * 43}, {"Authorization": "Bearer nope"}],
-        ids=["none", "unknown-key", "bad-bearer"],
-    )
-    def test_after_the_cutoff_no_valid_credential_is_refused_before_any_transport(
-        self, client, monkeypatch, headers
-    ):
-        from app import mcp_gate
-
-        monkeypatch.setattr(mcp_gate, "_clock", lambda: AFTER)
-
-        async def run(app, c):
-            return await _post(c, INITIALIZE, headers)
-
-        r = _arun(_with_app(run))
-        assert r.status_code == 401
-        assert mcp_gate.counters()["refused_unauthenticated"] == 1
         assert mcp_gate.counters()["live_transports"] == 0
 
-    @pytest.mark.parametrize("shape", ["x-api-key", "bearer-api-key", "bearer-jwt"])
-    def test_after_the_cutoff_every_credential_shape_still_works(
-        self, registered, monkeypatch, shape
-    ):
+    def test_a_credentialed_request_is_counted_as_such(self, registered):
         from app import mcp_gate
 
-        monkeypatch.setattr(mcp_gate, "_clock", lambda: AFTER)
-        headers = {
-            "x-api-key": {"X-Api-Key": registered["api_key"]},
-            "bearer-api-key": {"Authorization": f"Bearer {registered['api_key']}"},
-            "bearer-jwt": {"Authorization": f"Bearer {registered['token']}"},
-        }[shape]
-
         async def run(app, c):
-            return await _post(c, LIST, headers)
+            return await _post(c, LIST, {"X-Api-Key": registered["api_key"]})
 
-        r = _arun(_with_app(run))
-        assert r.status_code == 200, r.text
-        assert mcp_gate.counters()["served_authenticated"] == 1
-
-    def test_after_the_cutoff_a_revoked_session_is_refused_at_the_handshake(
-        self, client, registered, monkeypatch
-    ):
-        """The handshake applies ADR 0044's revocation, not just a signature check."""
-        from app import mcp_gate
-
-        monkeypatch.setattr(mcp_gate, "_clock", lambda: AFTER)
-        changed = client.put(
-            "/auth/password",
-            json={
-                "current_password": registered["password"],
-                "new_password": "another long passphrase",
-            },
-            headers={"Authorization": f"Bearer {registered['token']}"},
-        )
-        assert changed.status_code == 200, changed.text
-
-        async def run(app, c):
-            return await _post(c, LIST, {"Authorization": f"Bearer {registered['token']}"})
-
-        assert _arun(_with_app(run)).status_code == 401
+        assert _arun(_with_app(run)).status_code == 200
+        assert mcp_gate.counters()["served_with_header"] == 1
 
     def test_the_handshake_writes_no_audit_row(self, registered, monkeypatch):
-        from app import audit, mcp_gate
+        """Only the tool call behind a request authenticates and records; an unauthenticated caller
+        must not be able to append rows (RISK-OPS-006)."""
+        from app import audit
 
-        monkeypatch.setattr(mcp_gate, "_clock", lambda: AFTER)
         rows: list = []
         monkeypatch.setattr(audit, "record", lambda *a, **kw: rows.append((a, kw)))
 
@@ -495,29 +438,6 @@ class TestTheAnonymousCutoff:
         _arun(_with_app(run))
         # The lifespan writes its own boot row; what must be absent is any authentication row.
         assert [r for r in rows if r[0] and r[0][0] == audit.AUTHENTICATED] == []
-
-
-class TestTheCutoffSetting:
-    def test_the_default(self):
-        from app import mcp_gate
-
-        assert mcp_gate.anonymous_cutoff() == int(datetime(2027, 1, 15, tzinfo=UTC).timestamp())
-        assert mcp_gate.anonymous_cutoff_problem() is None
-
-    def test_an_earlier_date_is_honoured(self, monkeypatch):
-        from app import mcp_gate
-
-        monkeypatch.setattr(settings, "mcp_anonymous_cutoff", "2026-12-01")
-        assert mcp_gate.anonymous_cutoff() == int(datetime(2026, 12, 1, tzinfo=UTC).timestamp())
-        assert mcp_gate.anonymous_cutoff_problem() is None
-
-    @pytest.mark.parametrize("value", ["2027-06-01", "soon", "", "2027-13-01"])
-    def test_a_later_or_malformed_date_is_ignored_and_reported(self, monkeypatch, value):
-        from app import mcp_gate
-
-        monkeypatch.setattr(settings, "mcp_anonymous_cutoff", value)
-        assert mcp_gate.anonymous_cutoff() == int(datetime(2027, 1, 15, tzinfo=UTC).timestamp())
-        assert mcp_gate.anonymous_cutoff_problem()
 
 
 class TestTheCountersSayNothingAboutCallers:
@@ -564,6 +484,5 @@ class TestTheComposeFilesPassTheSettings:
         for line in (
             "- MCP_MAX_INFLIGHT=${MCP_MAX_INFLIGHT:-32}",
             "- MCP_SOURCE_MAX_INFLIGHT=${MCP_SOURCE_MAX_INFLIGHT:-8}",
-            "- MCP_ANONYMOUS_CUTOFF=${MCP_ANONYMOUS_CUTOFF:-2027-01-15}",
         ):
             assert line in text, line

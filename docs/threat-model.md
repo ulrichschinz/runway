@@ -687,8 +687,8 @@ cap. It is now stateless (nothing outlives a request; `live_transports` returns 
 before any work under a global, a per-source and an anonymous ceiling, and cancels a request after 30
 seconds. Enforced: `backend/tests/unit/test_mcp_budget.py` (the request above each ceiling refused,
 capacity returned after completion and after the deadline, a 50-request burst leaving no transport). The
-ceilings are per process (`RISK-SEC-003`), and until `MCP_ANONYMOUS_CUTOFF` (2027-01-15) anyone who can
-reach the endpoint may list the tools (`RISK-MCP-002`, `SHIM-MCP-001`).
+ceilings are per process (`RISK-SEC-003`), and anyone who can reach the endpoint may still list the
+tools (`RISK-MCP-002`).
 
 ---
 

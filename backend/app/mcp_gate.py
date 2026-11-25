@@ -1,6 +1,6 @@
 """The MCP surface's controls: where a tool call may go, and what an MCP request may cost.
 
-Brief 0071, ADR 0045 (findings REV-005, REV-004; `RISK-MCP-002`, `SHIM-MCP-001`). `main.py` builds
+Brief 0071, ADR 0045 (findings REV-005, REV-004; `RISK-MCP-002`). `main.py` builds
 the MCP server from `RunwayMCP` instead of `FastApiMCP`; nothing else imports this module.
 
 **A tool call reaches its own route, and no other (REV-005).** `fastapi-mcp` 0.4.0 turns a tool call
@@ -24,17 +24,17 @@ gets a fresh server transport that is torn down in a `finally` — and its serve
 the request ends, however it ends. No `Mcp-Session-Id` is issued; `GET` (the server stream) and
 `DELETE` (session end) answer 405, which the specification allows a server without either.
 
-**Reserve before work.** `BUDGET.reserve` takes a slot under one lock before the credential is looked
-up or the transport reads a byte: a global ceiling, a per-source ceiling, and — once the request turns
-out to carry no valid credential — a quarter of the global ceiling for anonymous requests. Every
+**Reserve before work.** `BUDGET.reserve` takes a slot under one lock before the transport reads a
+byte: a global ceiling, a per-source ceiling, and — for a request that presents no credential header
+at all — a quarter of the global ceiling. Every
 request is bounded by `REQUEST_DEADLINE_SECONDS`; past it, it is cancelled and answered 504, which is
 also what bounds a client that disconnects (Starlette does not cancel a buffered handler on
 disconnect). In-process and per-worker, like the login budget (`RISK-SEC-003`).
 
-**Authentication at the handshake, by date (D5).** Every MCP request's credential is resolved by
-`dependencies.identify` — the same code as `get_current_user`, without its audit row. Until
-`MCP_ANONYMOUS_CUTOFF` a request without a valid one is still served (anonymous discovery, which README
-and ADR 0033 promised); from that day it is 401 before any transport exists.
+**Not yet: authentication at the handshake.** The handshake and the tool list are still served
+without a credential (`RISK-MCP-002`); every tool call is authenticated by the route behind it. The
+dated switch to 401 is deferred until the owner decides on the structural change it needs (brief
+0071, *Deferred*).
 
 **Counters only.** `counters()` and the summary line carry integers: no header, address, account or
 tool argument.
@@ -49,7 +49,6 @@ import logging
 import threading
 import time
 from collections.abc import MutableMapping
-from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -63,16 +62,12 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from app import rate_limit
 from app.config import settings
-from app.database import users_connection
-from app.dependencies import bearer_token, identify
 
 logger = logging.getLogger(__name__)
 
 # Three times the inner tool call's own httpx timeout (fastapi-mcp's 10 s), so a slow but healthy tool call
 # finishes; anything longer is a request holding a slot it is not using.
 REQUEST_DEADLINE_SECONDS: float = 30.0
-ANONYMOUS_CUTOFF_DEFAULT = "2027-01-15"
-_ANONYMOUS_CUTOFF_LATEST = datetime(2027, 1, 15, tzinfo=UTC)
 _SUMMARY_EVERY = 3600.0
 _WARN_EVERY = 300.0
 
@@ -109,50 +104,14 @@ async def bind_mcp_target(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=MCP_UNBOUND_DETAIL)
 
 
-def _clock() -> int:
-    """Now, in UTC epoch seconds. One function so the tests can move it."""
-    return int(datetime.now(UTC).timestamp())
-
-
-# --- the anonymous cutoff ----------------------------------------------------------------------
-
-
-def _date(value: str) -> datetime | None:
-    try:
-        return datetime.strptime(value.strip(), "%Y-%m-%d").replace(tzinfo=UTC)
-    except (AttributeError, ValueError):
-        return None
-
-
-def anonymous_cutoff_problem() -> str | None:
-    """Why the configured `MCP_ANONYMOUS_CUTOFF` is not applied, or None when it is."""
-    configured = _date(settings.mcp_anonymous_cutoff)
-    if configured is None:
-        return f"not a YYYY-MM-DD date; {ANONYMOUS_CUTOFF_DEFAULT} applies"
-    if configured > _ANONYMOUS_CUTOFF_LATEST:
-        return f"later than {ANONYMOUS_CUTOFF_DEFAULT}, which it may not be; the default applies"
-    return None
-
-
-def anonymous_cutoff() -> int:
-    """The moment (UTC epoch seconds) from which an MCP request without a valid credential is
-    refused: the configured date at 00:00 UTC if valid and no later than the default, else the
-    default."""
-    configured = _date(settings.mcp_anonymous_cutoff)
-    if configured is None or configured > _ANONYMOUS_CUTOFF_LATEST:
-        configured = _ANONYMOUS_CUTOFF_LATEST
-    return int(configured.timestamp())
-
-
 # --- counters ----------------------------------------------------------------------------------
 
 _COUNTER_NAMES = (
-    "served_authenticated",
+    "served_with_header",
     "served_anonymous",
     "refused_source",
     "refused_global",
     "refused_anonymous_share",
-    "refused_unauthenticated",
     "refused_unbound_target",
     "timed_out",
 )
@@ -381,12 +340,15 @@ def _source(request: Request) -> str | None:
     )
 
 
-async def _authenticated(request: Request) -> bool:
-    async with users_connection() as db:
-        username, _ = await identify(
-            db, bearer_token(request.headers.get("authorization")), request.headers.get("x-api-key")
-        )
-    return username is not None
+def _carries_credential(request: Request) -> bool:
+    """Whether the request presents a credential header at all — not whether it is valid.
+
+    The tool call behind the request verifies it (every REST route does). Verifying it here too
+    would make this module a new importer of the authentication code, a structural change the
+    owner has not yet decided (brief 0071, *Deferred*). A caller can therefore escape the anonymous
+    share by sending a made-up header; it still meets the global and per-source ceilings.
+    """
+    return bool(request.headers.get("authorization") or request.headers.get("x-api-key"))
 
 
 class BudgetedTransport(FastApiHttpSessionManager):
@@ -394,14 +356,14 @@ class BudgetedTransport(FastApiHttpSessionManager):
 
     # Declared here because the base class assigns them untyped in its __init__.
     _manager_started: bool
+    _manager_ready: asyncio.Event
+    _session_manager: StreamableHTTPSessionManager | None
 
     async def _ensure_session_manager_started(self) -> None:
-        if self._manager_started:
-            return
-        async with self._startup_lock:
-            if self._manager_started:
-                return
-            self._session_manager = _StatelessManager(
+        # Check and create with no await in between, so one event loop cannot start two managers;
+        # no lock, because an asyncio.Lock binds to the first loop that contends for it.
+        if not self._manager_started or self._session_manager is None:
+            manager = _StatelessManager(
                 app=self.mcp_server,
                 event_store=None,
                 json_response=True,
@@ -411,14 +373,15 @@ class BudgetedTransport(FastApiHttpSessionManager):
             ready = asyncio.Event()
 
             async def run_session_manager() -> None:
-                async with self._session_manager.run():
+                async with manager.run():
                     ready.set()
                     await asyncio.Event().wait()
 
+            self._session_manager = manager
+            self._manager_ready = ready
             self._manager_task = asyncio.create_task(run_session_manager())
-            await ready.wait()
-            # Only now: a request that sees the flag outside the lock must find the task group.
             self._manager_started = True
+        await self._manager_ready.wait()
 
     async def handle_fastapi_request(self, request: Request) -> Response:
         if request.method != "POST":
@@ -433,11 +396,8 @@ class BudgetedTransport(FastApiHttpSessionManager):
                 return _json(429, "Too many MCP requests from this source", {"Retry-After": "1"})
             return _json(503, "The MCP server is at capacity", {"Retry-After": "1"})
         try:
-            authenticated = await _authenticated(request)
-            if not authenticated:
-                if _clock() >= anonymous_cutoff():
-                    _count("refused_unauthenticated")
-                    return _json(401, "Not authenticated", {"WWW-Authenticate": "Bearer"})
+            credentialed = _carries_credential(request)
+            if not credentialed:
                 try:
                     reservation.mark_anonymous()
                 except Refused as refused:
@@ -450,7 +410,7 @@ class BudgetedTransport(FastApiHttpSessionManager):
             except TimeoutError:
                 _count("timed_out")
                 return _json(504, "The MCP request took too long")
-            _count("served_authenticated" if authenticated else "served_anonymous")
+            _count("served_with_header" if credentialed else "served_anonymous")
             return response
         finally:
             reservation.release()

@@ -1395,19 +1395,20 @@ residual_risks:
 
   - id: RISK-MCP-002
     statement: >
-      The MCP endpoint answers without a credential until MCP_ANONYMOUS_CUTOFF (default
-      2027-01-15, SHIM-MCP-001). Since brief 0071 that costs no session: the transport is
-      stateless, a request without a valid credential holds at most a quarter of the in-flight
-      budget, and it is torn down when it ends (REV-004, tests/unit/test_mcp_budget.py). What
-      remains is disclosure of the tool inventory — all 27 tools, their descriptions and input
-      schemas — to anyone who can reach /api/mcp; it is published in README.md and
-      ops/surfaces/mcp-tools.json anyway. Every tool CALL is authenticated by the REST endpoint
-      it is forwarded to and may reach only that endpoint (REV-005,
-      tests/unit/test_mcp_target_binding.py). From the cutoff every MCP request without a valid
-      credential is 401 before any transport exists, which closes this risk in behaviour; it is
-      removed from this register with the contract step that deletes the anonymous branch.
+      The MCP endpoint itself is unauthenticated: anyone who can reach /api/mcp may complete a
+      handshake and list all 27 tools — names, descriptions and input schemas — without a
+      credential. Every tool CALL is authenticated by the REST endpoint it is forwarded to, and
+      since brief 0071 may reach only that endpoint (REV-005,
+      tests/unit/test_mcp_target_binding.py). Since brief 0071 an anonymous handshake also costs
+      no session: the transport is stateless, a request without a credential header holds at
+      most a quarter of the in-flight budget, and it is torn down when it ends (REV-004,
+      tests/unit/test_mcp_budget.py). What remains is disclosure of the inventory, which is
+      published in README.md and ops/surfaces/mcp-tools.json anyway, so it stays accepted.
+      Closing it — authenticating every MCP request before the transport, behind a dated soak —
+      is designed (ADR 0045) and deferred: it makes backend/app/mcp_gate.py an importer of
+      backend/app/dependencies.py, a fan-in ratchet raise (RULE-ARCH-003) the owner decides.
     owner: maintainer
-    re_open_trigger: "a tool is added whose name or description reveals something not already public, the endpoint is exposed on a network where enumeration itself matters, or the cutoff is moved"
+    re_open_trigger: "a tool is added whose name or description reveals something not already public, the endpoint is exposed on a network where enumeration itself matters, or the owner approves the dependencies.py fan-in raise"
     decision_record: docs/adr/0045-mcp-authentication-and-resource-budget.md
 
   - id: RISK-OPS-006

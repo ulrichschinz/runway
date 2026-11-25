@@ -3,17 +3,17 @@
 - **Date:** 2026-11-25
 - **Status:** Accepted
 - **Scope:** `backend/app/mcp_gate.py` (new), `backend/app/main.py` (the MCP mount, the app-level
-  dependency), `backend/app/dependencies.py` (`identify`, `bearer_token`),
-  `backend/app/config.py` (`MCP_MAX_INFLIGHT`, `MCP_SOURCE_MAX_INFLIGHT`, `MCP_ANONYMOUS_CUTOFF`),
-  both compose files, `SHIM-MCP-001`, `RISK-MCP-002`
+  dependency), `backend/app/config.py` (`MCP_MAX_INFLIGHT`, `MCP_SOURCE_MAX_INFLIGHT`), both compose
+  files, `RISK-MCP-002`
 - **Brief:** [0071](../briefs/0071-mcp-calls-reach-their-own-route-and-hold-no-session.md)
-- **Amends:** the promises of [ADR 0033](0033-the-mcp-server-nobody-could-connect-to.md) (open
-  connection) and [ADR 0037](0037-the-mcp-surface-is-an-allowlist.md) (what the allowlist binds)
+- **Amends:** [ADR 0033](0033-the-mcp-server-nobody-could-connect-to.md) (the transport) and
+  [ADR 0037](0037-the-mcp-surface-is-an-allowlist.md) (what the allowlist binds)
 
 Milestone M5 of the security remediation plan: findings **REV-005** and **REV-004** of the November
 2026 review, and the residual risk `RISK-MCP-002`. Decision gate **D5**, taken as recommended:
 authentication before any session is created, and stateless Streamable HTTP where the real session
-test allows it.
+test allows it. Stateless means no session is created at all, so the first half holds by construction;
+authenticating the handshake itself is designed here (Decision 4) and **deferred** (see there).
 
 ## Context
 
@@ -64,24 +64,31 @@ create, and needs four limits to bound what stateless does not create.
 
 ## Decision 3 — reserve before work, and a deadline
 
-`mcp_gate.BUDGET.reserve` takes a slot under one lock before the credential is looked up: a global
+`mcp_gate.BUDGET.reserve` takes a slot under one lock before the transport reads a byte: a global
 ceiling (`MCP_MAX_INFLIGHT`, 32), a per-source ceiling (`MCP_SOURCE_MAX_INFLIGHT`, 8; the source as the
-login budget determines it), and, for a request without a valid credential, a quarter of the global
-ceiling. Full: 503 (global, anonymous share) or 429 (source), `Retry-After: 1`, no database work. Every
+login budget determines it), and, for a request without any credential header, a quarter of the global
+ceiling. Presence, not validity: a made-up header escapes the anonymous share but not the other two. Full: 503 (global, anonymous share) or 429 (source), `Retry-After: 1`, no database work. Every
 MCP request is bounded by 30 seconds and answered 504 past it, which also bounds a client that
 disconnects. The body limit (1 MiB, `BodyLimitMiddleware`) already applied. Per-worker and in-process,
 like the login budget (`RISK-SEC-003`).
 
-## Decision 4 — authentication at the handshake, by date
+## Decision 4 — authentication at the handshake: designed, deferred
 
-Every MCP request's credential is resolved by `dependencies.identify`, now the one implementation behind
-`get_current_user` too, so every credential form and its revocation (ADR 0044) apply identically — but
-without an audit row: the tool call behind it writes that row, and an unauthenticated caller must not be
-able to append any (`RISK-OPS-006`). Until `MCP_ANONYMOUS_CUTOFF` (default **2027-01-15**, earlier only,
-like `API_KEY_LEGACY_CUTOFF`) a request without a valid credential is still served, within its share,
-and counted; from that day it is 401 before any transport exists. That is `SHIM-MCP-001`, the expand and
-soak of the plan's "no hard switch at the handshake without expand/soak/contract": ADR 0033 and the
-README promised anonymous discovery, and a consumer of it would otherwise break on the deploy.
+The plan's switch is: resolve every MCP request's credential with the same code as `get_current_user`
+(extracted as one `identify` function so the two cannot drift, ADR 0044's revocation included, no audit
+row so an unauthenticated caller cannot append any), serve a request without a valid one during a soak,
+and refuse it with 401 before any transport from a published date (`MCP_ANONYMOUS_CUTOFF`, earlier
+only, as `API_KEY_LEGACY_CUTOFF`), recorded as a shim with an expiry. It was implemented and tested in
+the working tree of brief 0071 and then **taken out before the commit**: it makes `mcp_gate.py` an
+importer of `backend/app/dependencies.py`, whose fan-in ratchet (`RULE-ARCH-003`, baseline 6 in
+`ops/structure-baseline.toml`) may only be raised as a deliberate owner decision. That decision is not
+the implementing agent's to take (`RISK-GOV-001`). Without it the handshake stays open
+(`RISK-MCP-002`, accepted as before) — but it now costs no session, which was REV-004's harm.
+
+*Trigger:* the owner approves raising the `dependencies.py` fan-in from 6 to 7 for this importer — the
+same reasoning as the 2026-08-25 raise for `/inbox` (one more dependent on the auth choke point instead
+of a second auth implementation). Then: expand (classify, count, serve) in one change, the dated 401 at
+least four weeks after its deploy, and the contract removing the anonymous branch.
 
 ## Decision 5 — counters only
 
@@ -94,17 +101,15 @@ operation id, both strings this repository wrote.
 
 | Step | What | When |
 |---|---|---|
-| Expand | Binding, stateless transport, budget, deadline, handshake classification; anonymous still served | brief 0071 |
-| Soak | Read `served_anonymous` on the host | until the cutoff |
-| Switch | Anonymous MCP requests 401 | 2027-01-15 by date (or earlier by setting) |
-| Contract | Remove the anonymous branch, share and setting; remove `SHIM-MCP-001` and `RISK-MCP-002` | its own change, after 2027-01-15, before 2027-01-31 |
+| Expand | Binding, stateless transport, budget, deadline | brief 0071 |
+| Handshake authentication | Decision 4: classify and count, then 401 without a valid credential by date, then remove the anonymous branch | deferred — trigger: owner approval of the fan-in raise |
 
 ## Consequences
 
 - ADR 0033: Streamable HTTP and the header allowlist stand; the transport is stateless; the open
-  connection becomes a dated shim. ADR 0037: the allowlist now binds the handler a call runs, not only
+  connection stays open (`RISK-MCP-002`) until Decision 4 is taken up. ADR 0037: the allowlist now binds the handler a call runs, not only
   the name it is called by.
-- MCP tool names and the OpenAPI schema are byte-identical; three env vars are added.
+- MCP tool names and the OpenAPI schema are byte-identical; two env vars are added.
 - Both controls of Decision 1 and the transport of Decision 2 rest on private seams of the pinned
   `fastapi-mcp` 0.4.0 and `mcp` 1.29.0 (ADR 0004); a version bump must re-run
   `test_mcp_target_binding.py`, `test_mcp_budget.py` and `test_mcp_session.py`, which the pin already

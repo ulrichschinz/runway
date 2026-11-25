@@ -155,42 +155,16 @@ class TestCredentialsReachTheEndpoint:
         assert not result.isError, result.content[0].text
         assert json.loads(result.content[0].text)["username"] == registered["username"]
 
-    def test_an_unauthenticated_session_is_refused_at_the_tool(self, api_key, monkeypatch):
-        """During the soak the connection is open; the endpoint behind it never was.
+    def test_an_unauthenticated_session_is_refused_at_the_tool(self, api_key):
+        """The connection is deliberately open; the endpoint behind it is not.
 
-        Until MCP_ANONYMOUS_CUTOFF a client may connect and list tools without a credential
-        (SHIM-MCP-001, RISK-MCP-002); the clock is pinned inside that window so this test does not
-        change meaning on the day. What must not happen, in any phase, is a *call* succeeding
-        without one. After the cutoff the handshake itself is refused: test_mcp_budget.py.
+        Nothing authenticates the MCP endpoint itself — a client may connect and list tools without
+        a credential. That is recorded as RISK-MCP-002 (since brief 0071 the transport is stateless,
+        so it costs no session). What must not happen is a *call* succeeding without one.
         """
-        from datetime import UTC, datetime
-
-        from app import mcp_gate
-
-        monkeypatch.setattr(
-            mcp_gate, "_clock", lambda: int(datetime(2026, 12, 1, tzinfo=UTC).timestamp())
-        )
         _, result = _run({})
         assert result.isError
         assert "401" in result.content[0].text
-
-    def test_after_the_cutoff_a_client_without_a_credential_cannot_connect(
-        self, client, monkeypatch
-    ):
-        """The switch of SHIM-MCP-001, seen from a real client: no session, no tool list."""
-        from datetime import UTC, datetime
-
-        from app import mcp_gate
-
-        monkeypatch.setattr(
-            mcp_gate, "_clock", lambda: int(datetime(2027, 2, 1, tzinfo=UTC).timestamp())
-        )
-        try:
-            _run({}, tool=None)
-        except BaseException as error:  # the SDK wraps the HTTP error in exception groups
-            assert "401" in repr(error) or "Unauthorized" in repr(error), repr(error)
-        else:
-            raise AssertionError("a client without a credential completed a session")
 
 
 # The eleven operations the allowlist took off the MCP surface (ADR 0037). Each one carries a

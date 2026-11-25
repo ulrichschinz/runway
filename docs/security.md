@@ -226,13 +226,12 @@ Unicode look-alike values, not the status code.
 **The transport holds no session and has a budget** (finding REV-004). Stateless Streamable HTTP: no
 `Mcp-Session-Id`, a fresh transport per request torn down when it ends; `GET`/`DELETE` are 405. Every
 request reserves a slot before any work — 32 in total, 8 per source, a quarter of the total for requests
-without a valid credential (`MCP_MAX_INFLIGHT`, `MCP_SOURCE_MAX_INFLIGHT`) — and is cancelled after 30
+without a credential header (`MCP_MAX_INFLIGHT`, `MCP_SOURCE_MAX_INFLIGHT`) — and is cancelled after 30
 seconds. `backend/tests/unit/test_mcp_budget.py`.
 
-**The handshake is authenticated from 2027-01-15** (`MCP_ANONYMOUS_CUTOFF`, earlier only;
-`SHIM-MCP-001`, `RISK-MCP-002`). Every MCP request's credential is resolved by `dependencies.identify`,
-the same code as `get_current_user` (revocation included), without an audit row. Until the cutoff a
-request without a valid one may still list the tools; from it, 401 before any transport exists.
+**The handshake is not authenticated yet** (`RISK-MCP-002`): anyone who can reach the endpoint may
+list the tools; every call is authenticated by its route. The dated switch to 401 is designed and
+deferred (ADR 0045).
 
 ## Passwords
 

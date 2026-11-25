@@ -65,10 +65,6 @@ async def lifespan(app: FastAPI):
     cutoff_problem = legacy_cutoff_problem()
     if cutoff_problem:
         logger.warning("API_KEY_LEGACY_CUTOFF ignored: " + cutoff_problem)
-    # RISK-MCP-002 / SHIM-MCP-001 (brief 0071): the same shape for the MCP anonymous cutoff.
-    mcp_cutoff_problem = mcp_gate.anonymous_cutoff_problem()
-    if mcp_cutoff_problem:
-        logger.warning("MCP_ANONYMOUS_CUTOFF ignored: " + mcp_cutoff_problem)
     logger.info(
         "startup complete",
         # The storage mode as the resolver will apply it, so an operator can see the switch
@@ -79,9 +75,6 @@ async def lifespan(app: FastAPI):
             "task_storage_mode": task_storage.storage_mode(),
             "login_trusted_proxies": len(rate_limit.trusted_networks(settings.trusted_proxies)),
             "legacy_key_cutoff": datetime.fromtimestamp(legacy_cutoff(), UTC).date().isoformat(),
-            "mcp_anonymous_cutoff": datetime.fromtimestamp(mcp_gate.anonymous_cutoff(), UTC)
-            .date()
-            .isoformat(),
             "mcp_max_inflight": settings.mcp_max_inflight,
             "mcp_source_max_inflight": settings.mcp_source_max_inflight,
         },
@@ -171,8 +164,7 @@ def health():
 # `RunwayMCP` (backend/app/mcp_gate.py, brief 0071, ADR 0045) is FastApiMCP with three controls:
 # every tool call must reach the route its tool was made from (REV-005 — a `..` in a path argument
 # used to reach REST-only routes), the transport is stateless and holds no session (REV-004), and
-# every MCP request is reserved in an in-flight budget, bounded by a deadline, and — from
-# MCP_ANONYMOUS_CUTOFF — refused without a valid credential (RISK-MCP-002, SHIM-MCP-001).
+# every MCP request is reserved in an in-flight budget and bounded by a deadline.
 mcp = mcp_gate.RunwayMCP(
     app,
     headers=["authorization", "x-api-key"],

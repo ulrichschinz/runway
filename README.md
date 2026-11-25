@@ -105,17 +105,10 @@ API_KEY_LEGACY_CUTOFF=2027-01-15
 # The MCP endpoint's budget: MCP requests in flight at once, in total and per network source
 # (the source as for the login budget, TRUSTED_PROXIES included). The request above either is
 # refused at once — 503 for the total, 429 for one source, with Retry-After — before any other
-# work; a quarter of the total is the most that requests without a valid credential may hold.
+# work; a quarter of the total is the most that requests without a credential header may hold.
 # Every MCP request is also bounded by 30 seconds (504). Both compose files pass both through.
 MCP_MAX_INFLIGHT=32
 MCP_SOURCE_MAX_INFLIGHT=8
-
-# The day (UTC, YYYY-MM-DD) from which an MCP request without a valid API key or session is
-# refused with 401 — the handshake and the tool list included, without a restart. Until then
-# anyone who can reach /api/mcp may still list the tools (every tool call needs a credential
-# either way). Earlier only: a later or malformed value is ignored with a startup WARNING and
-# the default applies. Both compose files pass it through. See docs/operations.md, "MCP".
-MCP_ANONYMOUS_CUTOFF=2027-01-15
 
 # Comma-separated addresses or CIDR networks of the proxies in front of the backend whose
 # X-Forwarded-For the login limiter believes (in the shipped setup: nginx and the TLS proxy in
@@ -305,11 +298,9 @@ wrapper. Add to `claude_desktop_config.json`:
 Both credential shapes work — `X-Api-Key: <key>` and `Authorization: Bearer <key>` — because
 `backend/app/main.py` forwards both into the tool call. Prefer `X-Api-Key`: the Bearer form is
 `SHIM-SEC-006`, a dated compatibility shim, and it will stop working when the shim is removed.
-Every tool call is authenticated by the REST endpoint behind it. **Until 2027-01-15** the MCP
-endpoint itself still answers without a credential — anyone who can reach it may list the tools;
-**from that day** (`MCP_ANONYMOUS_CUTOFF`, which can only bring it forward) every MCP request
-needs one, the handshake included, and is otherwise `401` (`RISK-MCP-002`, `SHIM-MCP-001`). Send
-the key on every request, as the snippets above do.
+The MCP endpoint itself is open — anyone who can reach it may list the tools — but every tool
+call is authenticated by the REST endpoint behind it (`RISK-MCP-002`). Send the key on every
+request, as the snippets above do: a later release is planned to require it on the handshake too.
 
 The transport is **stateless** Streamable HTTP (brief 0071, ADR 0045): the server issues no
 `Mcp-Session-Id`, keeps nothing between requests, and answers `GET` and `DELETE` on `/mcp` with

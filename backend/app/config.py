@@ -51,13 +51,9 @@ class Settings(BaseSettings):
     # The MCP transport's budget (REV-004, brief 0071, ADR 0045): MCP requests allowed in flight
     # at once, in total and per network source (the source as the login budget determines it,
     # TRUSTED_PROXIES included). A request above either is refused before any other work, 503 or
-    # 429. A quarter of the total is the most that requests without a valid credential may hold.
+    # 429. A quarter of the total is the most that requests without a credential header may hold.
     mcp_max_inflight: int = 32
     mcp_source_max_inflight: int = 8
-    # The day (UTC, YYYY-MM-DD) from which an MCP request without a valid credential is refused
-    # with 401 before any transport exists (RISK-MCP-002, SHIM-MCP-001). Until then anonymous
-    # discovery is still served, statelessly. Earlier only, never later — like the key cutoff.
-    mcp_anonymous_cutoff: str = "2027-01-15"
     # How much of the JSON log stream is emitted. The *format* is not configurable and
     # neither is the redaction filter: a setting that turns a control off is the setting
     # that gets turned off at 3am. An unrecognised value falls back to INFO rather than
