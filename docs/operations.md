@@ -573,6 +573,13 @@ Decision 1, which also lists what the eventual retention job must respect). Unti
 this repository deletes, archives or vacuums a row. Free space on the partition is the operator's to watch
 (`df -h /opt/services/runway`).
 
+**Refusals an anonymous caller can repeat are one row per window, with a count.** A refused login is
+reported by the limiter (`auth.login.throttled … (refusals: N)`, brief 0069); a refused registration
+(`auth.registered`, outcome `refused`/`failure`) writes its first row of a kind in a login window as before,
+and the rest are carried as `… (refusals: N)` by the next row of that kind or by a summary
+`…: N further refusals in the last window` (hourly, and at shutdown). So such rows cannot grow the file at
+a client's request rate; to count refused registrations, sum the `N`s rather than the rows.
+
 ### Is anyone still using the Bearer-as-API-key shape?
 
 The question `SHIM-SEC-006` has been blocked on since Step 13, and the reason this table exists. Three

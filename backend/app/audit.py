@@ -36,6 +36,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -319,6 +321,90 @@ def route_of(request: Request | None) -> str | None:
     return f"{method} {template}" if method else str(template)
 
 
+# --- refusals an unauthenticated caller can repeat (RISK-OPS-006, second review of brief 0073) -----
+#
+# `POST /auth/register` needs no credential and has no limiter, and each refusal wrote one row: a
+# client could grow `audit.db` linearly with its request rate. Like the login limiter's reports
+# (brief 0069), the first refusal of a kind in a window is a row; later ones are counted and carried
+# by the next row of that kind — or by a summary row once the window has passed with nothing to carry
+# it. So such rows are bounded per kind and window whatever the request rate, and every row says how
+# many refusals it stands for. A kind is (event, outcome, detail); callers pass a constant detail, so
+# the set of kinds is fixed by the code and the counters cannot grow either. In-process, like the
+# limiter: a count not yet written is lost on a restart (at most one window's worth per kind).
+
+
+@dataclass
+class _Coalesced:
+    written_at: float | None = None
+    unwritten: int = 0
+    route: str | None = None
+
+
+_coalesce_lock = threading.Lock()
+_coalesced: dict[tuple[str, str, str], _Coalesced] = {}
+
+
+def _clock() -> float:
+    return time.monotonic()
+
+
+def record_refusal(
+    event: str, *, outcome: str, actor: str | None, route: str | None, detail: str
+) -> None:
+    """Record a refusal an unauthenticated caller can repeat at will. Never raises.
+
+    The first of its kind in a window is written as `record` would write it; the rest are counted.
+    The next row of the kind, after the window, carries the count in its detail."""
+    key = (event, outcome, detail)
+    now = _clock()
+    with _coalesce_lock:
+        bucket = _coalesced.setdefault(key, _Coalesced())
+        bucket.unwritten += 1
+        bucket.route = route
+        if bucket.written_at is not None and now - bucket.written_at < _coalesce_window():
+            return
+        refusals, bucket.unwritten, bucket.written_at = bucket.unwritten, 0, now
+    text = detail if refusals == 1 else f"{detail} (refusals: {refusals})"
+    record(event, outcome=outcome, actor=actor, route=route, detail=text)
+
+
+def flush_refusals(*, everything: bool = False) -> None:
+    """Write a summary row for every kind whose window has passed with refusals still uncounted
+    (`everything`: regardless of the window, at shutdown). Never raises."""
+    now = _clock()
+    due: list[tuple[tuple[str, str, str], int, str | None]] = []
+    with _coalesce_lock:
+        for key, bucket in _coalesced.items():
+            if not bucket.unwritten:
+                continue
+            if (
+                not everything
+                and bucket.written_at is not None
+                and (now - bucket.written_at < _coalesce_window())
+            ):
+                continue
+            due.append((key, bucket.unwritten, bucket.route))
+            bucket.unwritten, bucket.written_at = 0, now
+    for (event, outcome, detail), refusals, route in due:
+        record(
+            event,
+            outcome=outcome,
+            route=route,
+            detail=f"{detail}: {refusals} further refusals in the last window",
+        )
+
+
+def reset_refusals() -> None:
+    """Test seam, like `rate_limit.reset_all`: the counters are module state."""
+    with _coalesce_lock:
+        _coalesced.clear()
+
+
+def _coalesce_window() -> float:
+    # The login limiter's window: one notion of "a window" for every coalesced audit row.
+    return float(settings.login_rate_window_seconds)
+
+
 # --- the size of the store (RISK-OPS-006, brief 0073, ADR 0047 Decision 1) -------------------------
 #
 # Measured, warned about, remembered at its largest — and never pruned. How long rows must be kept is
@@ -392,4 +478,5 @@ async def watch_size(interval: float | None = None) -> None:
     """Measure every `interval` seconds until cancelled (the lifespan cancels it at shutdown)."""
     while True:
         await asyncio.sleep(SIZE_INTERVAL_SECONDS if interval is None else interval)
+        await asyncio.to_thread(flush_refusals)
         await asyncio.to_thread(measure)

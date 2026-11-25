@@ -96,6 +96,8 @@ async def lifespan(app: FastAPI):
         size_watch.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await size_watch
+        # Refusals counted but not yet written (brief 0073, second review) are not lost at a stop.
+        audit.flush_refusals(everything=True)
 
 
 app = FastAPI(
