@@ -118,3 +118,9 @@ admin routes are REST-only (ADR 0037), and the snapshot is unchanged.
   993 passed, frontend 767 passed, 57 fixture arms passed, 0 failed; 47 of 50 executable rules proven able
   to fail. The **container tier was skipped** on this arm64 host (`RISK-TEST-001`: no arm64 archlinux
   image); it runs in CI only and was not observed here. No Taskwarrior path changed in this package.
+- Review round, `make check` on `e28bcc4`: red once on the stale index (`RULE-IDX-001`, before `make fix`
+  rebuilt it), then **GREEN** (34 s of 180 s).
+- Review round, `make verify` on `e28bcc4` in a clean, bootstrapped detached worktree: **GREEN** (256 s of
+  600 s) — unit 996 passed (the 3 new CLI tests included), frontend 767 passed, 57 fixture arms passed,
+  0 failed; 47 of 50 executable rules proven able to fail. The **container tier was skipped** on this arm64
+  host (`RISK-TEST-001`); it runs in CI only and was not observed here.
