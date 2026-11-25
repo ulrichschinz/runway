@@ -68,3 +68,9 @@ Coverage floor is a ratchet, not a target — raise it, never lower it to fit a 
   so a test that does either needs the JWT. A legacy (pre-2026-11) key exists only in a database
   written in the old shape — `test_api_keys.py::_write_pre_m4_database` — and is refused once
   `API_KEY_LEGACY_CUTOFF` is set to a past date; the setting may only move the date earlier.
+- **MCP is stateless, budgeted and bound** (brief 0071, ADR 0045, `app/mcp_gate.py`). No session id is
+  issued; each POST gets its own transport. `mcp_gate` keeps module state (budget, counters) — reset it
+  with `mcp_gate.reset_all()` in a test that measures it. A test that connects without a credential must
+  pin `mcp_gate._clock` inside or after the soak: from `MCP_ANONYMOUS_CUTOFF` (2027-01-15) an anonymous
+  MCP request is 401. A tool call reaches only its own route — `mcp_gate.bind_mcp_target` is the
+  app's first dependency on every route and is inert for REST requests.

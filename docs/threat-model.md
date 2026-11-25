@@ -169,7 +169,11 @@ list, and the container tier repeats it against the binary.
 
 Two exclusions are worth naming. `/ ? # %` are refused not because Taskwarrior minds them but
 because fastapi-mcp 0.4.0 substitutes a path parameter into the URL unencoded, so a project
-named `a/b` would address a different route over MCP. And a value a client merely resends —
+named `a/b` would address a different route over MCP. That refusal only ever covered *new*
+names, and an MCP caller can send any value: finding REV-005 showed `uuid="../auth/apikey"`
+reaching a REST-only route. Since brief 0071 every MCP path argument is sent as one encoded
+segment and `bind_mcp_target` refuses a call whose selected route is not its tool's own
+(enforced: `backend/tests/unit/test_mcp_target_binding.py`, ADR 0045). And a value a client merely resends —
 a tag the task already carries, the project it already has — is deliberately **not** validated:
 live users hold data that predates these rules, and re-checking it would lock their tasks.
 
@@ -613,6 +617,8 @@ API-key, user or admin operation is a tool, so an agent — or a prompt injected
 key over MCP cannot read it back through `GET /auth/apikey`, rotate it, change the password, or reach
 an admin route, even when the account is an admin. `backend/tests/unit/test_mcp_session.py` pins the
 list as a client receives it, and a call to a removed name returns "Unknown tool" without the key.
+Until brief 0071 a listed tool could still be *pointed* at a removed route with a `..` path argument
+(finding REV-005); every call is now bound to its own handler (`test_mcp_target_binding.py`, ADR 0045).
 REST is unchanged: the same key used directly against the API still reaches every route.
 
 ### The compatibility shim
@@ -674,6 +680,15 @@ the Taskwarrior call, so a hung binary is a failed request rather than a worker 
 service, checked in. What does not exist: any request size limit (`RISK-SEC-004`), any pruning of
 `audit.db` (`RISK-OPS-006`), any capacity budget, and any measurement of the partition all three
 stores share.
+
+**The MCP endpoint is the exception** (finding REV-004, brief 0071, ADR 0045). It used to keep a session
+— a server transport and a task — for every `initialize`, anonymous ones included, with no expiry and no
+cap. It is now stateless (nothing outlives a request; `live_transports` returns to zero), reserves a slot
+before any work under a global, a per-source and an anonymous ceiling, and cancels a request after 30
+seconds. Enforced: `backend/tests/unit/test_mcp_budget.py` (the request above each ceiling refused,
+capacity returned after completion and after the deadline, a 50-request burst leaving no transport). The
+ceilings are per process (`RISK-SEC-003`), and until `MCP_ANONYMOUS_CUTOFF` (2027-01-15) anyone who can
+reach the endpoint may list the tools (`RISK-MCP-002`, `SHIM-MCP-001`).
 
 ---
 

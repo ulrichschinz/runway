@@ -150,3 +150,33 @@ shims:
     expires: 2027-04-30
     re_open_trigger: "the expiry passes, a rollback to an image before brief 0067 happens after its soak, or the bcrypt pin blocks a fix"
     decision_record: docs/adr/0044-credential-lifecycle-jwt-password-and-api-key.md
+
+  - id: SHIM-MCP-001
+    what: >
+      `mcp_gate.BudgetedTransport.handle_fastapi_request` serves an MCP request that carries no
+      valid credential — `initialize`, `tools/list`, `ping` — while `_clock()` is before
+      `anonymous_cutoff()` (MCP_ANONYMOUS_CUTOFF, default 2027-01-15), statelessly and within the
+      anonymous quarter of the in-flight budget (backend/app/mcp_gate.py).
+    why: >
+      README and ADR 0033 promised that "anyone who can reach it may list the tools". A client,
+      monitor or registry that lists the tools without a key would break on the deploy if the
+      handshake were refused at once, and the plan (M5.2) forbids a hard authentication switch at
+      the handshake without a soak. The transport is stateless, so serving it costs no session
+      (REV-004); what it still discloses is the tool inventory, which is public (RISK-MCP-002).
+    removal: >
+      The contract step of brief 0071, its own change, after the cutoff: delete the anonymous
+      branch, the anonymous share and the MCP_ANONYMOUS_CUTOFF setting, so a request without a
+      valid credential is 401 by construction, not by date; then close RISK-MCP-002.
+    evidence: >
+      The `served_anonymous` counter in the hourly "mcp budget" log line on the deploy host: a
+      non-zero value names traffic that still lists tools without a key (the counter carries no
+      caller). After the cutoff, `refused_unauthenticated` takes its place. Both are read on the
+      host, not something this repository can see; the unit tests show each phase's behaviour.
+    owner: maintainer
+    # Written by the implementing agent on the owner's order of 2026-11-24 to carry out M5;
+    # the owner has not yet reviewed this entry itself (RISK-GOV-001: no independent review).
+    # Explicit owner sign-off before merge is a deferred step of brief 0071.
+    approved_on: 2026-11-25
+    expires: 2027-01-31
+    re_open_trigger: "the expiry passes, a consumer is found that lists tools without a key, or MCP_ANONYMOUS_CUTOFF is set earlier in production"
+    decision_record: docs/adr/0045-mcp-authentication-and-resource-budget.md

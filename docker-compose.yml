@@ -36,6 +36,10 @@ services:
       - LOGIN_RATE_MAX_KEYS=${LOGIN_RATE_MAX_KEYS:-10000}
       # Brief 0070: legacy API keys are refused from this day; earlier only, never later.
       - API_KEY_LEGACY_CUTOFF=${API_KEY_LEGACY_CUTOFF:-2027-01-15}
+      # Brief 0071: the MCP budget, and the day anonymous MCP discovery ends (earlier only).
+      - MCP_MAX_INFLIGHT=${MCP_MAX_INFLIGHT:-32}
+      - MCP_SOURCE_MAX_INFLIGHT=${MCP_SOURCE_MAX_INFLIGHT:-8}
+      - MCP_ANONYMOUS_CUTOFF=${MCP_ANONYMOUS_CUTOFF:-2027-01-15}
     network_mode: host
     restart: unless-stopped
     # The backend now writes a JSON line per request. Docker's default json-file driver has

@@ -1,6 +1,7 @@
 from aiosqlite import Connection
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security.utils import get_authorization_scheme_param
 
 from app import audit, database, task_storage
 from app.auth import TokenClaims, decode_token
@@ -38,17 +39,47 @@ async def get_current_user(
     `request` is here for the route template alone. It is not a body or query parameter, so it
     adds nothing to the OpenAPI schema and no route or MCP tool moves.
     """
+    username, outcome = await identify(
+        db, credentials.credentials if credentials else None, x_api_key
+    )
+    if username is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=outcome)
+    _record(username, outcome, request)
+    return username
+
+
+def bearer_token(authorization: str | None) -> str | None:
+    """The credential of an `Authorization: Bearer …` header, exactly as `HTTPBearer` reads it.
+
+    For callers outside the dependency system — the MCP handshake (brief 0071) — so a header the
+    REST routes would not accept is not accepted there either.
+    """
+    scheme, credential = get_authorization_scheme_param(authorization)
+    if not (authorization and scheme and credential) or scheme.lower() != "bearer":
+        return None
+    return credential
+
+
+async def identify(
+    db: Connection, bearer_credential: str | None, x_api_key: str | None
+) -> tuple[str | None, str]:
+    """Who a credential names: `(username, shape)`, or `(None, detail)` for a refusal.
+
+    The one implementation of authentication. `get_current_user` wraps it with the 401 and the
+    audit row; the MCP handshake (brief 0071) calls it without either, because the tool call
+    behind the handshake records itself and an unauthenticated caller must not be able to append
+    rows (`RISK-OPS-006`). Two copies of this logic would drift — that was finding SEC-6.
+    """
     if x_api_key:
         # WAIVER-SEC-003 (ADR 0044 Decision 6): only the hash is compared, never the cleartext
         # column. Unknown, malformed, expired, revoked, and legacy after the cutoff: one answer.
         username = await _api_key_owner(db, x_api_key)
         if username is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-        _record(username, audit.SHAPE_API_KEY_HEADER, request)
-        return username
+            return None, "Invalid API key"
+        return username, audit.SHAPE_API_KEY_HEADER
 
-    if credentials:
-        claims = decode_token(credentials.credentials)
+    if bearer_credential:
+        claims = decode_token(bearer_credential)
         if claims:
             # A JWT is signed, not looked up: it outlives the account it names, and it used to
             # outlive every password change too (finding REV-001). So it is held to the row it
@@ -59,11 +90,8 @@ async def get_current_user(
             stored = await get_auth_version(db, claims.username)
             presented = await _presented_version(db, claims)
             if stored is None or presented != stored:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
-                )
-            _record(claims.username, audit.SHAPE_BEARER_JWT, request)
-            return claims.username
+                return None, "Not authenticated"
+            return claims.username, audit.SHAPE_BEARER_JWT
 
         # SHIM-SEC-006 — an API key presented in the Bearer slot.
         #
@@ -76,12 +104,11 @@ async def get_current_user(
         # Tracked in rules/shims.yaml with a removal step. Deliberately last: a real JWT is
         # tried first, so this costs one database read only for a credential that was going
         # to be rejected anyway.
-        owner = await _api_key_owner(db, credentials.credentials)
+        owner = await _api_key_owner(db, bearer_credential)
         if owner is not None:
-            _record(owner, audit.SHAPE_BEARER_API_KEY, request)
-            return owner
+            return owner, audit.SHAPE_BEARER_API_KEY
 
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return None, "Not authenticated"
 
 
 async def _presented_version(db: Connection, claims: TokenClaims) -> int:

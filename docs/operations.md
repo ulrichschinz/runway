@@ -934,6 +934,47 @@ It reads the files; a host that starts the image some other way is outside what 
 not adjust it: a limiter shared by every worker — Traefik's rate-limit middleware at the edge, or a counter in
 a store all workers use — has to exist first.
 
+## MCP
+
+Since brief 0071 (findings REV-004, REV-005; ADR 0045) the MCP endpoint (`/api/mcp`) is **stateless**: it
+issues no `Mcp-Session-Id` and keeps nothing between requests, so a restart or deploy loses no MCP state
+(there is none) and clients need no reconnect logic beyond retrying a request. `GET` and `DELETE` on it
+answer `405` by design.
+
+**Capacity.** Every MCP request takes a slot before any work: at most `MCP_MAX_INFLIGHT` (32) at once in
+total and `MCP_SOURCE_MAX_INFLIGHT` (8) per network source — the source as for the login budget, so with
+`TRUSTED_PROXIES` unset every client behind nginx counts against the total only — and requests without a
+valid credential at most a quarter of the total. Above that: `503` (total) or `429` (source), `Retry-After:
+1`. A request longer than 30 seconds is cancelled and answered `504`. Both compose files pass the two
+variables through; raise them in `/opt/services/runway/.env` and `docker compose up -d backend`. Like the
+login budget they are per process (`RISK-SEC-003`).
+
+**What it is doing.** The backend logs one INFO line `mcp budget` at most once an hour, and a WARNING
+`mcp budget: a request was refused for capacity` at most once in five minutes, each with `mcp_counters`:
+`served_authenticated`, `served_anonymous`, `refused_source`, `refused_global`, `refused_anonymous_share`,
+`refused_unauthenticated`, `refused_unbound_target`, `timed_out`, `inflight`, `inflight_anonymous`,
+`live_transports`. Integers only — no caller, address, header or argument. `live_transports` above zero
+with no traffic would mean a torn-down request left a server task behind: report it. A
+`MCP tool call refused: it does not reach its own route` WARNING names a tool whose argument tried to
+address another route (REV-005); it is refused before the credential is looked up.
+
+```sh
+sudo docker compose logs backend | grep '"mcp budget' | tail -5
+```
+
+**Anonymous discovery ends on 2027-01-15** (`MCP_ANONYMOUS_CUTOFF`, `SHIM-MCP-001`). Until then an MCP
+request without a valid key is still served (the tool list, never a tool call); from that day it is `401`,
+without a restart. Before it: read `served_anonymous` in the summary lines. A steady non-zero count is
+something that lists tools without a key — a monitor, a registry, a misconfigured client; find it from the
+access log of the TLS proxy, not from this backend, which records no caller. The date may be brought
+forward (`MCP_ANONYMOUS_CUTOFF=YYYY-MM-DD` in `.env`, then `docker compose up -d backend`; the boot line
+`startup complete` carries `mcp_anonymous_cutoff`); a later or malformed value is ignored with a WARNING
+`MCP_ANONYMOUS_CUTOFF ignored`. Postponing it is a code change with a new shim expiry, not a setting.
+
+**Rollback.** The previous image is stateful again and ignores the three variables; nothing on disk
+changed, so rolling back and forward is free. It also reopens REV-005 (a `..` path argument reaching
+REST-only routes) for as long as it runs.
+
 ## Password hashing: Argon2id and the bcrypt migration
 
 Since brief 0067 (finding SEC-006, ADR 0044 Decision 5) new passwords are hashed with Argon2id; the

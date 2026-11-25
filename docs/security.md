@@ -213,6 +213,27 @@ cannot read the key back, rotate it, or reach an admin route through MCP, whatev
 role. The list fails closed — a router with a new tag is not a tool until it is added — and
 `backend/tests/unit/test_mcp_session.py` pins it as a client receives it. ADR 0037.
 
+**A tool call runs only its own handler** (finding REV-005, brief 0071, ADR 0045). The allowlist used to
+check the tool's *name* only, and `fastapi-mcp` substitutes a path argument into the URL unencoded, so
+`get_task(uuid="../auth/apikey")` reached `GET /auth/apikey` and `modify_task(uuid="../auth/me", …)`
+changed the profile — with an admin's key, `../admin/settings` changed site settings. Now every path
+argument is sent as one percent-encoded segment, and `mcp_gate.bind_mcp_target` — the first
+dependency of every route — refuses with 400 a tool call whose selected route is not the tool's own,
+before the credential is looked up. `backend/tests/unit/test_mcp_target_binding.py` asserts the final
+handler for every path-parameter tool against traversal, encoded, double-encoded, query, fragment and
+Unicode look-alike values, not the status code.
+
+**The transport holds no session and has a budget** (finding REV-004). Stateless Streamable HTTP: no
+`Mcp-Session-Id`, a fresh transport per request torn down when it ends; `GET`/`DELETE` are 405. Every
+request reserves a slot before any work — 32 in total, 8 per source, a quarter of the total for requests
+without a valid credential (`MCP_MAX_INFLIGHT`, `MCP_SOURCE_MAX_INFLIGHT`) — and is cancelled after 30
+seconds. `backend/tests/unit/test_mcp_budget.py`.
+
+**The handshake is authenticated from 2027-01-15** (`MCP_ANONYMOUS_CUTOFF`, earlier only;
+`SHIM-MCP-001`, `RISK-MCP-002`). Every MCP request's credential is resolved by `dependencies.identify`,
+the same code as `get_current_user` (revocation included), without an audit row. Until the cutoff a
+request without a valid one may still list the tools; from it, 401 before any transport exists.
+
 ## Passwords
 
 Since brief 0067 (finding SEC-006, ADR 0044 Decision 5):

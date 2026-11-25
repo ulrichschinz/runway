@@ -128,9 +128,12 @@ id = "be/app"
 scope = "backend"
 layer = 0
 owner = "maintainer"
-paths = ["backend/app/main.py", "backend/app/__init__.py"]
+paths = ["backend/app/main.py", "backend/app/__init__.py", "backend/app/mcp_gate.py"]
 note = """
 Application assembly. Imports routers and wires middleware; nothing imports it back.
+mcp_gate.py is here because it is assembly too: it wires the MCP library to this application
+(the target binding, the stateless transport, the in-flight budget; brief 0071) and only
+main.py imports it.
 """
 
 [[units]]

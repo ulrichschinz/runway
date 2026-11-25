@@ -1395,17 +1395,20 @@ residual_risks:
 
   - id: RISK-MCP-002
     statement: >
-      The MCP endpoint itself is unauthenticated. `mount_http()` is mounted with no
-      dependencies, so anyone who can reach /api/mcp may complete a handshake and list all
-      27 tools without presenting a credential. Every tool CALL is authenticated, by the
-      REST endpoint the call is forwarded to — tests/unit/test_mcp_session.py pins that a
-      call without a credential comes back 401 — so this discloses the tool inventory and
-      nothing else. The inventory is published in README.md and ops/surfaces/mcp-tools.json
-      anyway, which is why this is accepted rather than fixed. Closing it means passing
-      `dependencies=` to the mount, which would also refuse anonymous discovery.
+      The MCP endpoint answers without a credential until MCP_ANONYMOUS_CUTOFF (default
+      2027-01-15, SHIM-MCP-001). Since brief 0071 that costs no session: the transport is
+      stateless, a request without a valid credential holds at most a quarter of the in-flight
+      budget, and it is torn down when it ends (REV-004, tests/unit/test_mcp_budget.py). What
+      remains is disclosure of the tool inventory — all 27 tools, their descriptions and input
+      schemas — to anyone who can reach /api/mcp; it is published in README.md and
+      ops/surfaces/mcp-tools.json anyway. Every tool CALL is authenticated by the REST endpoint
+      it is forwarded to and may reach only that endpoint (REV-005,
+      tests/unit/test_mcp_target_binding.py). From the cutoff every MCP request without a valid
+      credential is 401 before any transport exists, which closes this risk in behaviour; it is
+      removed from this register with the contract step that deletes the anonymous branch.
     owner: maintainer
-    re_open_trigger: "a tool is added whose name or description reveals something not already public, or the endpoint is exposed on a network where enumeration itself matters"
-    decision_record: docs/adr/0033-the-mcp-server-nobody-could-connect-to.md
+    re_open_trigger: "a tool is added whose name or description reveals something not already public, the endpoint is exposed on a network where enumeration itself matters, or the cutoff is moved"
+    decision_record: docs/adr/0045-mcp-authentication-and-resource-budget.md
 
   - id: RISK-OPS-006
     statement: >
