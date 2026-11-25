@@ -101,8 +101,9 @@ All four fields × {`2026-01-01 rc.data.location=V`, the same with tab and newli
 `V` stays empty, `M` is never created (rc 0 or 2). Positive control: `task rc.data.location=V add …`
 creates `V/taskchampion.sqlite3`. A first reading that `TASKRC=EVILRC` (an rc file naming `V`) also
 redirects was wrong — `V` already held the store from the control before it; re-run in the test, `TASKDATA`,
-which `_run` always sets, outranks an rc file's `data.location`. So an rc file is no positive control, and
-`rc:EVILRC` stays a negative payload only.
+which `_run` always sets, outranks an rc file's `data.location`. So an rc file's `data.location` is no
+positive control. *Corrected after the third review:* that also made the `rc:EVILRC` payloads unable to
+fail; the rc file now carries signals `TASKDATA` does not override (see *Third review*).
 
 **Observation, not a finding:** an element with a **newline** is not read as an attribute at all on 3.5.0.
 `add "due:2026-01-01⏎x" -- probe` stores the description `due:2026-01-01⏎x probe` and no date; `modify`
@@ -151,6 +152,22 @@ Six findings; each verified against the host's Homebrew Taskwarrior 3.5.0 with s
 Public surface: unchanged in shape — the newly refused values were never documented and are 400 as
 before (the DOM refs were already 400 from the binary, now without the disclosure; `now+rc.data.location`
 was 201 and stored a wrong date, now 400). No OpenAPI string changed. No rule, risk or waiver changed.
+
+## Third review (2026-11-25)
+
+| # | Finding | Verdict | Change |
+|---|---|---|---|
+| 1 | The `rc:EVILRC` payloads cannot fail: the rc file only set `data.location`, which `TASKDATA` outranks, so a loaded file leaves `victim` empty; no positive control for the `rc:` form | **confirmed.** Re-probed on the host's Homebrew 3.5.0: `task rc:EVILRC add -- control` with `default.project=PWNED` stores project `PWNED` and leaves `victim` empty. A simulated regressed binary on `PATH` (a wrapper that hoists an embedded `rc:<file>` out of a date value into a standalone argument, 40 hoists logged) left the **old** add/modify regressions green (8 passed) | `evil_rc` now also sets `hooks=on`, `hooks.location` to a directory holding an `on-launch` hook that creates a `rc-loaded` file, and `default.project=PWNED`; both loops assert no `rc-loaded` after every payload, the add loop also no alice task in `PWNED`; two positive controls (`test_the_harness_can_see_an_rc_file_load_on_add` / `…_on_modify`) show a standalone `rc:` runs the hook and, on add, sets the project |
+
+| Tier | Test | Red before the fix | Green |
+|---|---|---|---|
+| Container | `test_an_override_in_a_date_on_{add,modify}_reaches_no_other_store` × 4 fields, against the simulated regressed binary | old version **green (blind)**, 8 passed; new version **8 red**, each naming `<field>:2026-01-01 rc:<evilrc>` "loaded the rc file (its hook ran)" | green against the unmodified Homebrew 3.5.0 |
+| Container | `test_the_harness_can_see_an_rc_file_load_on_add`, `…_on_modify` (positive controls) | new | green — a standalone `rc:` is loaded on add and modify |
+| Container (class) | `TestDateValuesAreOneArgument` on the host's Homebrew 3.5.0 | — | 32 passed |
+
+The regressed binary was a test-only wrapper in the session scratchpad, never committed. Test-only change
+plus docs (`threat-model.md`, `operations.md` step 4); no product code, public surface, rule, risk or waiver
+changed.
 
 ## Rollback
 

@@ -1208,8 +1208,10 @@ security change, not a dependency chore:
 3. Re-run the date regression in that class and the audit probe the brief describes against the new
    binary. If nothing redirects, set `DATE_EVIDENCE_VERSION` to the new major.minor **in the same change**
    and record the run in its brief.
-4. If anything redirects — an embedded `rc.` term honoured (`=` or `:` spelling), a newline or space
-   re-lexed into a standalone override — **do not merge the bump**. Open a new finding with its own
+4. If anything redirects — an embedded `rc.` term honoured (`=` or `:` spelling), an embedded
+   `rc:<file>` loaded (the regression's rc file runs a launch hook and sets a default project, which
+   `TASKDATA` does not override), a newline or space re-lexed into a standalone override — **do not
+   merge the bump**. Open a new finding with its own
    attack path; SEC-007 is not reinterpreted. The service's date grammar (`DATE_VALUE_RE` and
    `DATE_DOM_RE` in [`task_service.py`](../backend/app/services/task_service.py)) refuses those
    shapes already — whitespace, `=`, `/`, any dot next to a letter (every `rc.<key>`, in either

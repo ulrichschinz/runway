@@ -253,9 +253,28 @@ class TestDateValuesAreOneArgument:
         return directory
 
     @pytest.fixture
-    def evil_rc(self, real_data_root: Path, victim: Path) -> Path:
+    def rc_loaded(self, real_data_root: Path) -> Path:
+        """The file `evil_rc`'s launch hook creates: it exists only if the rc file was loaded."""
+        return real_data_root / "rc-loaded"
+
+    @pytest.fixture
+    def evil_rc(self, real_data_root: Path, victim: Path, rc_loaded: Path) -> Path:
+        """An rc file whose load is observable on add *and* modify.
+
+        `data.location` alone proves nothing: TASKDATA, which `_run` always sets, outranks it, so
+        a loaded file would leave `victim` empty (third review of brief 0074). Hence two signals
+        TASKDATA does not override: an `on-launch` hook that creates `rc_loaded` on every command,
+        and `default.project=PWNED` on every add. Both are shown to fire by the controls below.
+        """
+        hooks = real_data_root / "evilhooks"
+        hooks.mkdir()
+        hook = hooks / "on-launch.rc-loaded"
+        hook.write_text(f"#!/bin/sh\ntouch '{rc_loaded}'\n")
+        hook.chmod(0o755)
         rc = real_data_root / "evilrc"
-        rc.write_text(f"data.location={victim}\n")
+        rc.write_text(
+            f"data.location={victim}\ndefault.project=PWNED\nhooks=on\nhooks.location={hooks}\n"
+        )
         return rc
 
     @staticmethod
@@ -322,8 +341,9 @@ class TestDateValuesAreOneArgument:
     @pytest.mark.parametrize("operator", ["=", ":"])
     def test_the_harness_can_see_a_redirect(self, victim, operator):
         """Positive control: a *standalone* override, in either spelling, does create a store in
-        `victim`, so the negative tests below would see one. (An rc file is no control: TASKDATA,
-        which `_run` always sets, outranks its `data.location` — observed on 3.5.0, brief 0074.)"""
+        `victim`, so the negative tests below would see one. (An rc file's `data.location` is no
+        control: TASKDATA, which `_run` always sets, outranks it — observed on 3.5.0, brief 0074;
+        the rc-file controls below watch its hook and default project instead.)"""
         self._raw_task([f"rc.data.location{operator}{victim}", "add", "--", "control"])
         assert "taskchampion.sqlite3" in _files(victim), "a standalone override did not redirect"
 
@@ -333,12 +353,28 @@ class TestDateValuesAreOneArgument:
         self._raw_task([f"rc.data.location={victim}", task.uuid, "modify", "due:2030-01-01"])
         assert "taskchampion.sqlite3" in _files(victim), "a standalone override did not redirect"
 
+    def test_the_harness_can_see_an_rc_file_load_on_add(self, evil_rc, rc_loaded):
+        """Positive control for the `rc:<file>` payloads: a standalone `rc:` loads the file, which
+        both runs its hook and sets the project, so the negative tests below would see a load."""
+        result = self._raw_task([f"rc:{evil_rc}", "add", "--", "control"])
+        assert result.returncode == 0, result.stderr
+        assert rc_loaded.exists(), "a standalone rc: did not run the rc file's hook"
+        projects = {t.description: t.project for t in task_service.list_tasks(S["alice"])}
+        assert projects == {"control": "PWNED"}, "a standalone rc: did not set the project"
+
+    def test_the_harness_can_see_an_rc_file_load_on_modify(self, evil_rc, rc_loaded):
+        task = task_service.create_task(S["alice"], TaskCreate(description="host"))
+        rc_loaded.unlink(missing_ok=True)
+        result = self._raw_task([f"rc:{evil_rc}", task.uuid, "modify", "due:2030-01-01"])
+        assert result.returncode == 0, result.stderr
+        assert rc_loaded.exists(), "a standalone rc: did not run the rc file's hook on modify"
+
     @pytest.mark.parametrize("field", DATE_FIELDS)
     def test_an_override_in_a_date_on_add_reaches_no_other_store(
-        self, real_data_root, victim, evil_rc, field
+        self, real_data_root, victim, evil_rc, rc_loaded, field
     ):
         """Every payload, through `task_runner` past the service grammar: no store opened in
-        `victim` or touched in bob's directory, no shell command run."""
+        `victim` or touched in bob's directory, no rc file loaded, no shell command run."""
         from app.services import task_runner
 
         task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
@@ -351,6 +387,10 @@ class TestDateValuesAreOneArgument:
             except task_runner.TaskwarriorRejected:
                 pass  # refused by the binary: also no redirect
             assert _files(victim) == [], f"{token!r} opened a store in the victim directory"
+            assert not rc_loaded.exists(), f"{token!r} loaded the rc file (its hook ran)"
+            assert "PWNED" not in {t.project for t in task_service.list_tasks(S["alice"])}, (
+                f"{token!r} loaded the rc file (its default.project applied)"
+            )
             assert not marker.exists(), f"{token!r} ran a shell command"
         assert _files(S["bob"].path) == bob_before, "bob's directory changed"
         assert [t.description for t in task_service.list_tasks(S["bob"])] == ["bob private note"]
@@ -360,7 +400,7 @@ class TestDateValuesAreOneArgument:
 
     @pytest.mark.parametrize("field", DATE_FIELDS)
     def test_an_override_in_a_date_on_modify_reaches_no_other_store(
-        self, real_data_root, victim, evil_rc, field
+        self, real_data_root, victim, evil_rc, rc_loaded, field
     ):
         from app.services import task_runner
 
@@ -377,6 +417,7 @@ class TestDateValuesAreOneArgument:
             except task_runner.TaskwarriorRejected:
                 pass  # refused by the binary: also no redirect
             assert _files(victim) == [], f"{token!r} opened a store in the victim directory"
+            assert not rc_loaded.exists(), f"{token!r} loaded the rc file (its hook ran)"
             assert not marker.exists(), f"{token!r} ran a shell command"
         assert _files(S["bob"].path) == bob_before, "bob's directory changed"
         assert [t.description for t in task_service.list_tasks(S["bob"])] == ["bob private note"]

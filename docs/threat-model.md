@@ -173,8 +173,9 @@ redirect the store, since `reject_structural_tokens` only refuses a token that *
 (`now + 1d` evaluates) but drops an embedded `rc.` or `rc:` term, and the value is one argv
 element with no shell. `TestDateValuesAreOneArgument` in `backend/tests/container/test_real_task.py`
 proves it for every field and nine payload shapes (space, tab, newline, the override as the whole
-value, an `rc:` file, three shell forms), past the service, next to a positive control showing
-that a standalone override does redirect. On top, as defence in depth and not as the control the
+value, an `rc:` file, three shell forms), past the service, next to positive controls showing
+that a standalone override does redirect and a standalone `rc:` file is loaded (its launch hook
+runs, its `default.project` applies). On top, as defence in depth and not as the control the
 refutation rests on, the service holds a date to one word — `DATE_VALUE_RE`, ASCII letters,
 digits and `: + - .` (brief 0074) — so whitespace, `=`, `/`, quotes, shell characters and control
 characters never reach the argv; and `DATE_DOM_RE` refuses a dot next to a letter and `rc:` at a
