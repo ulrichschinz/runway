@@ -757,7 +757,9 @@ import sys
 
 p = pathlib.Path(sys.argv[1])
 t = p.read_text()
-login = "    rate_limit.clear(body.username)\n"
+# The success path closes the login budget's reservation (brief 0069); the line after it is
+# still inside the handler, with the password in scope.
+login = "        attempt.succeed()\n"
 # Anchored on the return alone: the handler now carries a legitimate log line of its own,
 # and an anchor that spans it would break every time that line is reworded.
 rotate = "    return ApiKeyInfo(api_key=new_key)\n"
@@ -766,7 +768,7 @@ assert rotate in t, "regenerate_apikey is not where the fixture expects it"
 t = "import logging as lg\n\n" + t
 t = t.replace(
     login,
-    login + '    lg.getLogger("audit").info(f"login ok: {body.username} / {body.password}")\n',
+    login + '        lg.getLogger("audit").info(f"login ok: {body.username} / {body.password}")\n',
     1,
 )
 t = t.replace(
