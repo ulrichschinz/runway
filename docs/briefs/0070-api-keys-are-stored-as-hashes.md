@@ -206,6 +206,11 @@ below, run against `09e7da5` (the tests added, nothing else).
 Surfaces: `ops/surfaces/openapi.json` (the GET's description) updated by `./run surfaces --update`; paths,
 methods and schemas unchanged. No rule, budget or baseline changed.
 
+Gate for this round: `make check` on `340c46d` (after `make fix`): **GREEN** (40 s of 180 s). `make verify` on
+`340c46d` in a clean, bootstrapped detached worktree: **GREEN** (292 s of 600 s) — unit 1132 passed, frontend
+779 passed, 60 fixture arms passed, 0 failed; 47 of 50 executable rules proven able to fail. The **container
+tier was skipped** on this arm64 host (`RISK-TEST-001`) and was not observed.
+
 ## Results
 
 - Plan M4 acceptance, as far as it can be met before the cutoff: a synthetic DB, audit and log search finds
