@@ -208,4 +208,17 @@ and the anonymous-served test rewritten without the clock.
 - **Library bump** — `fastapi-mcp`/`mcp` upgrades must re-run the three MCP test files (private seams:
   `_execute_api_tool`, `_register_mcp_endpoints_http`, `_handle_stateless_request`); ADR 0004's pin forces it.
 
-Gate results: recorded in the follow-up commit.
+### Gate
+
+- `make check` on `2c6933c` (the first commit): **RED** after `make fix` — `RULE-ARCH-003`:
+  `backend/app/dependencies.py` fan-in 6 → 7 and `backend/app/database.py` 9 → 10, from `mcp_gate.py`'s
+  handshake authentication (green before the commit only because the untracked file was not yet indexed).
+  Not fixed by raising the baseline (see *Handshake authentication: deferred*); `de6c9f7` removes the
+  cause. **That intermediate commit does not pass the gate**; only the branch head is the candidate.
+- `make check` on `de6c9f7` after `make fix`: **GREEN** (39 s of 180 s; 1410 unit tests).
+- `make verify` on `de6c9f7` in a clean, bootstrapped detached worktree: first run **RED only on
+  `RULE-GATE-001`** (1504 s of the 600 s budget, every other rule green) while other workloads loaded the
+  host (load average ≈ 5–6); rerun on the same commit with the host idle: **GREEN** (282 s of 600 s) — unit
+  1410 passed, 60 fixture arms passed, 0 failed, 47 of 50 executable rules proven able to fail. The
+  **container tier was skipped** on this arm64 host (`RISK-TEST-001`) and was **not** observed here; M5
+  names no container test.
