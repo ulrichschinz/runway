@@ -183,6 +183,13 @@ an account this image registered is, correctly, no longer imported. Surfaces: `d
 `openapi.json` (regenerate's description) updated by `./run surfaces --update`; `rules/route-guards.toml`
 comment names regenerate.
 
+Gate for this round: `make check` on `3aa9a26` (after `make fix`): **GREEN** (40 s of 180 s). `make verify` on
+`3aa9a26` in a clean, bootstrapped detached worktree: **GREEN** (290 s of 600 s) — unit 1128 passed, frontend
+779 passed, 60 fixture arms passed, 0 failed; 47 of 50 executable rules proven able to fail. The **container
+tier was skipped** on this arm64 host (`RISK-TEST-001`) and was not observed. The rollback of issue 2 was
+exercised by the test's reproduction of the previous image's backfill, not by booting the previous image's
+code; the manual old→new→old probe above predates the new column and was not repeated.
+
 ## Results
 
 - Plan M4 acceptance, as far as it can be met before the cutoff: a synthetic DB, audit and log search finds
