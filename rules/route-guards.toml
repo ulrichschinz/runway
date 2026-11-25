@@ -13,7 +13,7 @@
 #
 # The inventory is every route the booted application serves (brief 0073, ADR 0047): a route on
 # the app object, a transport route and the framework's own routes are routes too, and a `Mount`
-# is declared as `MOUNT <path>`.
+# is declared as `MOUNT <path>`, a WebSocket route as `WS <path>`.
 
 version = 1
 

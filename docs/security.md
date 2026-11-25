@@ -88,7 +88,7 @@ ADR 0047) `tools/checks/route_guards.py` boots the application and takes its inv
 was declared, with included routers' prefixes and dependencies applied — and reads each route's
 guard from its **resolved dependency tree**, which is what FastAPI runs, router-level dependencies
 included. The served OpenAPI operations must all be in that inventory, and a mounted
-sub-application is declared as `MOUNT <path>`. Before, it parsed `backend/app/routers/*.py` only, and
+sub-application is declared as `MOUNT <path>` and a WebSocket route as `WS <path>` — it has no HTTP method and no OpenAPI entry, so until the second review of brief 0073 the inventory dropped it silently; a route kind with no methods that the checker does not know fails the gate. Before, it parsed `backend/app/routers/*.py` only, and
 six served routes — `GET /health`, the three methods of `/mcp` and the framework's documentation
 routes — were declared nowhere.
 

@@ -27,7 +27,10 @@ Three guards exist:
 `open` is never inferred as acceptable. Each one is declared with a reason in the TOML, because
 a route that anyone can reach is a decision, and a decision with no recorded reason is
 indistinguishable from an oversight. A `Mount` (a sub-application) is a route too and must be
-declared as `MOUNT <path>`: what it serves is not visible from here.
+declared as `MOUNT <path>`: what it serves is not visible from here. A WebSocket route is declared
+as `WS <path>` — it has no HTTP method and is not in the OpenAPI schema, so nothing else would see
+it. Any other route kind with no methods fails the gate outright: a route this file cannot
+classify is reported, never skipped.
 """
 
 from __future__ import annotations
@@ -80,7 +83,7 @@ def _calls(dependant: Any) -> set[Any]:
 def observed(app: Any) -> dict[str, str]:
     """Every route the application serves, mapped to the guard its dependency tree enforces."""
     from fastapi.routing import iter_route_contexts
-    from starlette.routing import Mount
+    from starlette.routing import Host, Mount, WebSocketRoute
 
     from app.dependencies import get_current_admin, get_current_user
 
@@ -88,7 +91,7 @@ def observed(app: Any) -> dict[str, str]:
     for context in iter_route_contexts(app.routes):
         route = getattr(context, "original_route", context)
         path = getattr(context, "path", None) or getattr(route, "path", "?")
-        if isinstance(route, Mount):
+        if isinstance(route, Mount | Host):
             routes[f"MOUNT {path}"] = "open"
             continue
         calls = _calls(getattr(context, "dependant", None))
@@ -98,7 +101,22 @@ def observed(app: Any) -> dict[str, str]:
             guard = "user"
         else:
             guard = "open"
+        # A WebSocket route has no methods and is not in the OpenAPI schema, so a methods-only
+        # inventory dropped it without a word (second review of brief 0073): an unauthenticated
+        # `@app.websocket` was served and declared nowhere. FastAPI's APIWebSocketRoute subclasses
+        # starlette's WebSocketRoute, so one test covers both.
+        if isinstance(route, WebSocketRoute):
+            routes[f"WS {path}"] = guard
+            continue
         methods = set(getattr(context, "methods", None) or [])
+        if not methods:
+            # A route kind this checker does not know is a route it cannot classify: the gate
+            # says so instead of skipping it, and no declaration can silence that.
+            fail(
+                f"{type(route).__name__} {path} is served but has no HTTP method and is not a "
+                "known route kind — the inventory cannot classify it"
+            )
+            continue
         explicit = methods - IMPLIED_METHODS or methods
         for method in sorted(explicit):
             routes[f"{method} {path}"] = guard

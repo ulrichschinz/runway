@@ -405,7 +405,7 @@ rules:
 
   - id: RULE-SEC-001
     statement: >
-      Every HTTP route the booted application serves — wherever it is declared, framework and
+      Every HTTP and WebSocket route the booted application serves — wherever it is declared, framework and
       transport routes included — MUST declare its required guard in rules/route-guards.toml, the
       declaration MUST match the guard the route's resolved dependency tree enforces, every
       operation in the served OpenAPI schema MUST be in that inventory, and a route declared open
@@ -427,6 +427,8 @@ rules:
       recorded reason cannot be told apart from an oversight. The inventory became the running
       application on 2026-11-25 (brief 0073, ADR 0047): reading one directory left six served
       routes undeclared, and a route beside GET /health would have shipped green (RISK-SEC-005).
+      A WebSocket route has no HTTP method and no OpenAPI entry; it is declared as `WS <path>`,
+      and a route kind the checker cannot classify fails the gate instead of being skipped.
 
   - id: RULE-SEC-002
     statement: >

@@ -375,6 +375,21 @@ p.write_text(t)
 OUTSIDEROUTE
 expect_red "SEC-001-outside" "tools/checks/route-guards.sh" "RULE-SEC-001"
 
+# --- RULE-SEC-001 — a WebSocket route arrives with no guard decision ----------
+# Second review of brief 0073: the inventory keyed routes by HTTP method, and a WebSocket route has
+# none and is not in the OpenAPI schema, so an unauthenticated `@app.websocket` was served and the
+# gate stayed green. It must be declared as `WS <path>` like any other route.
+python3 - "$SANDBOX/backend/app/main.py" <<'WSROUTE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+t += '\n\n@app.websocket("/undeclared-socket")\nasync def undeclared_socket(websocket):\n    await websocket.accept()\n'
+p.write_text(t)
+WSROUTE
+expect_red "SEC-001-ws" "tools/checks/route-guards.sh" "RULE-SEC-001"
+
 # --- RULE-SEC-001 — a router-level guard is dropped --------------------------
 # A guard can also be a dependency of the whole router, which no parameter default shows. Take the
 # admin guard off one handler and put a user guard on the router instead: the route still requires
