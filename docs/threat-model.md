@@ -166,6 +166,23 @@ put the user's own words back into the one position `--` cannot protect, which i
 an argument vector at all; `backend/tests/unit/test_tasks.py` asserts exactly that for a fuzz
 list, and the container tier repeats it against the binary.
 
+The four date **modifiers** — `due`, `scheduled`, `wait`, `until` on create and modify — sit in
+the same position. Finding SEC-007 asked whether `due:2026-01-01 rc.data.location=<victim>` would
+redirect the store, since `reject_structural_tokens` only refuses a token that *starts* with
+`rc.`. **Enforced, for Taskwarrior 3.5.0:** it does not — the binary lexes a date value
+(`now + 1d` evaluates) but drops an embedded `rc.` or `rc:` term, and the value is one argv
+element with no shell. `TestDateValuesAreOneArgument` in `backend/tests/container/test_real_task.py`
+proves it for every field and nine payload shapes (space, tab, newline, the override as the whole
+value, an `rc:` file, three shell forms), past the service, next to a positive control showing
+that a standalone override does redirect. On top, as defence in depth and not as the control the
+refutation rests on, the service holds a date to one word — `DATE_VALUE_RE`, ASCII letters,
+digits and `: + - .` (brief 0074) — so whitespace, `=`, `/`, quotes, shell characters and control
+characters never reach the argv; the documented `YYYY-MM-DD`/`YYYY-MM-DDTHH:MM` and every one-word
+Taskwarrior expression still do. **Asserted only:** that another Taskwarrior version behaves the
+same. The re-open trigger is executable — a major or minor upgrade fails the container tier until
+the regression is re-run and `DATE_EVIDENCE_VERSION` moved ([operations](operations.md#upgrading-taskwarrior));
+a redirect seen then is a new finding, not SEC-007 reinterpreted.
+
 Two exclusions are worth naming. `/ ? # %` are refused not because Taskwarrior minds them but
 because fastapi-mcp 0.4.0 substitutes a path parameter into the URL unencoded, so a project
 named `a/b` would address a different route over MCP. That refusal only ever covered *new*

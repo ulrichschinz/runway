@@ -1193,6 +1193,31 @@ affected accounts as above if a roll forward is impossible.
 7-byte one must get `422`; a 20 KB login body must get `413`; after Switch 1 its stored hash starts
 `$argon2id$`.
 
+## Upgrading Taskwarrior
+
+The binary is whatever the dated Arch archive snapshot in [`backend/Dockerfile`](../backend/Dockerfile)
+and [`backend/Dockerfile.test`](../backend/Dockerfile.test) holds (`RULE-DEP-004`); moving that date is
+the only way Taskwarrior changes. Its argument grammar is part of the tenancy boundary, so a bump is a
+security change, not a dependency chore:
+
+1. Move the date in **both** Dockerfiles in one change, with a brief.
+2. CI's container tier runs the whole argv boundary against the new binary (`RULE-TEST-002`). On another
+   major or minor version, `TestDateValuesAreOneArgument::test_the_binary_is_the_version_the_date_evidence_covers`
+   in `backend/tests/container/test_real_task.py` fails on purpose: the evidence that a date value cannot
+   redirect the store (finding SEC-007, rejected for 3.5.0, brief 0074) was taken on one version only.
+3. Re-run the date regression in that class and the audit probe the brief describes against the new
+   binary. If nothing redirects, set `DATE_EVIDENCE_VERSION` to the new major.minor **in the same change**
+   and record the run in its brief.
+4. If anything redirects — an embedded `rc.` term honoured, a newline or space re-lexed into a standalone
+   override — **do not merge the bump**. Open a new finding with its own attack path; SEC-007 is not
+   reinterpreted. The service's date grammar (`DATE_VALUE_RE` in
+   [`task_service.py`](../backend/app/services/task_service.py)) refuses those shapes already, so the
+   running version stays protected while the finding is worked.
+
+Nothing announces that the snapshot has aged (`RISK-DEP-001`); arm64 developers cannot run step 2
+locally (`RISK-TEST-001`) — the host's own Taskwarrior can run `backend/tests/container` if it is the
+same major.minor, which is evidence about that build, not the image's.
+
 ## The deploy host's topology
 
 **Read directly from the host on 2026-08-24 and checked in as** [`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml).

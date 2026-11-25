@@ -434,6 +434,12 @@ Three controls, in order of how much they are relied on:
    itself — it is always the tail of `project:` or `project.is:` — so an `rc.`-shaped name is
    inert; the `/` of a real data path is refused anyway, because it would also break an MCP
    path parameter ([ADR 0038](adr/0038-validated-filters-and-exact-project-match.md)).
+   A date **modifier** (`due`, `scheduled`, `wait`, `until`) is one word, `DATE_VALUE_RE`:
+   ASCII letters, digits and `: + - .`, surrounding whitespace stripped (brief 0074). That is
+   defence in depth: finding SEC-007 — an `rc.` override inside a date value — is refuted on
+   Taskwarrior 3.5.0 by the container regression `TestDateValuesAreOneArgument`, which also fails
+   on purpose when the binary's major or minor version changes, so the refutation is re-run
+   before an upgrade ships ([runbook](operations.md#upgrading-taskwarrior)).
    Values a client merely resends unchanged — a kept tag, the project a task already has —
    are **not** re-validated, or live users' legacy data would become uneditable.
 4. **`RULE-ARCH-004`** keeps `subprocess` importable only from
