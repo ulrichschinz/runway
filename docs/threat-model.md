@@ -506,6 +506,14 @@ Everything that enters the running image is pinned by content, not by name.
 - `RULE-DEP-001` — the backend imports cleanly from its pinned set. This rule exists because of a
   real outage: an unpinned transitive `mcp` broke the import and two green deploys shipped a backend
   that could not start ([ADR 0004](adr/0004-pin-transitive-mcp.md)).
+- `RULE-DEP-005` — the lock installs exactly what `requirements*.txt` pins.
+- **Installed, not only locked** (brief 0072). `test_dependency_fixes.py` holds the venv the unit tier
+  imports to the intent, and `tests/container/test_installed_dependencies.py` holds the test image to its
+  lock, every package at exactly its locked version. `python-multipart` is 0.0.33: past CVE-2024-53981
+  (finding SEC-005, first fix 0.0.18) and every later advisory OSV listed for 0.0.12 on 2026-11-25. It is
+  in the image because `mcp` needs it, not because a route does: no route declares `Form`/`File`, and a
+  multipart body sent to a JSON route reaches no multipart parser — both are tests, so the first upload
+  route fails them and has to bring its own size, file and parser regressions.
 - `RULE-DEP-003` — no credential committed.
 - `RULE-TI-002` — the runtime versions in `tools/versions.env` match what the Dockerfiles build on.
 
