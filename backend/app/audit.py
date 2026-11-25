@@ -229,6 +229,17 @@ def init_store() -> None:
         )
 
 
+# An actor or subject is a name: an account, a task uuid, `user:<id>`. The request models bound the
+# names a caller types (256), and this bounds the column whatever a call site passes, so no row can
+# grow to the size of a request body (review of brief 0073, RISK-OPS-006).
+IDENTITY_MAX = 256
+
+
+def _identity(value: Any) -> str | None:
+    cleaned = _clean(value)
+    return None if cleaned is None else cleaned[:IDENTITY_MAX]
+
+
 def _clean(value: Any) -> str | None:
     """One column value: a string with every recognisable credential removed, or NULL.
 
@@ -270,8 +281,8 @@ def record(
                 (
                     now(),
                     event,
-                    _clean(actor),
-                    _clean(subject),
+                    _identity(actor),
+                    _identity(subject),
                     outcome,
                     auth_shape,
                     _clean(route),

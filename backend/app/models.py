@@ -29,11 +29,21 @@ RESERVED_PROJECT_NAMES = frozenset({"overview", "plans"})
 # Field limits (RISK-SEC-004, plan M8, brief 0073). The body limit (`app.middleware`) bounds a
 # request; these bound a field, so a single value cannot grow a user's Taskwarrior store or reach
 # the kernel's per-argument limit (`MAX_ARG_STRLEN`, 131 072 bytes on Linux), where `execve` fails
-# with E2BIG. Counted in characters, as JSON Schema's `maxLength` is: at 4 UTF-8 bytes a character
-# the largest argument here is 32 000 bytes. Set far above anything the SPA, the skill or an agent
-# writes; one past a limit is 422, raised while the body is parsed — before any handler runs.
+# with E2BIG. Counted in characters, as JSON Schema's `maxLength` is (a description at 4 UTF-8 bytes
+# a character is at most 8 000 bytes); a note also in bytes. At or above what the SPA, Android, the
+# skill and an agent send; one past a limit is 422, raised while the body is parsed — before any
+# handler runs.
 DESCRIPTION_MAX = 2_000
-ANNOTATION_MAX = 8_000
+# An annotation and an inbox note: what the capture clients send. `capping.js` and Android's
+# `Capping.kt` cut a note at 32 KiB of UTF-8 (brief 0052), and the previous deploy accepted that,
+# so the bound is the same 32 KiB — in bytes, the clients' rule, with the character count as the
+# `maxLength` JSON Schema can state. 32 KiB is a quarter of `MAX_ARG_STRLEN`.
+ANNOTATION_MAX = 32 * 1024
+ANNOTATION_MAX_BYTES = 32 * 1024
+# A username as a request gives it. Registration still refuses more than `USERNAME_MAX` (64) with
+# its 400; this bound only stops a name of any size reaching the audit row and the log line that
+# login and registration write before any check runs. Generous, so no account is locked out.
+USERNAME_GIVEN_MAX = 256
 DATE_FIELD_MAX = 64
 PRIORITY_MAX = 16
 TAG_MAX = 100
@@ -49,6 +59,22 @@ PLAN_ITEM_TEXT_MAX = 4_000
 PLAN_LIST_MAX_ITEMS = 500
 
 Tag = Annotated[str, Field(max_length=TAG_MAX)]
+
+
+def _within_note_bytes(value: str) -> str:
+    if len(value.encode()) > ANNOTATION_MAX_BYTES:
+        raise ValueError(f"at most {ANNOTATION_MAX_BYTES} bytes in UTF-8")
+    return value
+
+
+NoteText = Annotated[
+    str,
+    Field(
+        max_length=ANNOTATION_MAX,
+        description=f"At most {ANNOTATION_MAX_BYTES} bytes in UTF-8 (the capture clients' rule).",
+    ),
+    AfterValidator(_within_note_bytes),
+]
 DependsId = Annotated[str, Field(max_length=DEPENDS_ID_MAX)]
 
 # The complete set of roles. Two is deliberate: `admin` may administer other users and
@@ -201,7 +227,7 @@ class TaskModify(BaseModel):
 
 
 class AnnotationCreate(BaseModel):
-    text: str = Field(max_length=ANNOTATION_MAX)
+    text: NoteText
 
 
 def _checked(new: bool):
@@ -241,13 +267,16 @@ GivenPassword = Annotated[
 ]
 
 
+GivenUsername = Annotated[str, Field(max_length=USERNAME_GIVEN_MAX)]
+
+
 class UserCreate(BaseModel):
-    username: str
+    username: GivenUsername
     password: NewPassword
 
 
 class UserLogin(BaseModel):
-    username: str
+    username: GivenUsername
     password: GivenPassword
 
 

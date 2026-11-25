@@ -1513,12 +1513,14 @@ residual_risks:
   - id: RISK-SEC-004
     statement: >
       Narrowed 2026-11-25 by brief 0073 (plan M8): every free-text field a request carries is now
-      bounded in backend/app/models.py — a task description at 2 000 characters, an annotation and
-      an inbox note at 8 000, date-like fields at 64, tags at 100 each and 50 per task, plan texts
-      at 20 000 — and one past a limit is 422 while the body is parsed, before any handler runs;
-      MCP tool calls meet the same bounds through the tool input schema and the route. The largest
-      Taskwarrior argument is therefore at most 32 000 bytes, a quarter of Linux's
-      MAX_ARG_STRLEN, and an E2BIG that still occurs is task_runner.ArgumentTooLong, answered 413,
+      bounded in backend/app/models.py — a username at 256 characters at login and registration
+      (before it reaches an audit row or a log line; audit.py also cuts actor and subject at 256),
+      a task description at 2 000 characters, an annotation and an inbox note at 32 KiB of UTF-8
+      (the cut capping.js and Android's Capping.kt already make), date-like fields at 64, tags at
+      100 each and 50 per task, plan texts at 20 000 — and one past a limit is 422 while the body is
+      parsed, before any handler runs; MCP tool calls meet the same bounds through the tool input
+      schema and the route. The largest Taskwarrior argument is therefore at most 32 KiB, a
+      quarter of Linux's MAX_ARG_STRLEN, and an E2BIG that still occurs is task_runner.ArgumentTooLong, answered 413,
       not 500. What remains is volume, not size: nothing bounds how many tasks, annotations or plan
       revisions one account writes, so a user's own store can still grow on the partition that
       holds users.db and audit.db (RISK-OPS-006). That is a capacity question decision F1 keeps

@@ -186,8 +186,9 @@ is the one place `--` cannot protect. It is now `+LATEST`, Taskwarrior's own vir
 ### Request bodies
 
 Pydantic models at [`backend/app/models.py`](../backend/app/models.py) constrain types. They
-bound every free-text field too, since brief 0073 (plan M8): description 2 000 characters, annotation
-and inbox note 8 000, date-like fields 64, tags 100 each and 50 per task, plan texts 20 000. One past a
+bound every free-text field too, since brief 0073 (plan M8): username 256 characters at login and
+registration, description 2 000 characters, annotation and inbox note 32 KiB of UTF-8 (the capture
+clients' cut), date-like fields 64, tags 100 each and 50 per task, plan texts 20 000. One past a
 limit is 422 while the body is parsed; an `E2BIG` from `execve` that still occurs is 413
 (`task_runner.ArgumentTooLong`), not 500. Volume — how many tasks one account writes — is not bounded.
 `RISK-SEC-004`.

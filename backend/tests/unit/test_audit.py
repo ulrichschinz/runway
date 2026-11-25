@@ -629,3 +629,15 @@ def test_a_store_that_cannot_be_initialised_does_not_stop_the_boot(
 
 def test_route_of_tolerates_a_request_that_was_never_routed(client: TestClient):
     assert audit.route_of(None) is None
+
+
+def test_an_identity_column_is_bounded_whatever_a_caller_passes(client: TestClient):
+    """Defence in depth behind the request models (review of brief 0073): an actor or subject is a
+    name, and a name a caller chose must not be able to grow a row to the size of its body."""
+    audit.record(
+        audit.LOGIN_FAILED, outcome=audit.FAILURE, actor="a" * 15_000, subject="s" * 15_000
+    )
+    row = last(audit.LOGIN_FAILED)
+    assert len(row["actor"]) <= audit.IDENTITY_MAX
+    assert len(row["subject"]) <= audit.IDENTITY_MAX
+    assert row["actor"].startswith("a" * 100)

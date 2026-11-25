@@ -44,11 +44,18 @@
 
 See ADR 0047 for the reasoning; in short:
 
-- **R1 — field limits in characters, far above use, below the kernel.** Description 2 000, annotation and
-  inbox note 8 000, date-like fields 64, priority 16, tag 100 (at most 50 tags), dependency id 64 (at most
+- **R1 — field limits at or above what the clients send, below the kernel.** Username 256 at login and
+  registration, description 2 000, annotation and inbox note 32 768 characters **and** 32 KiB of UTF-8,
+  date-like fields 64, priority 16, tag 100 (at most 50 tags), dependency id 64 (at most
   100), profile name 200, email 320, role 32, plan texts 20 000 each, a plan list 500 items of id 200 and
-  text 4 000. At 4 bytes per character the largest Taskwarrior argument is 32 000 bytes, a quarter of
-  `MAX_ARG_STRLEN`. A refusal is pydantic's 422 at body parsing. An `E2BIG` that still occurs is
+  text 4 000. The note bound is the capture clients' own rule: `capping.js` and Android's `Capping.kt`
+  (outside this repository, not changeable in this change) cut a note at 32 KiB of UTF-8, which the previous
+  deploy accepted — the first draft's 8 000 characters refused such captures (review, see *Review
+  findings*). The largest Taskwarrior argument is 32 KiB (a note) or 8 000 bytes (a description at 4 bytes
+  a character), a quarter of `MAX_ARG_STRLEN`. The username bound only stops a name of any size reaching
+  the audit row and the log line written before any check; registration still refuses more than 64 with its
+  400, and 256 is wide enough that no account registered under any earlier rule is expected to be locked
+  out (production's longest name is an operator check at merge, see *Deferred*). A refusal is pydantic's 422 at body parsing. An `E2BIG` that still occurs is
   `task_runner.ArgumentTooLong` → **413** from one exception handler in `main.py`. The 1 MiB / 16 KiB body
   limits stay; MCP tool calls meet the same models because each is a request to its own route.
 - **R2 — audit size is measured, not pruned.** `audit.measure()` stats `audit.db` (+ `-wal`, `-shm`), keeps a
@@ -76,7 +83,8 @@ See ADR 0047 for the reasoning; in short:
 Six commits on `security/m8-capacity-and-schema`, each green under `make check` and each deployable on its own:
 
 1. **Field limits** (`RISK-SEC-004`). `backend/app/models.py`: the limit constants, `Tag` and `DependsId`
-   item types, `max_length` on every free-text request field; `StoredBrainstormItem` (unbounded) for the
+   item types, `max_length` on every free-text request field (the usernames of `UserCreate`/`UserLogin`
+   and the note's byte rule `NoteText` added after review; `audit._identity` cuts actor/subject at 256); `StoredBrainstormItem` (unbounded) for the
    plan *response*, so a plan written before the limits still reads back. `routers/inbox.py`: `InboxItem`
    bounded like a task and its annotation. `task_runner._run`: `OSError(E2BIG)` → `ArgumentTooLong`
    (sizes logged, never the text); `task_service.ArgumentTooLong` re-export; `main.py`: one handler → 413.
@@ -124,6 +132,9 @@ nothing (stated per row).
 | CI (stubbed) | `TestTheJobFailsForEveryFalseSuccess` (10) — the two `verify-deploy` steps extracted from `deploy.yml` and run with `sh` against stub `curl`/`docker`: this run passes; build `111`/`dev`, a wrong baked compose, a wrong or **null applied compose**, schema version 0 or null each fail naming the field; a registry digest that is not the pushed one fails; the job receives the digest | **red: the unchanged step exited 0 for all seven false successes**; no registry step; no digest output | green |
 | Changed expectations | `test_migrations.py::lines` sets aside the one INFO line `schema migration applied` (once per database); six `buffer.getvalue() == ""` became `lines(buffer) == []` | — | green; the "silent re-run" property is unchanged for every other line |
 
+| ASGI/REST (review) | `CASES` rows for `POST /auth/login` and `POST /auth/register` (username 257 is 422, 256 is 401/400); `test_the_largest_capture_a_client_sends_is_accepted` ×4 (ASCII, 2-, 3-, 4-byte letters: a 500-code-point description and a note cut at 32 KiB of UTF-8, on `POST /inbox` and as an annotation); a note over 32 KiB in bytes but under the character bound is 422; `test_an_oversized_username_leaves_no_audit_row_or_log_line` | **8 red** (shim: `USERNAME_GIVEN_MAX`, `ANNOTATION_MAX_BYTES` defined, nothing enforced): a 257-character name was 401/403 instead of 422; every largest-capture case was 422 (`String should have at most 8000 characters`); a 15 000-character name wrote an audit row and a log line | green |
+| Unit (review) | `test_audit.py::test_an_identity_column_is_bounded_whatever_a_caller_passes` | **red**: actor and subject stored at 15 000 characters | green |
+
 Not run here: the container tier (arm64, `RISK-TEST-001`) — see *Gate*. The `E2BIG` itself was not reproduced
 (macOS); the 413 path is tested at the subprocess seam. No browser test: nothing in the SPA changed.
 
@@ -147,6 +158,17 @@ Not run here: the container tier (arm64, `RISK-TEST-001`) — see *Gate*. The `E
   database (tested as above); it ignores `/etc/runway/applied-compose.yml` and the new `/skill` fields; it
   does not bound fields, which is the only thing a rollback gives back.
 
+### Review findings (after the first gate)
+
+- **Usernames unbounded (two reviewers, important) — real, fixed.** `UserLogin`/`UserCreate.username` had no
+  `max_length`; an unauthenticated request wrote a ~15 KB actor into `audit.db` and the log on every failed
+  login and on every refused registration (no limiter there). Now 422 above 256 characters while the body is
+  parsed, and `audit.py` cuts actor and subject at 256 whatever a call site passes.
+- **Inbox note / annotation below the clients' capture (important) — real, fixed.** 8 000 characters refused
+  what `capping.js` and Android send (a note up to 32 KiB of UTF-8); the outbox treats that 4xx as failed, so
+  captures would have been lost. The bound is now the clients' rule, so no client change and no compatibility
+  window is needed; nothing of the previous deploy's client traffic is refused.
+
 ### Deferred, with trigger
 
 - **Audit retention, archival and `VACUUM`** — after the operator decides gate D7 (period, size budget,
@@ -157,7 +179,9 @@ Not run here: the container tier (arm64, `RISK-TEST-001`) — see *Gate*. The `E
 - **Production confirmations (not possible from this repository):** the first `verify-deploy` of this branch
   passing the new checks (build, both compose hashes, schema version 1, registry digest); that no production
   row carries a role outside the two (else the step refuses — `docs/operations.md`, *Schema migrations*);
-  a copy of `users.db` and `audit.db` before that deploy (plan §7). Owner, at merge.
+  a copy of `users.db` and `audit.db` before that deploy (plan §7); and that no production account has a
+  username longer than 256 characters (`SELECT max(length(username)) FROM users` — such an account could no
+  longer log in; not readable from here). Owner, at merge.
 - **Not built:** an alert outside the log stream, a measurement of the partition's free space, a scheduled
   host-side comparison between deploys.
 

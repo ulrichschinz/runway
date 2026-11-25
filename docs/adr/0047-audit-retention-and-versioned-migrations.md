@@ -122,8 +122,12 @@ declared `open` with reasons: `GET /health`, `POST|GET|DELETE /mcp`, `GET /opena
 
 ## Decision 5 — field limits
 
-Characters, not bytes (JSON Schema's `maxLength`); far above what the SPA, the skill or an agent writes; the
-largest Taskwarrior argument at most 32 000 bytes, a quarter of `MAX_ARG_STRLEN`. A refusal is 422 at body
+Characters (JSON Schema's `maxLength`), at or above what the SPA, Android, the skill or an agent writes. An
+annotation and an inbox note are also bounded in bytes, at the capture clients' own 32 KiB of UTF-8, so a
+capture the previous deploy accepted is still accepted (amended after review: the first draft's 8 000
+characters refused them). A username is bounded at 256 at login and registration, and the audit store cuts
+actor and subject at 256, so no request can grow an audit row to its body's size. The largest Taskwarrior
+argument is at most 32 KiB, a quarter of `MAX_ARG_STRLEN`. A refusal is 422 at body
 parsing. Stored plan items are read back through an unbounded model, so a plan written before the limits
 stays readable. `E2BIG` is `ArgumentTooLong` → 413 from one handler in `app.main`.
 

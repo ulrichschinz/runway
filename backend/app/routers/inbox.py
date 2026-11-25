@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.dependencies import get_current_user, get_task_store
-from app.models import ANNOTATION_MAX, DESCRIPTION_MAX, PRIORITY_MAX
+from app.models import DESCRIPTION_MAX, PRIORITY_MAX, NoteText
 from app.services import task_service
 from app.task_storage import TaskStore
 
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/inbox", tags=["inbox"])
 class InboxItem(BaseModel):
     # The same bounds as a task and its annotation, which is what the two become (RISK-SEC-004).
     description: str = Field(max_length=DESCRIPTION_MAX)
-    note: str | None = Field(default=None, max_length=ANNOTATION_MAX)
+    note: NoteText | None = None
     priority: str | None = Field(default=None, max_length=PRIORITY_MAX)  # H, M, L
 
 

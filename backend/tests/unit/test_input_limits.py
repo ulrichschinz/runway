@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import sqlite3
 import subprocess
 from typing import Any
 
@@ -40,6 +41,20 @@ CASES: list[tuple[str, str, Any, int]] = [
         "/tasks",
         lambda n: {"description": "x", "depends": ["u"] * n},
         models.DEPENDS_MAX_ITEMS,
+    ),
+    # The plan names login first. Each of these names went whole into an audit row and a log line
+    # before any check ran, unauthenticated (review of brief 0073).
+    (
+        "POST",
+        "/auth/login",
+        lambda n: {"username": "u" * n, "password": "x"},
+        models.USERNAME_GIVEN_MAX,
+    ),
+    (
+        "POST",
+        "/auth/register",
+        lambda n: {"username": "u" * n, "password": "a-long-enough-password"},
+        models.USERNAME_GIVEN_MAX,
     ),
     ("PUT", "/auth/me", lambda n: {"full_name": "f" * n}, models.PROFILE_NAME_MAX),
     ("PUT", "/auth/me", lambda n: {"email": "e" * n}, models.EMAIL_MAX),
@@ -80,9 +95,13 @@ class TestEveryFieldIsBounded:
         """At the limit the length is never the refusal. A date, recurrence or dependency id of that
         length is not a valid value, so what validates it refuses with 400 — not 422."""
         r = _send(client, auth, method, path, body(limit))
+        if path.startswith("/auth/login"):
+            # No such account: refused for the credentials, not for the length.
+            assert r.status_code == 401, (path, r.status_code, r.text[:200])
+            return
         assert r.status_code in (200, 201, 400), (path, r.status_code, r.text[:200])
         if r.status_code == 400:
-            assert "due" in str(body(1)) or "recur" in str(body(1)) or "depends" in str(body(1))
+            assert any(k in str(body(1)) for k in ("due", "recur", "depends", "username"))
 
     def test_a_huge_description_inside_the_body_limit_is_refused(self, client, auth, fake_task):
         """The scenario of RISK-SEC-004 itself: 900 KiB fits the 1 MiB body and is refused anyway."""
@@ -103,10 +122,53 @@ class TestEveryFieldIsBounded:
         assert task["description"] == "x"
         assert task["annotations"] == []
 
-    def test_the_largest_argument_stays_far_below_the_kernel_limit(self):
-        """MAX_ARG_STRLEN is 32 pages (131 072 bytes) on Linux; UTF-8 is at most 4 bytes a character."""
-        largest = max(models.DESCRIPTION_MAX, models.ANNOTATION_MAX)
-        assert 4 * largest <= 131_072 // 4
+    def test_the_largest_argument_stays_below_the_kernel_limit(self):
+        """MAX_ARG_STRLEN is 32 pages (131 072 bytes) on Linux, terminating NUL included. A
+        description is bounded in characters (UTF-8 is at most 4 bytes each), a note or annotation
+        also in bytes."""
+        assert 4 * models.DESCRIPTION_MAX < 131_072 // 4
+        assert models.ANNOTATION_MAX_BYTES < 131_072 // 2
+
+    @pytest.mark.parametrize("letter", ["a", "\u00e9", "\u20ac", "\U0001f600"])
+    def test_the_largest_capture_a_client_sends_is_accepted(self, client, auth, fake_task, letter):
+        """`capping.js` (and Android's `Capping.kt`, line for line) sends a description of at most
+        500 code points and a note cut at 32 KiB of UTF-8. The previous deploy accepted that, so the
+        bound must too: on POST /inbox, and as an annotation for a capture into a project."""
+        note = (letter * 40_000).encode()[: 32 * 1024].decode(errors="ignore")
+        assert len(note.encode()) <= 32 * 1024
+        body = {"description": letter * 500, "note": note}
+        r = client.post("/inbox", json=body, headers=auth)
+        assert r.status_code == 201, r.text[:200]
+        uuid = client.post("/tasks", json={"description": "x"}, headers=auth).json()["uuid"]
+        r = client.post(f"/tasks/{uuid}/annotate", json={"text": note}, headers=auth)
+        assert r.status_code in (200, 201), r.text[:200]
+
+    def test_a_note_over_its_bytes_is_422_even_under_its_characters(self, client, auth, fake_task):
+        note = "\u20ac" * (models.ANNOTATION_MAX_BYTES // 3 + 1)
+        assert len(note) <= models.ANNOTATION_MAX
+        r = client.post("/inbox", json={"description": "x", "note": note}, headers=auth)
+        assert r.status_code == 422
+        assert not any(fake_task.stores.values())
+
+    def test_an_oversized_username_leaves_no_audit_row_or_log_line(self, client, caplog):
+        from app import database
+
+        def actors() -> list:
+            con = sqlite3.connect(database.audit_db_path())
+            try:
+                return [r[0] for r in con.execute("SELECT actor FROM audit_events")]
+            finally:
+                con.close()
+
+        before = actors()
+        huge = "u" * 15_000
+        assert (
+            client.post("/auth/login", json={"username": huge, "password": "x"}).status_code == 422
+        )
+        r = client.post("/auth/register", json={"username": huge, "password": "a-long-password"})
+        assert r.status_code == 422
+        assert actors() == before
+        assert huge not in caplog.text
 
     def test_the_openapi_schema_states_the_limits(self, client):
         schema = client.get("/openapi.json").json()["components"]["schemas"]
