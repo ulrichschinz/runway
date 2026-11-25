@@ -44,6 +44,15 @@ size ever seen as a high-water mark in a one-row-per-key table `audit_meta` in t
 WARNING when the size is over `AUDIT_DB_WARN_BYTES` (default 100 MiB — `RISK-OPS-006`'s own re-open trigger).
 It runs at boot and hourly in a lifespan task; it never raises.
 
+**Row volume from unauthenticated callers is bounded now** (amended after the second review): the measurement
+does not stop a client from growing the file, and `POST /auth/register` — no credential, no limiter — wrote
+one row per refusal. Its three refusals now go through `audit.record_refusal`: the first of a kind
+(event, outcome, constant detail) in a window (the login window) is a row, later ones are counted and carried
+by the next row of that kind (`… (refusals: N)`) or by a summary row written by the hourly task or at
+shutdown (`…: N further refusals in the last window`). Login refusals were already coalesced by the limiter
+(brief 0069). Every other writer needs an authenticated principal. What remains unbounded is the volume of
+authenticated activity — that is retention, and D7.
+
 **What the retention job must respect when it is built** (the input to D7, recorded so the job cannot be
 written without it):
 
@@ -102,7 +111,7 @@ predicates, `CHECK` clauses, triggers, and the applied version.
 route FastAPI serves, with included routers flattened and their prefixes and dependencies applied — instead
 of parsing `backend/app/routers/*.py`. A route's guard is read from its resolved dependency tree:
 `get_current_admin` anywhere is `admin`, else `get_current_user` is `user`, else `open`. A `Mount` is a
-route too. The served OpenAPI paths must be a subset of the inventory. Framework and transport routes are
+route too, declared `MOUNT <path>`; a WebSocket route is declared `WS <path>` (it has no HTTP method and no OpenAPI entry, and the first version dropped it silently — second review); any other route kind with no method fails the gate. The served OpenAPI paths must be a subset of the inventory. Framework and transport routes are
 declared `open` with reasons: `GET /health`, `POST|GET|DELETE /mcp`, `GET /openapi.json`, `GET /docs`,
 `GET /docs/oauth2-redirect`, `GET /redoc`.
 
@@ -130,6 +139,19 @@ actor and subject at 256, so no request can grow an audit row to its body's size
 argument is at most 32 KiB, a quarter of `MAX_ARG_STRLEN`. A refusal is 422 at body
 parsing. Stored plan items are read back through an unbounded model, so a plan written before the limits
 stays readable. `E2BIG` is `ArgumentTooLong` → 413 from one handler in `app.main`.
+
+**Only what changes is held to a bound** (amended after the second review). The previous deploy stored
+values of any size, and the SPA resends a task's description, tags and depends and a plan's texts and lists
+whole on every save; bounding the stored value made such a task or plan uneditable, its due date included.
+So the update models (`TaskModify`, `ProjectPlanUpdate`) carry only the old effective ceilings —
+`STORED_ARG_MAX` (131 072, the kernel's per-argument limit every stored task text passed) and
+`STORED_PLAN_VALUE_MAX` (the 1 MiB body limit every stored plan arrived in) — and the service or router
+compares with what is stored: a description, plan text, new tag or new plan item over its bound that differs
+from the stored value is 422 in FastAPI's validation shape (`models.LimitExceeded`), and a tag set, dependency
+set or plan list over its bound is refused only when it is also larger than what is stored. An unchanged
+over-limit description is not resent to Taskwarrior. The rule is the one legacy tags and project names
+already follow (ADR 0038, D3/D4). Creation (`TaskCreate`, `POST /inbox`, annotations) keeps the bounds at
+body parsing: nothing is stored yet.
 
 ## Consequences
 

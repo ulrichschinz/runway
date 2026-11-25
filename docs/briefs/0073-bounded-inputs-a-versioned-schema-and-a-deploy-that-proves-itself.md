@@ -58,6 +58,14 @@ See ADR 0047 for the reasoning; in short:
   out (production's longest name is an operator check at merge, see *Deferred*). A refusal is pydantic's 422 at body parsing. An `E2BIG` that still occurs is
   `task_runner.ArgumentTooLong` → **413** from one exception handler in `main.py`. The 1 MiB / 16 KiB body
   limits stay; MCP tool calls meet the same models because each is a request to its own route.
+  **Stored values (second review):** the bounds hold what a request *changes*, never what the previous deploy
+  already stored. The update models carry only the old effective ceilings (131 072 characters for a task
+  text — the per-argument limit every stored one passed; 1 MiB for a plan value — the body it arrived in); a
+  changed description, plan text, new tag or new plan item over its bound is 422 (`LimitExceeded`, naming the
+  field), and a tag, dependency or plan-item set over its bound is refused only when it is larger than the
+  stored one too. So a task with a 3 000-character description or 60 tags, or a plan with a 25 000-character
+  purpose or 505 items, stays editable from the SPA and over MCP; existing over-limit data is kept as it is
+  and needs no operator query.
 - **R2 — audit size is measured, not pruned.** `audit.measure()` stats `audit.db` (+ `-wal`, `-shm`), keeps a
   high-water mark in `audit_meta`, logs `audit store size` at INFO at boot and hourly, and at WARNING above
   `AUDIT_DB_WARN_BYTES` (default 100 MiB, `RISK-OPS-006`'s own re-open trigger). No row is deleted: D7 is
@@ -73,6 +81,10 @@ See ADR 0047 for the reasoning; in short:
   every route context and its resolved dependency tree (router-level dependencies included), and requires
   a declaration for each method/path; a `Mount` must be declared too. Framework and transport routes are
   declared `open` with reasons.
+- **R2a — refusals an unauthenticated caller can repeat are coalesced (second review).** The three
+  refusals of `POST /auth/register` go through `audit.record_refusal`: one row per kind and login window,
+  later ones counted and carried by the next row or a summary (hourly task, shutdown). Row volume from
+  anonymous callers is thereby bounded; authenticated volume is D7's.
 - **R5 — the deploy proves itself.** The image carries a build id (`github.run_id`); `GET /skill` reports
   it, the SHA-256 of the baked compose, the SHA-256 of the host's compose (bind-mounted read-only at
   `/etc/runway/applied-compose.yml`) and the schema version. `verify-deploy` requires each to match what
@@ -146,9 +158,11 @@ Not run here: the container tier (arm64, `RISK-TEST-001`) — see *Gate*. The `E
   handler that authenticates inside its body.
 - **`RISK-SURF-001`, `RISK-SEC-002` closed in this repository, open until production reports version 1** —
   `verify-deploy` now fails if it does not.
-- **`RISK-OPS-006` narrowed** — measured, high-water mark, warning; **not bounded**: the plan's acceptance
-  "synthetic load cannot grow the audit file without bound" is **not met** and cannot be until D7. The limiter
-  (brief 0069) and request bodies/fields (this brief) are bounded.
+- **`RISK-OPS-006` narrowed** — measured, high-water mark, warning; rows an unauthenticated caller can cause
+  are bounded per kind and window (login: brief 0069; registration: R2a). **Not bounded**: the volume of
+  authenticated activity, so the plan's acceptance "synthetic load cannot grow the audit file without bound"
+  is met for anonymous load only and fully not until D7. The limiter (brief 0069) and request bodies/fields
+  (this brief) are bounded.
 - **`RISK-OPS-002` narrowed** — commit, build, baked and applied compose, schema version, registry digest;
   remaining: the host's own digest, and anything between deploys.
 - **Public surfaces:** OpenAPI regenerated (limits; four additive `server` fields); MCP names and count
@@ -169,6 +183,28 @@ Not run here: the container tier (arm64, `RISK-TEST-001`) — see *Gate*. The `E
   captures would have been lost. The bound is now the clients' rule, so no client change and no compatibility
   window is needed; nothing of the previous deploy's client traffic is refused.
 
+### Review findings (second review)
+
+- **Stored over-limit task values became uneditable (two reviewers, important) — real, fixed.** The SPA
+  sends the full description, tags and depends on every save; with `TaskModify` bounded at 2 000 / 50 × 100 /
+  100, a task the previous deploy stored with a 3 000-character description returned 422 for a due-date
+  change. Same for a plan (`planBody` resends everything). Fixed by R1's stored-values rule (option (b) of
+  the review, without an SPA change): ceilings in the update models, the bound applied to the changed value
+  in `task_service.modify_task` and `models.plan_limit_problem`. Red first:
+  `test_stored_values_stay_editable.py`, 7 of 8 tests red on `bd5ad1f` (422 for every unchanged legacy
+  value; `tags_add` growing a 55-tag set past 50 was 200).
+- **Refused registrations grew `audit.db` without bound (important) — real, fixed.** 300 refused
+  registrations wrote 300 rows; now one (R2a). Red first: `test_audit.py::TestRefusedRegistrationsAreCoalesced`,
+  4 of 4 red (300 rows instead of 1; no `_clock`/`flush_refusals`; 40 rows instead of 2).
+- **WebSocket routes skipped by the route-guard inventory (important) — real, fixed.** `observed()` keyed
+  routes by HTTP method; a WebSocket route has none and no OpenAPI entry. Now `WS <path>`, and an unknown
+  method-less route kind fails the gate. Red first: an `@app.websocket` appended to `main.py` in a scratch
+  copy left the old checker silent (exit 0, no line); the new one names `WS /undeclared-socket`. New fixture
+  arm `SEC-001-ws`.
+- **The SPA shows a 422 detail array as `[object Object]` (minor) — not fixed here, deferred.** Pre-existing
+  for every pydantic 422 the SPA can receive; after the fix above a 422 on save only follows a value the user
+  actually typed over its bound. See *Deferred*.
+
 ### Deferred, with trigger
 
 - **Audit retention, archival and `VACUUM`** — after the operator decides gate D7 (period, size budget,
@@ -182,6 +218,10 @@ Not run here: the container tier (arm64, `RISK-TEST-001`) — see *Gate*. The `E
   a copy of `users.db` and `audit.db` before that deploy (plan §7); and that no production account has a
   username longer than 256 characters (`SELECT max(length(username)) FROM users` — such an account could no
   longer log in; not readable from here). Owner, at merge.
+- **SPA field-level message for a 422** — `TaskModal.vue`, `ProjectPlanModal.vue` and `usePlan.js` show
+  `detail` as a string or the status; a validation array reads as `[object Object]` or `422`. A frontend
+  change of its own (one formatter in `src/shared`, tests in the browser tier). Trigger: the next SPA change
+  touching these components, or the first user report.
 - **Not built:** an alert outside the log stream, a measurement of the partition's free space, a scheduled
   host-side comparison between deploys.
 
