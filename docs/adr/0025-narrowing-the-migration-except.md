@@ -3,6 +3,9 @@
 - **Date:** 2026-08-28
 - **Status:** Accepted
 - **Scope:** `backend`
+- **Amended by:** [ADR 0047](0047-audit-retention-and-versioned-migrations.md) (2026-11-25) — the additive list
+  is frozen as schema version 0; new schema changes are numbered steps. Its failure judgement (log, continue
+  booting) is kept for them.
 
 ## Context
 

@@ -69,4 +69,107 @@ See ADR 0047 for the reasoning; in short:
 - **R5 — the deploy proves itself.** The image carries a build id (`github.run_id`); `GET /skill` reports
   it, the SHA-256 of the baked compose, the SHA-256 of the host's compose (bind-mounted read-only at
   `/etc/runway/applied-compose.yml`) and the schema version. `verify-deploy` requires each to match what
-  this run built and this commit records, and the registry's `:latest` digest to equal the pushed one.
+  this run built and this commit records, and the registry's `:latest` and `:<sha>` to resolve to the pushed digest.
+
+## Control
+
+Six commits on `security/m8-capacity-and-schema`, each green under `make check` and each deployable on its own:
+
+1. **Field limits** (`RISK-SEC-004`). `backend/app/models.py`: the limit constants, `Tag` and `DependsId`
+   item types, `max_length` on every free-text request field; `StoredBrainstormItem` (unbounded) for the
+   plan *response*, so a plan written before the limits still reads back. `routers/inbox.py`: `InboxItem`
+   bounded like a task and its annotation. `task_runner._run`: `OSError(E2BIG)` → `ArgumentTooLong`
+   (sizes logged, never the text); `task_service.ArgumentTooLong` re-export; `main.py`: one handler → 413.
+2. **Route-guard inventory** (`RISK-SEC-005`, `RULE-SEC-001`'s check). `tools/checks/route_guards.py`
+   rewritten: boots the app, `iter_route_contexts(app.routes)`, guard from the resolved dependency tree,
+   OpenAPI cross-check, `MOUNT` entries. `rules/route-guards.toml`: eight `open` declarations with reasons.
+   Two new fixture arms (a route in `main.py`; a guard moved to the router level).
+3. **Versioned migrations** (`RISK-SURF-001`, `RISK-SEC-002`, `RULE-SURF-005` new). `database.py`:
+   `MIGRATIONS` frozen; `schema_migrations`; `VERSIONED_MIGRATIONS = ((1, "users_declared_shape", …),)`;
+   `apply_versioned_migrations` (one `BEGIN IMMEDIATE` per step, rollback and stop on failure);
+   `CREATE_USERS_V1`/`COPY_USERS_V1` and the step (column-set check, role check, sequence kept, dependents
+   re-created, row count verified); `schema_fingerprint`/`schema_differences`. `tools/surfaces.py`: the
+   snapshot records `-- schema_version 1`; `check_schema_history` emits `RULE-SURF-005`. Three baselines in
+   `backend/tests/fixtures/schema_history/`. Ledger, fixture arm, `AGENTS.md` §5, docs.
+4. **Audit size** (`RISK-OPS-006`). `audit.py`: `audit_meta`, `measure()` (stat, high-water upsert, INFO/
+   WARNING line, never raises), `watch_size()`; `main.py`: at boot and as a lifespan task, cancelled at
+   shutdown; `config.audit_db_warn_bytes` (`AUDIT_DB_WARN_BYTES`, README, deploy compose).
+5. **Deploy evidence** (`RISK-OPS-002`). `Dockerfile`: `ARG RUNWAY_BUILD` → `/app/BUILD_ID`. Deploy
+   compose: `./docker-compose.yml:/etc/runway/applied-compose.yml:ro`. `ServerBuild` gains `build`,
+   `compose_sha256`, `applied_compose_sha256`, `schema_version` (handed to `skill_service` by the lifespan,
+   so `database.py`'s fan-in does not grow). `deploy.yml`: `RUNWAY_BUILD` build-arg, the digest as a job
+   output, four new comparisons in the existing step, a registry-digest step, `packages: read`.
+6. A test fix (the extracted job step ran in the repository and left `skill.zip` there), then this record.
+
+No budget, baseline, waiver or suppression changed; `ops/structure-baseline.toml` untouched (the first draft
+of step 5 raised `database.py`'s fan-in to 10 and `RULE-ARCH-003` refused it — the version is now handed in).
+
+## Test evidence
+
+Run on 2026-11-25 on an arm64 Mac. "Red" is each new test file against the code **before** its commit. Where
+the test needs a name the new code introduces, the red run used a shim that defines the name and enforces
+nothing (stated per row).
+
+| Tier | What | Red | Green |
+|---|---|---|---|
+| ASGI/REST | `test_input_limits.py::TestEveryFieldIsBounded` — one past each limit (13 fields over `POST /tasks`, `POST /inbox`, `PUT /auth/me`, `PUT /projects/plans/{name}`) is 422 and the store is untouched; at the limit the length is never the refusal; a 900 KiB description; annotate and modify; the OpenAPI schema states the limits | **16 red** (shim: the constants exist, nothing enforces them): every over-limit request was 200/201 — the 900 000-character description was **stored** — or 400 from a later validator; no `maxLength` in the schema | green |
+| Unit | `TestTheKernelRefusalIsNot500` — `E2BIG` from `subprocess.run` is `ArgumentTooLong`; another `OSError` is not; `ArgumentTooLong` is 413 on `POST /tasks`, `POST /inbox`, `GET /gtd/inbox` | **red**: `OSError: [Errno 7] Argument list too long` escaped `_run` (a 500) | green |
+| ASGI/MCP | `TestMcpMeetsTheSameLimits` — `create_task_tasks_post` over MCP with a 2 001-character description is an error and writes nothing | **red**: `isError=False`, the task was created | green: refused by the tool's own input schema ("is too long") before any request |
+| Gate | `RULE-SEC-001` with a route appended to `main.py` | **red observed as green**: the old checker printed `ok 42 route(s) declared` and exited 0 | the new checker names it; on the unchanged tree it named the eight undeclared served routes (`GET /health`, `POST`/`GET`/`DELETE /mcp`, `GET /openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc`) before they were declared. Fixture arms run by hand against a copy: outside-route, router-level guard, stripped guard — all three red |
+| DB-Integration | `test_schema_versions.py` (18) — every baseline upgraded equals fresh; both reach version 1; the role `CHECK` on fresh and every baseline (`Admin`, `root`, `''`, NULL refused; `user`→`admin` allowed); every value of every row kept (NULL role → `user`); a deleted account's id never reused; the storage-id and auth-version triggers and both uniqueness constraints survive; the step runs once and logs once; a hand-written role refuses the step, changes nothing, names no account; the service still starts; a step failing half-way is rolled back whole; the copy statement names every declared column | **10 red** (shim: `VERSIONED_MIGRATIONS = ()`, i.e. the unchanged schema behaviour): `2026-04-27-initial` — production's shape — differs from fresh (`api_key` UNIQUE, column order); **no path refused `role='root'`**; no version | green |
+| Rollback | `test_the_previous_image_boots_and_writes_on_a_rebuilt_database` — boot this image, register/use/change password/revoke a key; boot without the versioned step (the previous image: `MIGRATIONS` and every `CREATE` are unchanged, its writers are the same functions) and do the same; boot this image again and do it a third time | red under the shim only because the version is never 1 | green: three accounts, all `user`, version 1 kept |
+| Gate | `RULE-SURF-005` with a column added to `CREATE_PROJECT_STATUS` | — (the rule is new) | red by hand: "a database upgraded from 2026-11-25-m7.sql differs from a fresh one: table project_status: columns differ"; the fixture arm also rewrites the snapshot first, so `RULE-SURF-001` alone could not explain the red |
+| Unit | `test_audit_size.py` (8) — size = the three files; INFO line with the three fields; WARNING above the threshold; default 100 MiB; the high-water mark survives `DELETE` + `VACUUM`; measuring touches no `audit_events` and deletes nothing (SQLite trace); a failing connection is one ERROR and no exception; the boot measures; the timer measures again | **8 red**: no `measure`, no setting, **the boot logged no size line** | green |
+| Unit | `test_deploy_evidence.py::TestTheServerReportsItsDeployment` (6) — build, both compose hashes, schema version; a differing host file is reported as it is; absent files are `dev`/null; the route serves hashes and no file content or path; the compose mounts itself read-only at the path the server reads; the Dockerfile and workflow bake the build id | **6 red/error**: no fields, no mount, no build id | green |
+| CI (stubbed) | `TestTheJobFailsForEveryFalseSuccess` (10) — the two `verify-deploy` steps extracted from `deploy.yml` and run with `sh` against stub `curl`/`docker`: this run passes; build `111`/`dev`, a wrong baked compose, a wrong or **null applied compose**, schema version 0 or null each fail naming the field; a registry digest that is not the pushed one fails; the job receives the digest | **red: the unchanged step exited 0 for all seven false successes**; no registry step; no digest output | green |
+| Changed expectations | `test_migrations.py::lines` sets aside the one INFO line `schema migration applied` (once per database); six `buffer.getvalue() == ""` became `lines(buffer) == []` | — | green; the "silent re-run" property is unchanged for every other line |
+
+Not run here: the container tier (arm64, `RISK-TEST-001`) — see *Gate*. The `E2BIG` itself was not reproduced
+(macOS); the 413 path is tested at the subprocess seam. No browser test: nothing in the SPA changed.
+
+## Results
+
+- **`RISK-SEC-004` narrowed** — sizes bounded at 422/413; volume (how many tasks an account writes) is not,
+  decision F1. MCP meets the same bounds.
+- **`RISK-SEC-005` narrowed** — every served route classified; remaining: what nginx answers itself, and a
+  handler that authenticates inside its body.
+- **`RISK-SURF-001`, `RISK-SEC-002` closed in this repository, open until production reports version 1** —
+  `verify-deploy` now fails if it does not.
+- **`RISK-OPS-006` narrowed** — measured, high-water mark, warning; **not bounded**: the plan's acceptance
+  "synthetic load cannot grow the audit file without bound" is **not met** and cannot be until D7. The limiter
+  (brief 0069) and request bodies/fields (this brief) are bounded.
+- **`RISK-OPS-002` narrowed** — commit, build, baked and applied compose, schema version, registry digest;
+  remaining: the host's own digest, and anything between deploys.
+- **Public surfaces:** OpenAPI regenerated (limits; four additive `server` fields); MCP names and count
+  unchanged (27; their schemas carry the limits); DB snapshot regenerated (`users` v1, `schema_migrations`,
+  `-- schema_version 1`); one env var added and documented; SPA unchanged.
+- **Rollback:** every commit runs on the previous deploy's data. The previous image boots on a version-1
+  database (tested as above); it ignores `/etc/runway/applied-compose.yml` and the new `/skill` fields; it
+  does not bound fields, which is the only thing a rollback gives back.
+
+### Deferred, with trigger
+
+- **Audit retention, archival and `VACUUM`** — after the operator decides gate D7 (period, size budget,
+  protected event classes). ADR 0047 Decision 1 lists what the job must respect. Trigger: the D7 decision, or
+  the first WARNING `audit store size`.
+- **API-key contract (versioned step 2)** — drop `users.api_key`/`api_key_closed_at` by rebuild, after
+  `API_KEY_LEGACY_CUTOFF` (2027-01-15) and its soak; then `WAIVER-SEC-003` can close (ADR 0044).
+- **Production confirmations (not possible from this repository):** the first `verify-deploy` of this branch
+  passing the new checks (build, both compose hashes, schema version 1, registry digest); that no production
+  row carries a role outside the two (else the step refuses — `docs/operations.md`, *Schema migrations*);
+  a copy of `users.db` and `audit.db` before that deploy (plan §7). Owner, at merge.
+- **Not built:** an alert outside the log stream, a measurement of the partition's free space, a scheduled
+  host-side comparison between deploys.
+
+### Gate
+
+- `make check`: **GREEN** on every commit of the branch (29–53 s of 180 s; 159 s once while `make verify`
+  ran beside it).
+- `make verify` on `ea6718b`, in a clean, bootstrapped, detached worktree (the untracked audit evidence in the
+  main checkout trips `RULE-RULE-003` inside the fixture sandbox): **GREEN**, 495 s of 600 s. Fixture suite:
+  63 arms passed, 0 failed; 48 of 51 executable rules proven able to fail — among them the new arms
+  `SEC-001-outside`, `SEC-001-router` and `SURF-005`.
+- **The container tier did not run**: `py-test-container` is skipped on arm64 (`RISK-TEST-001`) and runs in CI
+  only. No test of this brief is in that tier; none was claimed to pass there. The changed `backend/Dockerfile`
+  (`BUILD_ID`) and the deploy compose mount were not built or started here — the first CI build and
+  `verify-deploy` of the merge are their test.
