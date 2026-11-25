@@ -162,3 +162,15 @@ it is not a production key.
   `test_dependency_fixes.py`, `test_jwt_hardening.py`, `test_session_revocation.py`, `test_mcp_session.py`
   and `test_security_wave.py` — **191 passed**. That is the pip layer both Dockerfiles run, not the image;
   CI's amd64 container tier is what runs the new container test inside the real test image.
+- `make verify` on `3b59202` in a clean, bootstrapped detached worktree: **GREEN** (302 s of 600 s) — unit
+  1472 passed, 779 frontend, 60 fixture arms passed, 0 failed, 47 of 50 executable rules proven able to fail.
+  The **container tier was skipped** on this arm64 host (`RISK-TEST-001`: "archlinux publishes no arm64
+  image and pacman fails under" emulation) and was **not** observed here — so the new
+  `tests/container/test_installed_dependencies.py` has run in this repository only in the venv and on the
+  amd64 Python base above, not inside the built test image.
+- `3b59202` was committed right after a `make check` that reported **RED** with one violation, whose line
+  was not captured (a scripting slip: the commit was chained on `grep` finding a verdict, not on GREEN).
+  The only thing that ran between that and the next `make check` on the same tree, **GREEN**, was `make fix`
+  — which refreshes the untracked index and changed no tracked file — so the violation was, by inference,
+  index freshness after the brief's last edit. `make verify` above is on that same commit.
+
