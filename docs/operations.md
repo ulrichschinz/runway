@@ -1208,11 +1208,15 @@ security change, not a dependency chore:
 3. Re-run the date regression in that class and the audit probe the brief describes against the new
    binary. If nothing redirects, set `DATE_EVIDENCE_VERSION` to the new major.minor **in the same change**
    and record the run in its brief.
-4. If anything redirects — an embedded `rc.` term honoured, a newline or space re-lexed into a standalone
-   override — **do not merge the bump**. Open a new finding with its own attack path; SEC-007 is not
-   reinterpreted. The service's date grammar (`DATE_VALUE_RE` in
-   [`task_service.py`](../backend/app/services/task_service.py)) refuses those shapes already, so the
-   running version stays protected while the finding is worked.
+4. If anything redirects — an embedded `rc.` term honoured (`=` or `:` spelling), a newline or space
+   re-lexed into a standalone override — **do not merge the bump**. Open a new finding with its own
+   attack path; SEC-007 is not reinterpreted. The service's date grammar (`DATE_VALUE_RE` and
+   `DATE_DOM_RE` in [`task_service.py`](../backend/app/services/task_service.py)) refuses those
+   shapes already — whitespace, `=`, `/`, any dot next to a letter (every `rc.<key>`, in either
+   spelling) and `rc:` at a word start — so the running version stays protected while the finding is
+   worked. Also check that a DOM reference in a date (`due:rc.data.location`) is still the only kind
+   of value whose refusal names the data path, and that `_run` still answers it generically
+   (`test_past_the_grammar_the_store_path_still_never_reaches_the_caller`).
 
 Nothing announces that the snapshot has aged (`RISK-DEP-001`); arm64 developers cannot run step 2
 locally (`RISK-TEST-001`) — the host's own Taskwarrior can run `backend/tests/container` if it is the

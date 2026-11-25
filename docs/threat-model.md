@@ -177,8 +177,15 @@ value, an `rc:` file, three shell forms), past the service, next to a positive c
 that a standalone override does redirect. On top, as defence in depth and not as the control the
 refutation rests on, the service holds a date to one word — `DATE_VALUE_RE`, ASCII letters,
 digits and `: + - .` (brief 0074) — so whitespace, `=`, `/`, quotes, shell characters and control
-characters never reach the argv; the documented `YYYY-MM-DD`/`YYYY-MM-DDTHH:MM` and every one-word
-Taskwarrior expression still do. **Asserted only:** that another Taskwarrior version behaves the
+characters never reach the argv; and `DATE_DOM_RE` refuses a dot next to a letter and `rc:` at a
+word start, so no DOM reference (`rc.<key>`, `system.os`, `tw.version`, `1.due`) and neither the
+colon spelling of an override (`rc.data.location:<dir>`) nor the rc-file form (`rc:<file>`) reaches
+it either. The documented `YYYY-MM-DD`/`YYYY-MM-DDTHH:MM` and every one-word Taskwarrior date
+expression still do. Those colon forms are inert inside a date on 3.5.0 too (rc 2, in the
+regression's payloads), but a DOM reference is not: 3.5.0 evaluates it and echoed the result in
+its refusal — `rc.data.location` gave the store's absolute path, a disclosure through the same
+field (second review of brief 0074). Besides the grammar, `_run` answers any rc-2 stderr that names
+the data directory with a generic 400 and logs it. **Asserted only:** that another Taskwarrior version behaves the
 same. The re-open trigger is executable — a major or minor upgrade fails the container tier until
 the regression is re-run and `DATE_EVIDENCE_VERSION` moved ([operations](operations.md#upgrading-taskwarrior));
 a redirect seen then is a new finding, not SEC-007 reinterpreted.

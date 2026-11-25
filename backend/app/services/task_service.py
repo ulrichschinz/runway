@@ -350,12 +350,20 @@ def get_task(store: TaskStore, uuid: str) -> Task:
 # one value and an embedded override is dropped (`tests/container`, `TestDateValuesAreOneArgument`).
 # Defence in depth on top, not a fix: a date is one word. That admits the documented `YYYY-MM-DD` and
 # `YYYY-MM-DDTHH:MM`, the stored `20261031T230000Z`, ISO with seconds or an offset, and every one-word
-# Taskwarrior expression (`tomorrow`, `eom`, `now+3d`, `2026-W05`, `P3D`). It refuses what the
-# hypothesis needs and the binary half-reads: whitespace inside the value (3.5.0 lexes it: `now + 1d`
-# evaluates, `2026-01-01 10:00` silently drops the time, a newline turns the token into description
-# text), `=`, `/`, quotes, shell characters, parentheses, control characters and anything not ASCII.
+# Taskwarrior expression (`tomorrow`, `eom`, `now+3d`, `2026-W05`, `P3D`). It refuses whitespace
+# inside the value (3.5.0 lexes it: `now + 1d` evaluates, `2026-01-01 10:00` silently drops the
+# time, a newline turns the token into description text), `=`, `/`, quotes, shell characters,
+# parentheses, control characters and anything not ASCII.
+#
+# A character set alone is not enough (second review of brief 0074): 3.5.0 evaluates a DOM
+# reference inside a date — `rc.data.location`, `rc.<key>`, `system.os`, `tw.version`, `1.due` —
+# and echoes the result in its refusal, the store's absolute path among them; and `rc.<key>:<v>`
+# is the override's colon spelling, one word. So `DATE_DOM_RE` refuses a dot next to a letter
+# (every DOM reference has one; no date form does — ISO fractional seconds are `.<digit>`) and
+# `rc:` at a word start (the rc-file form). Both case-insensitive, as Taskwarrior is.
 DATE_FIELDS = ("due", "scheduled", "wait", "until")
 DATE_VALUE_RE = re.compile(r"[A-Za-z0-9:+.\-]+")
+DATE_DOM_RE = re.compile(r"[A-Za-z]\.|\.[A-Za-z]|(?<![A-Za-z])rc:", re.IGNORECASE)
 
 
 def _validate_date_value(name: str, value: str) -> str:
@@ -366,7 +374,7 @@ def _validate_date_value(name: str, value: str) -> str:
     stripped: a no-break space or any other non-ASCII character is refused like the rest.
     """
     stripped = value.strip(" \t\n\r\f\v")
-    if stripped and not DATE_VALUE_RE.fullmatch(stripped):
+    if stripped and (not DATE_VALUE_RE.fullmatch(stripped) or DATE_DOM_RE.search(stripped)):
         raise ValueError(
             f"{value!r} is not a valid date for {name}: use YYYY-MM-DD or YYYY-MM-DDTHH:MM; a "
             "Taskwarrior date expression is one word without spaces (now+3d, eom)"

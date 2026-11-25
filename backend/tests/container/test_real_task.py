@@ -267,6 +267,14 @@ class TestDateValuesAreOneArgument:
             f"rc.data.location={victim}",
             f"now + rc.data.location={victim}",
             f"2026-01-01 rc:{evil_rc}",
+            # The colon spelling of an override, which Taskwarrior honours standalone
+            # (`test_the_harness_can_see_a_colon_redirect`), as the whole value and embedded;
+            # and the rc-file form as the whole value (second review of brief 0074).
+            f"rc.data.location:{victim}",
+            f"2026-01-01 rc.data.location:{victim}",
+            f"now+rc.data.location:{victim}",
+            "rc.data.location:..",
+            f"rc:{evil_rc}",
             f"$(touch {marker})",
             f"`touch {marker}`",
             f"2026-01-01;touch {marker}",
@@ -291,16 +299,14 @@ class TestDateValuesAreOneArgument:
             "covers: re-run the date regression and the grammar probe against it (brief 0074)"
         )
 
-    def test_the_harness_can_see_a_redirect(self, victim):
-        """Positive control: a *standalone* override does create a store in `victim`, so the
-        negative tests below would see one. (An rc file is no control: TASKDATA, which `_run`
-        always sets, outranks its `data.location` — observed on 3.5.0, brief 0074.)"""
+    @staticmethod
+    def _raw_task(args: list[str]) -> subprocess.CompletedProcess[str]:
+        """The binary on alice's store, past `_run` and its token check — for the controls."""
         store = S["alice"]
         task_bin = shutil.which("task")
         assert task_bin
-        subprocess.run(  # noqa: S603  # the binary, a synthetic store, no user input
-            [task_bin, "rc.confirmation=off", "rc.verbose=nothing"]
-            + [f"rc.data.location={victim}", "add", "--", "control"],
+        return subprocess.run(  # noqa: S603  # the binary, a synthetic store, no user input
+            [task_bin, "rc.confirmation=off", "rc.verbose=nothing", *args],
             env={
                 **os.environ,
                 "TASKDATA": str(store.path),
@@ -308,9 +314,23 @@ class TestDateValuesAreOneArgument:
                 "HOME": str(store.path),
             },
             capture_output=True,
+            text=True,
             timeout=10,
             stdin=subprocess.DEVNULL,
         )
+
+    @pytest.mark.parametrize("operator", ["=", ":"])
+    def test_the_harness_can_see_a_redirect(self, victim, operator):
+        """Positive control: a *standalone* override, in either spelling, does create a store in
+        `victim`, so the negative tests below would see one. (An rc file is no control: TASKDATA,
+        which `_run` always sets, outranks its `data.location` — observed on 3.5.0, brief 0074.)"""
+        self._raw_task([f"rc.data.location{operator}{victim}", "add", "--", "control"])
+        assert "taskchampion.sqlite3" in _files(victim), "a standalone override did not redirect"
+
+    def test_the_harness_can_see_a_redirect_on_modify(self, victim):
+        """The same control on the modify path the negative modify test exercises."""
+        task = task_service.create_task(S["alice"], TaskCreate(description="host"))
+        self._raw_task([f"rc.data.location={victim}", task.uuid, "modify", "due:2030-01-01"])
         assert "taskchampion.sqlite3" in _files(victim), "a standalone override did not redirect"
 
     @pytest.mark.parametrize("field", DATE_FIELDS)
@@ -344,17 +364,62 @@ class TestDateValuesAreOneArgument:
     ):
         from app.services import task_runner
 
+        task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
+        bob_before = _files(S["bob"].path)
         task = task_service.create_task(S["alice"], TaskCreate(description="host"))
         marker = real_data_root / "marker"
+        accepted = []
         for payload in self._payloads(victim, evil_rc, marker):
             token = f"{field}:{payload}"
             try:
                 task_runner.modify_task(S["alice"], task.uuid, [token])
+                accepted.append(token)
             except task_runner.TaskwarriorRejected:
-                pass
+                pass  # refused by the binary: also no redirect
             assert _files(victim) == [], f"{token!r} opened a store in the victim directory"
             assert not marker.exists(), f"{token!r} ran a shell command"
+        assert _files(S["bob"].path) == bob_before, "bob's directory changed"
+        assert [t.description for t in task_service.list_tasks(S["bob"])] == ["bob private note"]
+        assert accepted, "no payload was accepted, so the redirect was never really attempted"
         assert task_service.get_task(S["alice"], task.uuid).uuid == task.uuid
+
+    @pytest.mark.parametrize("reference", ["rc.data.location", "rc.dateformat", "system.os"])
+    def test_a_dom_reference_in_a_date_is_evaluated_by_the_binary(self, reference):
+        """Characterisation, the reason for the grammar's dot rule (second review of brief 0074):
+        3.5.0 evaluates a DOM reference inside a date and echoes the result in its rc-2 stderr —
+        for `rc.data.location`, the store's absolute path. No redirect; a disclosure."""
+        result = self._raw_task(["add", f"due:{reference}", "--", "probe"])
+        assert result.returncode == 2
+        assert "is not a valid date" in result.stderr
+        if reference == "rc.data.location":
+            assert str(S["alice"].path) in result.stderr
+
+    def test_past_the_grammar_the_store_path_still_never_reaches_the_caller(self):
+        """`_run`'s own control, held with the grammar bypassed: the refusal that would carry the
+        data path is answered generically."""
+        from app.services import task_runner
+
+        for token in ("due:rc.data.location", "scheduled:rc.data.location"):
+            with pytest.raises(task_runner.TaskwarriorRejected) as refused:
+                task_runner.add_task(S["alice"], [token], ["probe"])
+            assert str(settings.data_root) not in str(refused.value)
+            assert S["alice"].path.name not in str(refused.value)
+
+    @pytest.mark.parametrize(
+        "value",
+        ["rc.data.location", "system.os", "tw.version", "now+rc.data.location", "rc:rc"],
+    )
+    def test_over_http_a_dom_reference_is_refused_and_names_nothing(self, real_client, value):
+        """Through the ASGI app against the real binary, REST and therefore MCP: 400 from the
+        grammar, no path, no OS, no version; and `now+rc.data.location` is not stored as `now`."""
+        client, headers = real_client
+        r = client.post("/tasks", json={"description": "t", "due": value}, headers=headers)
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert "not a valid date" in detail
+        assert str(settings.data_root) not in detail
+        assert "Darwin" not in detail and "Linux" not in detail and "3.5" not in detail
+        assert client.get("/tasks", headers=headers).json() == []
 
     def test_a_newline_turns_the_token_into_description_text(self):
         """Characterisation, not a redirect: on 3.5.0 an element with a newline is not read as

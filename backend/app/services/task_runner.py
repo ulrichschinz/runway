@@ -75,6 +75,9 @@ _SYSTEM_FAULT = re.compile(
 # What a 500 for such a fault says. The stderr goes to the log, never to the caller.
 _SYSTEM_FAULT_MESSAGE = "Taskwarrior could not access its data store"
 
+# What a 400 says when Taskwarrior's own refusal would name the data path. The stderr is logged.
+_DATA_PATH_REFUSAL = "Taskwarrior refused a value: it is not a valid date or value here"
+
 # Free text is passed after this. Taskwarrior stops interpreting options at it.
 SEPARATOR = "--"
 
@@ -92,6 +95,9 @@ class TaskwarriorRejected(ValueError):
     or unreachable store, which stays a RuntimeError. A ValueError, so every router maps it
     to 400; before this it surfaced as a 500. The message is Taskwarrior's stderr; for the
     input refusals checked on 3.5.0 it names the offending value and nothing about the server.
+    The exception is a value the binary *evaluates*: a DOM reference such as `rc.data.location`
+    is echoed as the store's absolute path. A stderr naming the data directory is therefore
+    replaced by `_DATA_PATH_REFUSAL` and logged (second review of brief 0074).
     """
 
 
@@ -173,6 +179,12 @@ def _run(store: TaskStore, args: list[str], text: list[str] | None = None) -> st
             # Not the caller's error, and the stderr may name the data path: log it, 500.
             logger.error("taskwarrior store fault (rc 2): %s", stderr)
             raise RuntimeError(_SYSTEM_FAULT_MESSAGE)
+        if str(store.path.parent) in stderr:
+            # An input refusal that names the server's data directory: the binary evaluated a
+            # DOM reference such as `rc.data.location` inside a value (second review of brief
+            # 0074). The service grammar refuses those; this holds if something slips past it.
+            logger.warning("taskwarrior refusal named the data path (rc 2): %s", stderr)
+            raise TaskwarriorRejected(_DATA_PATH_REFUSAL)
         raise TaskwarriorRejected(stderr or "Taskwarrior rejected the command")
     if result.returncode not in (0, 1):
         raise RuntimeError(result.stderr.strip() or "task command failed")

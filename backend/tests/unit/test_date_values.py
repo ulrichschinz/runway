@@ -47,6 +47,8 @@ ACCEPTED = [
     "9am",
     "later",
     "-1d",
+    "2030-01-01T10:00:00.5Z",
+    "march",
 ]
 
 # The shapes the SEC-007 hypothesis needs, and their neighbours. Inert on 3.5.0 — refused anyway.
@@ -70,6 +72,23 @@ REFUSED = [
     "2026​-01-01",
     "2026-01-01 ",
     "２０２６-01-01",
+    # Taskwarrior DOM references, which 3.5.0 evaluates inside a date and echoes in its rc-2
+    # stderr: the data path, the OS, the version, any rc key (second review of brief 0074).
+    "rc.data.location",
+    "rc.dateformat",
+    "RC.data.location",
+    "system.os",
+    "tw.version",
+    "now+rc.data.location",
+    "1.description",
+    "context.name",
+    # The one-word colon spelling of an override, and the rc-file form as the whole value.
+    "rc.data.location:victim",
+    "rc.data.location:..",
+    "rc.hooks:on",
+    "rc:rc",
+    "RC:evilrc",
+    "now+rc:evilrc",
 ]
 
 
@@ -160,6 +179,30 @@ class TestTheDateGrammar:
             ALICE, TaskCreate(description="t", due="2030-01-01", recur="3 weeks")
         )
         assert "recur:3 weeks" in fake_task.calls[0][1]
+
+
+class TestTheStorePathNeverReachesTheCaller:
+    """Second review of brief 0074: an rc-2 stderr that names the store's directory is the binary
+    having evaluated something server-side (a DOM reference such as `rc.data.location`). `_run`
+    answers it with a generic refusal and keeps the stderr for the log, whatever let it through."""
+
+    def test_a_refusal_naming_the_data_path_is_generic(self, isolated_storage, monkeypatch):
+        stderr = f"'{STORE.path}' is not a valid date in the 'Y-M-D' format."
+        monkeypatch.setattr(
+            task_runner.subprocess, "run", lambda cmd, **kw: _Completed(2, "", stderr)
+        )
+        with pytest.raises(task_runner.TaskwarriorRejected) as refused:
+            task_runner.add_task(STORE, ["due:2030-01-01"], ["t"])
+        assert str(STORE.path.parent) not in str(refused.value)
+        assert "not a valid" in str(refused.value)
+
+    def test_an_ordinary_refusal_still_names_the_value(self, isolated_storage, monkeypatch):
+        stderr = "'garbage' is not a valid date in the 'Y-M-D' format."
+        monkeypatch.setattr(
+            task_runner.subprocess, "run", lambda cmd, **kw: _Completed(2, "", stderr)
+        )
+        with pytest.raises(task_runner.TaskwarriorRejected, match="'garbage' is not a valid"):
+            task_runner.add_task(STORE, ["due:garbage"], ["t"])
 
 
 class TestOverHttp:

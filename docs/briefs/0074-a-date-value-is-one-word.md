@@ -36,10 +36,14 @@ against the binary we ship and (b) not depending on a third-party lexer's choice
   fields, both tiers) and what is *passed* (a date-shaped word).
 - **D2 — the grammar is a word, not a parser.** A date value is ASCII letters, digits and `: + - .`,
   at most 64 characters (the M8 bound), after stripping surrounding whitespace. That admits every
-  documented form and every one-word Taskwarrior date expression probed on 3.5.0, and refuses exactly
-  the shapes the SEC-007 hypothesis needs: internal whitespace (the lexer's boundary), `=` (the
-  override's operator), `/` (every path), quotes, `$`, backticks, `;`, parentheses, control characters
-  and non-ASCII (Unicode whitespace and look-alikes). A full Taskwarrior date parser was rejected: it
+  documented form and every one-word Taskwarrior date expression probed on 3.5.0, and refuses
+  internal whitespace (the lexer's boundary), `=` (one of the override's two operators), `/` (every
+  absolute path), quotes, `$`, backticks, `;`, parentheses, control characters and non-ASCII (Unicode
+  whitespace and look-alikes). *Corrected after the second review:* a character set alone did **not**
+  refuse every shape the hypothesis needs — `:` is the override's other operator, so
+  `rc.data.location:victim` and `rc:evilrc` were one admitted word — nor the DOM references 3.5.0
+  evaluates inside a date. `DATE_DOM_RE` now also refuses a dot next to a letter and `rc:` at a word
+  start (D6). A full Taskwarrior date parser was rejected: it
   would reproduce a third-party grammar that changes between releases — the very thing this package
   watches — and refuse values the binary accepts.
 - **D3 — whitespace-only keeps its meaning.** Taskwarrior 3.5.0 reads `due:  ` as `due:` (clear on
@@ -53,14 +57,28 @@ against the binary we ship and (b) not depending on a third-party lexer's choice
   its message: re-run the date regression and the audit probe against the new binary, update the
   constant in the same change, and open a **new** finding if anything redirects.
 
+- **D6 — no DOM reference in a date (second review).** Taskwarrior 3.5.0 evaluates `rc.<key>`,
+  `system.os`, `tw.version`, `<id>.<attr>` inside a date value and echoes the result in its rc-2
+  refusal; `rc.data.location` gave the absolute store path (DATA_ROOT plus the storage id), and
+  `now+rc.data.location` was accepted and stored as `now`. Every DOM reference has a dot next to a
+  letter and no date form does (ISO fractional seconds are `.<digit>`), so that is the rule, plus
+  `rc:` at a word start for the rc-file form; case-insensitive. An allow-list parser was rejected for
+  D2's reason. And because a grammar can regress, `_run` replaces any rc-2 stderr naming the data
+  directory with a generic 400 and logs it — the no-path claim of `docs/security.md` no longer rests
+  on the grammar alone. Bare attribute names (`due:description`) evaluate to the *same* task's own
+  value; same account, nothing about the server — left alone.
+
 ## Control
 
 1. `task_service._validate_date_value(name, value)`: strip; empty → the existing clear/not-given path;
    otherwise `DATE_VALUE_RE.fullmatch` or `ValueError`. Called in `_build_args` for `due`, `scheduled`,
    `wait`, `until` only, before any token is built, so a refused value never reaches `_run`.
-2. `models._DATE_FORMAT` gains: "Other Taskwarrior date expressions are accepted as one word
+   Since the second review also `DATE_DOM_RE.search` → `ValueError` (D6).
+2. `task_runner._run`: an rc-2 stderr containing `store.path.parent` (the data directory) is logged and
+   raised as `TaskwarriorRejected(_DATA_PATH_REFUSAL)`, no path (D6).
+3. `models._DATE_FORMAT` gains: "Other Taskwarrior date expressions are accepted as one word
    (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400)."
-3. `tests/container/test_real_task.py::TestDateValuesAreOneArgument` — the regression, run through
+4. `tests/container/test_real_task.py::TestDateValuesAreOneArgument` — the regression, run through
    `task_runner.add_task`/`modify_task` directly so it holds the **binary's** behaviour whether or not
    the service-level grammar exists.
 
@@ -107,6 +125,32 @@ Run on 2026-11-25 on an arm64 Mac. "Red" is the new test against the code before
 | Unit (whole tier) | `backend/tests/unit` | — | 1 795 passed |
 
 No browser test: nothing in the SPA changed, and it sends `YYYY-MM-DD` only.
+
+## Second review (2026-11-25)
+
+Six findings; each verified against the host's Homebrew Taskwarrior 3.5.0 with synthetic stores.
+
+| # | Finding | Verdict | Change |
+|---|---|---|---|
+| 1 | The grammar admits DOM references; `due:rc.data.location` → 400 naming the absolute store path, `system.os` → `Darwin`, `tw.version` → `3.5.0`, `now+rc.data.location` stored as `now` | **confirmed** (re-probed: same stderr) — a disclosure, not a redirect | D6: `DATE_DOM_RE`; `_run` path substitution; `security.md`'s no-path claim corrected |
+| 2 | The grammar admits the colon override `rc.data.location:..`, `rc:rc`, `rc.hooks:on` | **confirmed** (inert inside a date on 3.5.0, rc 2; a working override standalone) | D6 refuses them; comment, `threat-model.md`, `operations.md` step 4 and D2 corrected |
+| 3, 5 | No binary-level payload uses the colon spelling | **confirmed** | `_payloads` gains `rc.data.location:V` (whole value, after a space, after `now+`), `rc.data.location:..`, `rc:EVILRC` as the whole value; the positive control runs for `=` **and** `:` |
+| 4, 6 | The modify regression never checks that a payload was accepted, nor bob | **confirmed** | counts accepted modifies and asserts ≥ 1; bob's files and tasks compared; a modify-side positive control |
+
+| Tier | Test | Red before the fix | Green |
+|---|---|---|---|
+| Unit | `TestTheDateGrammar`: 14 new refused values × 4 fields (`rc.data.location`, `rc.dateformat`, `RC.data.location`, `system.os`, `tw.version`, `now+rc.data.location`, `1.description`, `context.name`, `rc.data.location:victim`, `rc.data.location:..`, `rc.hooks:on`, `rc:rc`, `RC:evilrc`, `now+rc:evilrc`); 2 new accepted (`2030-01-01T10:00:00.5Z`, `march`, both rc 0 on 3.5.0) | **56 red** (all new refused cases reached argv) | green |
+| Unit | `TestTheStorePathNeverReachesTheCaller` (2): an rc-2 stderr naming the data path is generic; an ordinary refusal still names its value | **1 red** (the path was passed through); the other green, as intended | green |
+| Container | `test_past_the_grammar_the_store_path_still_never_reaches_the_caller` (via `task_runner`, past the grammar) | **red** — the 400 carried the absolute store path | green |
+| Container | `test_over_http_a_dom_reference_is_refused_and_names_nothing` × 5 (real ASGI app, real binary) | **4 red** (`rc.data.location`, `system.os`, `tw.version` leaked; `now+rc.data.location` was 201); `rc:rc` green before — the binary refuses it without disclosure | green |
+| Container | `test_a_dom_reference_in_a_date_is_evaluated_by_the_binary` × 3 — characterisation: the raw binary does echo the path, so a grammar regression is caught by the tests above | green (it is the binary's behaviour) | green |
+| Container | the colon payloads in the add/modify regressions; the strengthened modify test; `test_the_harness_can_see_a_redirect[=]`/`[:]`, `…_on_modify` | green before — no redirect on 3.5.0; the controls prove a standalone override in either spelling, and on modify, does redirect | green |
+| Container (whole tier) | `backend/tests/container` on the host's Homebrew 3.5.0 | — | 124 passed |
+| Unit (whole tier) | `backend/tests/unit` | — | 1 861 passed |
+
+Public surface: unchanged in shape — the newly refused values were never documented and are 400 as
+before (the DOM refs were already 400 from the binary, now without the disclosure; `now+rc.data.location`
+was 201 and stored a wrong date, now 400). No OpenAPI string changed. No rule, risk or waiver changed.
 
 ## Rollback
 

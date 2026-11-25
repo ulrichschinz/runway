@@ -435,7 +435,10 @@ Three controls, in order of how much they are relied on:
    inert; the `/` of a real data path is refused anyway, because it would also break an MCP
    path parameter ([ADR 0038](adr/0038-validated-filters-and-exact-project-match.md)).
    A date **modifier** (`due`, `scheduled`, `wait`, `until`) is one word, `DATE_VALUE_RE`:
-   ASCII letters, digits and `: + - .`, surrounding whitespace stripped (brief 0074). That is
+   ASCII letters, digits and `: + - .`, surrounding whitespace stripped, and with no dot next to
+   a letter and no `rc:` at a word start (`DATE_DOM_RE`), so neither a Taskwarrior DOM
+   reference (`rc.data.location`, `system.os`, `tw.version`) nor an override in its colon
+   spelling (`rc.data.location:<dir>`, `rc:<file>`) reaches the binary (brief 0074). That is
    defence in depth: finding SEC-007 — an `rc.` override inside a date value — is refuted on
    Taskwarrior 3.5.0 by the container regression `TestDateValuesAreOneArgument`, which also fails
    on purpose when the binary's major or minor version changes, so the refutation is re-run
@@ -459,7 +462,14 @@ stderr can name the absolute data path, so when the stderr matches `_SYSTEM_FAUL
 it and raises a `RuntimeError` with a generic message: 500, no path. Any other code stays a
 `RuntimeError`, 500. Until this, all of them were 500. The stderr of the input refusals checked
 names the offending value and nothing about the server, no data path (checked on 3.5.0, pinned
-in `tests/container`); the no-path claim covers those refusals only. The
+in `tests/container`) — **except when the value is one the binary evaluates**: a DOM reference
+in a date (`due:rc.data.location`) came back as `'<absolute store path>' is not a valid date`,
+`system.os` as the OS, `tw.version` as the version, and an authenticated caller read them from
+the 400 until the second review of brief 0074. Two controls now: the date grammar refuses every
+DOM reference before the argv, and `_run` replaces any rc-2 stderr that names the data directory
+with a generic refusal (the stderr is logged). The no-path claim covers the refusals checked
+plus that substitution; a refusal that echoes some other evaluated value not under the data
+directory is not covered by it. The
 binary never inherits the server's stdin (`/dev/null`), and `rc.recurrence.confirmation=no`
 is one of `_run`'s own overrides: modifying one instance of a recurring task otherwise asks
 whether to modify all of them and, on a terminal, waited for an answer until the timeout.
