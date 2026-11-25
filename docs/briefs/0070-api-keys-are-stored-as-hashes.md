@@ -173,7 +173,17 @@ regression pins named above.
   (probe above); keys created by this image do not work under it. After the cutoff, rolling back past this
   image is not allowed (runbook). The cutoff is not rolled back.
 
-*Gate outcome: recorded in the follow-up commit.*
+- `make check` on `cfbcf5c` (after `make fix`): **GREEN** (39 s of 180 s). Before the commit it was red once
+  on `RULE-ARCH-003` (`backend/app/auth.py` fan-in 5 → 6, from the first placement of the key format) and
+  `RULE-OPS-002` (a startup log field named `api_key_legacy_cutoff`, which the runtime filter would also have
+  redacted); both fixed in the code — the format moved to `database.py`, the field renamed
+  `legacy_key_cutoff` — no baseline or rule changed.
+- `make verify` on `cfbcf5c` in a clean, bootstrapped detached worktree: **GREEN** (288 s of 600 s) — unit
+  1121 passed, frontend 779 passed, 60 fixture arms passed, 0 failed (the three new ones —
+  `DEP-003-apikey`, `OPS-002-apikey`, `OPS-002-apikey-hash` — each went red); 47 of 50 executable rules
+  proven able to fail. The **container tier was skipped** on this arm64 host (`RISK-TEST-001`: no arm64
+  archlinux image) and was **not** observed here; `conftest.register_user` changed, so CI's container tier
+  is its first run.
 
 ### Deferred, with trigger
 
