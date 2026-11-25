@@ -22,6 +22,23 @@ describe('passwordError', () => {
     // the current one may be short: it was set before the rule
     expect(passwordError({ current: 'pw', next: 'ääää', confirm: 'ääää' })).toBeNull()
   })
+
+  // Brief 0067, R6: a bcrypt-era hash read only 72 bytes, so a new password sharing the current
+  // one's first 72 UTF-8 bytes would keep whatever value that hash accepted. Refused before sending.
+  it('refuses a new password that is the current one or shares its first 72 bytes', () => {
+    expect(passwordError({ current: 'gleich-lang-genug', next: 'gleich-lang-genug', confirm: 'gleich-lang-genug' })).toBe('set.pw.same')
+    const prefix = 'ä'.repeat(36) // 72 bytes
+    const other = prefix + '-anders'
+    expect(passwordError({ current: prefix + '-alt', next: other, confirm: other })).toBe('set.pw.same')
+    const differs = 'ä'.repeat(35) + 'ab-neu'
+    expect(passwordError({ current: prefix + '-alt', next: differs, confirm: differs })).toBeNull()
+  })
+
+  it('takes a current password of up to 4096 bytes (it was set before the rule)', () => {
+    const old = 'L'.repeat(2000)
+    expect(passwordError({ current: old, next: 'neu-lang-genug', confirm: 'neu-lang-genug' })).toBeNull()
+    expect(passwordError({ current: 'L'.repeat(4097), next: 'neu-lang-genug', confirm: 'neu-lang-genug' })).toBe('set.pw.givenTooLong')
+  })
 })
 
 describe('maskKey', () => {

@@ -3,7 +3,12 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, Field
 
-from app.auth import PASSWORD_MAX_BYTES, PASSWORD_MIN_BYTES, password_problem
+from app.auth import (
+    PASSWORD_GIVEN_MAX_BYTES,
+    PASSWORD_MAX_BYTES,
+    PASSWORD_MIN_BYTES,
+    password_problem,
+)
 
 # A project name we write, filter on, or put into a URL path (D4, ADR 0038). What it excludes,
 # and why: control characters and newlines (they would split an argument vector or a log line);
@@ -161,9 +166,11 @@ def _checked(new: bool):
 
 
 # Password fields are bounded in UTF-8 bytes (finding SEC-006, ADR 0044 Decision 5). The schema's
-# `maxLength` counts characters, and 1024 bytes are never more than 1024 characters, so it is a
-# true (weaker) bound that pydantic checks first; the validator then counts bytes. A refusal is
-# 422, raised while the body is parsed — before any hash is computed or any row is read.
+# `maxLength` counts characters, and N bytes are never more than N characters, so it is a true
+# (weaker) bound that pydantic checks first; the validator then counts bytes. A refusal is 422,
+# raised while the body is parsed — before any hash is computed or any row is read. A password
+# being set is at most 1024 bytes; one being given (login, current password) at most 4096, the
+# bound the previous image enforced, so no account that logged in before is refused here (R7).
 _SET_RULE = (
     f"{PASSWORD_MIN_BYTES} to {PASSWORD_MAX_BYTES} bytes in UTF-8 (counted in bytes, not "
     "characters), no NUL character. For up to 7 days after the server's password-hashing upgrade, "
@@ -177,9 +184,9 @@ NewPassword = Annotated[
 GivenPassword = Annotated[
     str,
     Field(
-        max_length=PASSWORD_MAX_BYTES,
-        description=f"At most {PASSWORD_MAX_BYTES} bytes in UTF-8. No minimum: a password set "
-        "before the rule still works.",
+        max_length=PASSWORD_GIVEN_MAX_BYTES,
+        description=f"At most {PASSWORD_GIVEN_MAX_BYTES} bytes in UTF-8. No minimum: a password "
+        "set before the rule still works.",
     ),
     AfterValidator(_checked(new=False)),
 ]

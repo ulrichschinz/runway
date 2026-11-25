@@ -118,10 +118,13 @@ response time said whether it existed), and a NUL byte made passlib raise — a 
 
 Decision gate D2 of the plan: **Argon2id with measured server parameters and rehash-on-login.**
 
-1. **Policy in UTF-8 bytes.** Every password field at most 1024 bytes; a password being set at least
-   8 and no NUL character. A login has no minimum, so a password set before the rule still logs in. Pydantic refuses
-   outside the rule with 422 while parsing, before any hash or query; the OpenAPI document declares
-   `maxLength: 1024` (a true bound in characters) and the byte rule in the description.
+1. **Policy in UTF-8 bytes.** A password being set is 8 to 1024 bytes with no NUL character; a
+   password being given (login, the current password of a change) has no minimum, so a password set
+   before the rule still logs in, and at most 4096 bytes — the bound the previous image enforced
+   (passlib's `MAX_PASSWORD_SIZE`), so no account that logged in before is refused by parsing
+   (brief 0067, R7). Pydantic refuses outside the rule with 422 while parsing, before any hash or
+   query; the OpenAPI document declares `maxLength` 1024 / 4096 (true bounds in characters) and the
+   byte rule in the description.
 2. **Body limit** in the backend, outside every route: 16 KiB on `/auth/*`, 1 MiB elsewhere (nginx's
    default, so nothing the SPA path could send is refused), 413 before a declared oversized body is
    read and as soon as a chunked one passes the limit; nginx gets the 16 KiB on `/api/auth/` too.
@@ -138,7 +141,10 @@ Decision gate D2 of the plan: **Argon2id with measured server parameters and reh
    NUL, so bcrypt saw every byte — is rehashed to Argon2id by a compare-and-swap on the verified hash,
    without touching `auth_version` (same password, no session ends). A match for **72 bytes or more is
    ambiguous**: the hash cannot tell the real password from its prefix plus anything, so the typed
-   value never becomes the new hash. During a window the login succeeds and the `Token` says
+   value never becomes the new hash — not by the login, and not by the password change: while the
+   current password is accepted only as this ambiguous case, a new password sharing its first 72
+   bytes (the same value retyped, or the prefix plus another suffix) is refused with 422 before any
+   hash (brief 0067, R6). During a window the login succeeds and the `Token` says
    `password_change_required: true`; both UIs send the person to set a new password; after the window
    it is refused and the operator reset (`python -m app.services.password_reset <account>`,
    `docs/operations.md`) is the recovery path.

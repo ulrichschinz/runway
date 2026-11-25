@@ -177,15 +177,20 @@ Since brief 0067 (finding SEC-006, ADR 0044 Decision 5):
 
 - **Hash: Argon2id** (argon2-cffi; t=3, 64 MiB, one lane — measured against a 250 ms / 64 MiB
   budget per verification and 500 ms per login, bcrypt check included). Hashes from before are passlib-era bcrypt and are still verified (`SHIM-SEC-009`).
-- **Limits, in UTF-8 bytes:** every password field at most **1024**; a password being set
-  (register, change) at least **8** and without a NUL character. Outside the rule is **422**, before any hash or query. A login
-  has no minimum, so a password set before the rule still works.
+- **Limits, in UTF-8 bytes:** a password being set (register, change) **8 to 1024** and without a
+  NUL character; a password being given (login, the current password) at most **4096** — the bound
+  the previous image enforced (passlib), so an account with a long bcrypt-era password still reaches
+  the flagged or audited path instead of a silent 422 (brief 0067, R7). Outside the rule is **422**,
+  before any hash or query. A login has no minimum, so a password set before the rule still works.
 - **Body limit:** **16 KiB** on `/auth/*`, **1 MiB** elsewhere, **413** before routing — in the
   backend itself and, for `/api/auth/`, at nginx.
 - **Migration:** an exact bcrypt login (input of 71 bytes or fewer) is rehashed to Argon2id by a
   compare-and-swap on the old hash; no session ends. A bcrypt match for 72 bytes or more is never
   rehashed from what was typed — bcrypt saw only the first 72 — so the login answers
-  `password_change_required: true`, both UIs send the person to Einstellungen, and after the window
+  `password_change_required: true`, both UIs send the person to Einstellungen — where a new
+  password sharing the current one's first 72 bytes (the same value retyped, or a guessed prefix
+  plus anything) is refused with 422, so the prefix-accepted value never becomes the hash on this
+  route either (brief 0067, R6) — and after the window
   such a login is refused and needs the operator reset (`docs/operations.md`).
 - **No oracle:** every login costs one Argon2id and one bcrypt operation whatever the account, and
   every failure is the same 401 `Invalid credentials`. A NUL byte is a 401, no longer a 500.

@@ -18,6 +18,8 @@ export default {
   'set.pw.done': 'Passwort geändert. Alle anderen Anmeldungen sind beendet; der API-Key gilt weiter. Falls ihn jemand haben könnte: unten einen neuen erzeugen.',
   'set.pw.tooShort': 'Das neue Passwort braucht mindestens 8 Bytes (ein Umlaut zählt zwei).',
   'set.pw.tooLong': 'Ein Passwort darf höchstens 1024 Bytes lang sein (ein Umlaut zählt zwei).',
+  'set.pw.givenTooLong': 'Das aktuelle Passwort kann höchstens 4096 Bytes lang sein (ein Umlaut zählt zwei).',
+  'set.pw.same': 'Das neue Passwort muss sich vom bisherigen unterscheiden, schon in den ersten 72 Bytes.',
   'set.pw.rule': 'Der Server nimmt dieses Passwort nicht an: 8 bis 1024 Bytes, ohne Nullzeichen (ein Umlaut zählt zwei). In der ersten Woche nach einem Server-Update höchstens 71 Bytes.',
   'set.pw.required': 'Bitte setz jetzt ein neues Passwort. Dein bisheriges wurde nur zu den ersten 72 Bytes geprüft; nach einer Übergangsfrist meldet es dich nicht mehr an.',
   'set.pw.hint': 'Ändern meldet dich auf allen anderen Geräten und Browsern ab. Der API-Key bleibt gültig.',

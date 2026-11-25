@@ -51,7 +51,7 @@ function messageFor(e) {
   // 422: the password rule (SEC-006); 413: a body over the auth routes' limit.
   // A register 422 the local check let through is a server-side part of the rule (NUL, the
   // soak's 72-byte limit), so the message names the whole rule, not "too short".
-  if (status === 422 || status === 413) return t(registering.value ? 'login.pw.rule' : 'login.pw.tooLong')
+  if (status === 422 || status === 413) return t(registering.value ? 'login.pw.rule' : 'login.pw.givenTooLong')
   return t('login.failed')
 }
 

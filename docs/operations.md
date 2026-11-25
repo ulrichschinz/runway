@@ -789,7 +789,7 @@ sqlite3 users.db "SELECT value FROM site_settings WHERE key = 'password_kdf_expa
 
 | From | What happens |
 |---|---|
-| first boot | Policy (8–1024 bytes, no NUL), body limits (16 KiB on `/auth/*`, 1 MiB elsewhere) and uniform login work apply. **New and changed passwords are still bcrypt** — the soak — and so must be **shorter than 72 bytes** until Switch 1 (422 otherwise): bcrypt would store a longer one truncated, and any password with the same first 72 bytes would log in to it. |
+| first boot | Policy (a new password 8–1024 bytes, no NUL; a typed one at most 4096, the previous image's bound), body limits (16 KiB on `/auth/*`, 1 MiB elsewhere) and uniform login work apply. **New and changed passwords are still bcrypt** — the soak — and so must be **shorter than 72 bytes** until Switch 1 (422 otherwise): bcrypt would store a longer one truncated, and any password with the same first 72 bytes would log in to it. |
 | + 7 days | **Switch 1.** New and changed passwords are Argon2id; an exact bcrypt login is rehashed (`auth.password.rehashed` in the audit log). |
 | + 67 days | **Switch 2.** A bcrypt login with a password of 72 bytes or more is refused; those accounts need the reset below. |
 
@@ -822,7 +822,9 @@ sqlite3 data/audit.db "SELECT COUNT(*) FROM audit_events WHERE event = 'auth.pas
 ```
 
 `$arg` is Argon2id, `$2b$` is bcrypt. **Who must change a long password** — every login accepted through a
-bcrypt hash for 72 bytes or more, before Switch 2; tell them, the app already does:
+bcrypt hash for 72 bytes or more, before Switch 2 (passwords of up to 4096 bytes reach this path; a
+longer one was refused by the previous image too); tell them, the app already does. Their new password
+must differ from the old one in its first 72 bytes — the server refuses it otherwise:
 
 ```sh
 sqlite3 data/audit.db "SELECT DISTINCT actor FROM audit_events WHERE event = 'auth.login.succeeded' AND detail LIKE 'bcrypt-era password%';"

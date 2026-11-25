@@ -12,25 +12,31 @@ from app.config import settings
 
 # --- the password policy (finding SEC-006, ADR 0044 Decision 5) --------------------------------
 #
-# Counted in UTF-8 bytes, because bytes are what the KDF reads and what a body costs. The minimum
-# applies to a password being SET (register, change); login keeps none, so an account created
-# before the rule still logs in. The maximum applies everywhere a password is accepted, login
-# included: it bounds the work an unauthenticated request can ask for.
+# Counted in UTF-8 bytes, because bytes are what the KDF reads and what a body costs. A password
+# being SET (register, change) is 8 to 1024 bytes. A password being GIVEN (login, the current
+# password of a change) has no minimum, so an account created before the rule still logs in, and
+# at most 4096 bytes: the bound the previous image already enforced (passlib's MAX_PASSWORD_SIZE,
+# with bcrypt reading the first 72), so no account that could log in before is refused by parsing
+# (brief 0067, R7). Both bound the work an unauthenticated request can ask for: bcrypt reads 72
+# bytes and Argon2id pre-hashes its input once.
 PASSWORD_MIN_BYTES = 8
 PASSWORD_MAX_BYTES = 1024
+PASSWORD_GIVEN_MAX_BYTES = 4096
 
 # bcrypt reads at most this many bytes of its input (passlib truncated silently; bcrypt 5 raises).
 BCRYPT_INPUT_BYTES = 72
 
 
 def password_problem(value: str, *, new: bool) -> str | None:
-    """Why `value` is not an acceptable password, or None. `new` adds the minimum."""
+    """Why `value` is not an acceptable password, or None. `new` (a password being set) adds the
+    minimum and the lower maximum; a given one is bounded by PASSWORD_GIVEN_MAX_BYTES."""
     try:
         size = len(value.encode("utf-8"))
     except UnicodeEncodeError:
         return "password must be valid UTF-8 text"
-    if size > PASSWORD_MAX_BYTES:
-        return f"password must be at most {PASSWORD_MAX_BYTES} bytes in UTF-8"
+    limit = PASSWORD_MAX_BYTES if new else PASSWORD_GIVEN_MAX_BYTES
+    if size > limit:
+        return f"password must be at most {limit} bytes in UTF-8"
     if new and size < PASSWORD_MIN_BYTES:
         return f"password must be at least {PASSWORD_MIN_BYTES} bytes in UTF-8"
     # passlib refused a NUL byte, and a bcrypt hash of one is a hash `check_password` never
@@ -126,6 +132,19 @@ def new_password_problem(phase: KdfPhase, password: str) -> str | None:
             f"the update), a new password must be shorter than {BCRYPT_INPUT_BYTES} bytes in UTF-8"
         )
     return None
+
+
+def keeps_the_ambiguous_prefix(current: str, new: str) -> bool:
+    """Whether `new` shares its first 72 UTF-8 bytes with `current` — for a change whose current
+    password a bcrypt-era hash accepted only by those 72 bytes (`change_required`). Such a new
+    password would keep exactly what that hash accepted, the prefix plus anything, as the account's
+    new authoritative password: the value an attacker who knows the prefix typed, or the old
+    password retyped. Refused (brief 0067, R6; ADR 0044 Decision 4). Covers `new == current`."""
+    head = slice(0, BCRYPT_INPUT_BYTES)
+    try:
+        return new.encode("utf-8")[head] == current.encode("utf-8")[head]
+    except UnicodeEncodeError:
+        return False
 
 
 def hash_for(phase: KdfPhase, password: str) -> str:

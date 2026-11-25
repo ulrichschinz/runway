@@ -131,7 +131,8 @@ password reaches verification on login, the normal-size body passes).
   added). **`py-test-container` was skipped** (arm64, `RISK-TEST-001`): the 94 container results above are
   from the host's Taskwarrior 3.5.0, not from the image, and have to be observed in CI on amd64.
   **Branch protection was skipped** (cannot resolve the repository, `RISK-GOV-002`).
- **SEC-006** — Argon2id for new and changed
+- **Closes SEC-006** (plan §5 criterion: Argon2id, byte and body limits, safe legacy handling, the
+  72-byte test) — Argon2id for new and changed
   passwords (after the 7-day soak), byte limits and a body limit before any work, safe legacy handling
   (exact → rehash; ambiguous → never rehashed, flagged, refused after the window), and the 72-byte test.
   During the 7-day soak new passwords are still bcrypt, and since the review fixes a new password of
@@ -200,6 +201,50 @@ paths in `architecture.toml`; its imports raise the recorded fan-in of `database
 the storage migration CLI — both files need owner approval, `RISK-GOV-001`), `fe/shared` (message text),
 `docs`, `tests`. Public surfaces: the REST bodies are unchanged (the soak refusal is a 422 in FastAPI's own
 validation shape, which the OpenAPI document already declares); MCP, DB schema, env vars, SPA unchanged.
+
+## Review fixes, round 2 (2026-11-25)
+
+A third review of `ad7cf85` found two more gaps (and the broken closing line above, fixed as text).
+Each control got a test first, observed red against `ad7cf85`'s code. **Base revision:** `ad7cf85`.
+`./run map` / `./run impact` on `auth.py`, `models.py`, `routers/auth.py`, `passwordPolicy.js`,
+`settingsRules.js`, `LoginPage.vue`: index `current`, revision `ad7cf85827ab` (1759 nodes / 2823 edges);
+dependents as above.
+
+| # | Finding | Failure scenario | Control |
+|---|---|---|---|
+| R6 | The forced password change could keep the prefix-accepted value | Carol's bcrypt hash covers `A*72 + "-real"`. Inside the window `A*72 + "-guess"` logs in flagged, and PUT /auth/password with that value as current **and as new** (or any new value sharing its first 72 bytes) wrote it as Argon2id: the real password stopped working, the forced change achieved nothing, and ADR 0044 Decision 4 ("the typed value never becomes the new hash") was false for this route. Reproduced by the reviewer on a throwaway server | When the current password was accepted as the **ambiguous case** (`change_required`), a new password whose first 72 UTF-8 bytes equal the current one's is refused with **422** in the validation shape (`loc: body.new_password`) before any hash is computed, audited as `auth.password.changed` / refused. An exact or Argon2id account is not affected. The SPA refuses a new password equal to the current one or sharing its first 72 bytes before sending (`set.pw.same`) |
+| R7 | The 1024-byte cap on **login** locked out accounts whose bcrypt-era password is 1025–4096 bytes | The previous image accepted up to 4096 bytes at login (passlib's `MAX_PASSWORD_SIZE`; bcrypt read 72). This branch answered 422 during parsing, before the handler: no audit row, so the runbook's queries never find the account; the SPA refused it locally too; no documented recovery | Option (b) of the review: a password being **given** (login, `current_password`) may be up to **4096** bytes — the bound the previous image already enforced, so no account that could log in before is refused by parsing. A password being **set** stays 8–1024 bytes. Such a login reaches `check_password`: inside the window it is the flagged ambiguous case (the change route accepts it as current), after Switch 2 it is the audited `bcrypt-era password` refusal the runbook queries. The work stays bounded: bcrypt reads 72 bytes, Argon2id pre-hashes its input once, and the 16 KiB `/auth/*` body limit is unchanged (a 4096-byte password plus a 1024-byte one fit unless almost every byte is a JSON-escaped control character — then 413, which no real password is) |
+
+Public surfaces: `ops/surfaces/openapi.json` — the two **given** password fields (`UserLogin.password`,
+`PasswordChange.current_password`) declare `maxLength: 4096` and say so; this loosens a bound this branch
+introduced and that never deployed, and matches what the deployed image accepted. MCP, DB schema, env vars,
+SPA routes and `localStorage` keys unchanged.
+
+**Red before the fix** (2026-11-25, against `ad7cf85`'s production code):
+
+- R6: `TestTheForcedChangeCannotKeepThePrefix::test_a_new_password_with_the_accepted_prefix_is_refused`
+  `[same, same_prefix, real]` — **red** (`assert 200 == 422`, `{"detail":"Password updated",…}`): the
+  reviewer's reproduction, in the suite. The two controls that pin it does not overreach (a different
+  new password still works; an Argon2id account may keep a long prefix) were green before and after.
+- R7: `TestALegacyPasswordLongerThanTheNewMaximum` — **red** on all four: a 2000-byte bcrypt-era login
+  was `422 string_too_long` (not 200 flagged), the change route could not take it as current, after
+  Switch 2 there was no `bcrypt-era password` audit row (`assert 422 == 401`), and a 4096-byte login was
+  422. `TestKdfUnit::test_password_problem` with the new table rows (1025 and 4096 bytes given: no
+  problem) — red. The oversized-login probe now posts 4097 bytes and still proves no SQL statement runs.
+- SPA: `passwordPolicy.test.js` ("a password being given may be up to 4096 bytes": `expected undefined
+  to be 4096`) and `settingsRules.test.js` ("refuses a new password that is the current one or shares
+  its first 72 bytes": `expected null to be 'set.pw.same'`; "takes a current password of up to 4096
+  bytes": `expected 'set.pw.tooLong' to be null`) — red.
+- After the fixes: unit **979 passed**, frontend **767 passed**. `make check` was RED twice on the way —
+  once `RULE-IDX-001` (the index was stale after the edits; `make fix` rebuilt it) and once
+  `RULE-TYPE-001` (mypy could not narrow the row through the new check; restructured, no suppression) —
+  then **GREEN** (28 s of 180 s).
+
+Units touched in round 2: `be/leaves` (`auth.py`, `models.py`, `middleware.py` comment), `be/routers`
+(`routers/auth.py`), `fe/shared` (`passwordPolicy.js`, `settingsRules.js`, both message catalogues),
+`fe/identity` (`LoginPage.vue`), `ops` (`ops/surfaces/openapi.json`), `docs` (this brief, ADR 0044
+Decisions 1 and 4, `docs/security.md`, `docs/threat-model.md`, `docs/operations.md`, `README.md`),
+`tests`. No gate rule, budget, ledger entry or suppression changed.
 
 ## Deferred, with triggers
 

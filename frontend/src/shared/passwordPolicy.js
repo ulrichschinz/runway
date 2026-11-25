@@ -9,6 +9,12 @@
 
 export const PASSWORD_MIN_BYTES = 8
 export const PASSWORD_MAX_BYTES = 1024
+// A password being given (login, the current password) may be longer: the previous image accepted
+// up to 4096 bytes (bcrypt read 72), and an account set up then must still reach the server, which
+// flags it or names the operator reset (brief 0067, R7).
+export const PASSWORD_GIVEN_MAX_BYTES = 4096
+// bcrypt read only this many bytes of a password.
+export const BCRYPT_INPUT_BYTES = 72
 
 const encoder = new TextEncoder()
 
@@ -19,17 +25,33 @@ export function utf8Bytes(value) {
 
 /**
  * Why `value` is not an acceptable password, or null. `isNew` (register, change) adds the
- * minimum; a login has none, so a password set before the rule still logs in.
+ * minimum and the 1024-byte maximum; a login has no minimum, so a password set before the rule
+ * still logs in, and the 4096-byte maximum the previous image had.
  *
  * @param {string} value
  * @param {{isNew: boolean}} options
- * @returns {'pw.tooShort'|'pw.tooLong'|null}
+ * @returns {'pw.tooShort'|'pw.tooLong'|'pw.givenTooLong'|null}
  */
 export function passwordProblem(value, { isNew }) {
   const size = utf8Bytes(value)
+  if (!isNew) return size > PASSWORD_GIVEN_MAX_BYTES ? 'pw.givenTooLong' : null
   if (size > PASSWORD_MAX_BYTES) return 'pw.tooLong'
-  if (isNew && size < PASSWORD_MIN_BYTES) return 'pw.tooShort'
+  if (size < PASSWORD_MIN_BYTES) return 'pw.tooShort'
   return null
+}
+
+/**
+ * Whether `next` is `current` or shares its first 72 UTF-8 bytes. A bcrypt-era hash read only
+ * those, so such a "new" password would keep whatever that hash accepted (brief 0067, R6).
+ *
+ * @param {string} current
+ * @param {string} next
+ */
+export function sharesTheBcryptPrefix(current, next) {
+  if (current === next) return true
+  const a = encoder.encode(current ?? '').slice(0, BCRYPT_INPUT_BYTES)
+  const b = encoder.encode(next ?? '').slice(0, BCRYPT_INPUT_BYTES)
+  return a.length === BCRYPT_INPUT_BYTES && a.length === b.length && a.every((byte, i) => byte === b[i])
 }
 
 /**

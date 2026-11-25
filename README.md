@@ -147,9 +147,10 @@ caller (`{"detail": …, "access_token": …, "token_type": "bearer"}`); a clien
 old token gets `401`. API keys are not affected by a password change — rotate them with
 `POST /api/auth/apikey/regenerate` if they may be compromised.
 
-**Passwords** are hashed with Argon2id and limited in **UTF-8 bytes**: at most 1024 in every
-password field (login included), at least 8 for a password being set (`POST /api/auth/register`,
-`PUT /api/auth/password`). A password outside the rule is refused with `422` before any work is
+**Passwords** are hashed with Argon2id and limited in **UTF-8 bytes**: a password being set
+(`POST /api/auth/register`, `PUT /api/auth/password`) is 8 to 1024 bytes and may not equal the
+current one in its first 72 bytes when that one is a bcrypt-era long password; one being typed to
+log in or as the current password at most 4096 (the bound the previous version had). A password outside the rule is refused with `422` before any work is
 done; a request body over 16 KiB on `/api/auth/*` (1 MiB elsewhere) with `413`. A login keeps no
 minimum, so an older short password still works. Passwords set before 2026-11 were hashed with
 bcrypt, which read only their first 72 bytes; a login with such a password of 72 bytes or more

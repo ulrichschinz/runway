@@ -78,9 +78,10 @@ class RequestIdMiddleware:
 # The earliest edge this repository controls in front of every route, and the only one in front
 # of a caller that reaches the backend directly on the shared Docker network rather than through
 # nginx. 1 MiB is nginx's default `client_max_body_size`, so nothing the SPA path could already
-# send is refused here; the auth routes carry a username and at most two 1024-byte passwords,
-# so 16 KiB is generous for them and small enough that a login cannot make the server parse a
-# large document. Uniform limits on the other fields are M8's (RISK-SEC-004).
+# send is refused here; the auth routes carry a username, at most a 4096-byte given password and a
+# 1024-byte new one, so 16 KiB is generous for them (unless nearly every byte is a JSON-escaped
+# control character, which no real password is: such a body is 413) and small enough that a login
+# cannot make the server parse a large document. Uniform limits on the other fields are M8's (RISK-SEC-004).
 AUTH_BODY_LIMIT = 16 * 1024
 DEFAULT_BODY_LIMIT = 1024 * 1024
 

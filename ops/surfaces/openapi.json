@@ -234,8 +234,8 @@
       "PasswordChange": {
         "properties": {
           "current_password": {
-            "description": "At most 1024 bytes in UTF-8. No minimum: a password set before the rule still works.",
-            "maxLength": 1024,
+            "description": "At most 4096 bytes in UTF-8. No minimum: a password set before the rule still works.",
+            "maxLength": 4096,
             "title": "Current Password",
             "type": "string"
           },
@@ -1188,8 +1188,8 @@
       "UserLogin": {
         "properties": {
           "password": {
-            "description": "At most 1024 bytes in UTF-8. No minimum: a password set before the rule still works.",
-            "maxLength": 1024,
+            "description": "At most 4096 bytes in UTF-8. No minimum: a password set before the rule still works.",
+            "maxLength": 4096,
             "title": "Password",
             "type": "string"
           },

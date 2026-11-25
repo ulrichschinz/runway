@@ -13,6 +13,7 @@ from app.auth import (
     hash_for,
     hash_password,
     kdf_phase,
+    keeps_the_ambiguous_prefix,
     new_password_problem,
 )
 from app.database import (
@@ -267,7 +268,10 @@ async def change_password(
     _refuse_new_password(phase, body.new_password, "new_password")
     async with db.execute("SELECT hashed_password FROM users WHERE username=?", (username,)) as cur:
         row = await cur.fetchone()
-    if not row or not check_password(body.current_password, row["hashed_password"], phase=phase).ok:
+    check = (
+        check_password(body.current_password, row["hashed_password"], phase=phase) if row else None
+    )
+    if row is None or check is None or not check.ok:
         audit.record(
             audit.PASSWORD_CHANGED,
             outcome=audit.FAILURE,
@@ -276,6 +280,29 @@ async def change_password(
             detail="the current password did not verify",
         )
         raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if check.change_required and keeps_the_ambiguous_prefix(
+        body.current_password, body.new_password
+    ):
+        # The current password was accepted only by its first 72 bytes (a bcrypt-era hash). A new
+        # one with the same 72 bytes would make that value — possibly a guessed prefix plus junk —
+        # the account's only password: refused before any hash (brief 0067, R6; ADR 0044).
+        audit.record(
+            audit.PASSWORD_CHANGED,
+            outcome=audit.REFUSED,
+            actor=username,
+            route=route,
+            detail="the new password keeps the first 72 bytes of a bcrypt-era password",
+        )
+        raise RequestValidationError(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("body", "new_password"),
+                    "msg": "the new password must differ from the current one in its first "
+                    "72 bytes in UTF-8",
+                }
+            ]
+        )
     # Hash and auth_version in one compare-and-swap statement (REV-001, ADR 0044): every token
     # issued before this line is refused from now on, on every REST route and every MCP tool.
     # None means another change replaced the hash after it was verified above — the password

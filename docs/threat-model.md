@@ -246,8 +246,10 @@ Argon2id on the next exact login. A bcrypt match for an input of 72 bytes or mor
 the hash cannot tell the real password from its prefix plus anything — so it is never written as
 the new hash: it is accepted for a window with `password_change_required` and refused after it.
 During the 7-day soak, when new hashes are still bcrypt, a new password must be shorter than 72 bytes,
-so the alias is never created new. Every password field is bounded at 1024 UTF-8 bytes, a new one needs
-8 and no NUL, and the body of an auth
+so the alias is never created new, and the forced change refuses a new password that keeps the
+ambiguous current one's first 72 bytes (brief 0067, R6). A password being set is bounded at 1024 UTF-8
+bytes and needs 8 and no NUL; one being given (login, current password) at 4096, the previous image's
+bound (R7); and the body of an auth
 request at 16 KiB. A hash is treated as credential-equivalent throughout, because it is
 offline-attackable; the log redaction knows both shapes.
 

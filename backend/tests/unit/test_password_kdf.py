@@ -198,7 +198,7 @@ class TestPasswordLimitsInBytes:
 
         monkeypatch.setattr(auth_router, "check_password", boom)
         monkeypatch.setattr(aiosqlite.Connection, "execute", counting_execute)
-        r = _login(client, "alice", "a" * 1025)
+        r = _login(client, "alice", "a" * 4097)
         assert r.status_code == 422
         assert statements == []
         # The probe itself is live: an ordinary login does reach both.
@@ -539,7 +539,9 @@ class TestKdfUnit:
             ("a" * 7, False, False),
             ("", False, False),
             ("a" * 1024, True, False),
-            ("a" * 1025, False, True),
+            ("a" * 1025, False, False),
+            ("a" * 4096, False, False),
+            ("a" * 4097, False, True),
             ("ä" * 512, True, False),
             ("ä" * 513, True, True),
             ("\ud800abcdefgh", True, True),
@@ -840,3 +842,111 @@ class TestTheMeasurement:
         assert calls and all(stored is None for (stored,) in calls)
         assert "per login" in out and "500 ms" in out
         assert "argon2id" in out and "bcrypt" in out
+
+
+# --- review round 2 (brief 0067, R6 and R7) ----------------------------------------------------
+
+
+class TestTheForcedChangeCannotKeepThePrefix:
+    """R6: inside the window a bcrypt-era login of 72 bytes or more is accepted with
+    `password_change_required`, and so is the same value as `current_password` on PUT
+    /auth/password. If the new password shares its first 72 UTF-8 bytes with that value — the
+    same value retyped, or a forged suffix — the prefix-accepted input would become the account's
+    only valid password: ADR 0044 Decision 4 says the typed value never becomes the new hash."""
+
+    def _forced(self, client):
+        real = _legacy_account(client, "carol", LEGACY["long_ascii"])
+        forged = real[:72] + "-what-mallory-typed"
+        answer = _login(client, "carol", forged).json()
+        assert answer["password_change_required"] is True
+        return real, forged, {"Authorization": f"Bearer {answer['access_token']}"}
+
+    @pytest.mark.parametrize("which", ["same", "same_prefix", "real"])
+    def test_a_new_password_with_the_accepted_prefix_is_refused(self, client, which):
+        real, forged, headers = self._forced(client)
+        new = {"same": forged, "same_prefix": real[:72] + "-another-suffix", "real": real}[which]
+        r = client.put(
+            "/auth/password",
+            json={"current_password": forged, "new_password": new},
+            headers=headers,
+        )
+        assert r.status_code == 422, r.text
+        detail = r.json()["detail"]
+        assert isinstance(detail, list) and detail[0]["loc"] == ["body", "new_password"]
+        assert forged not in r.text
+        # Nothing was written: the real password still works, the forged one is still flagged.
+        assert _stored_hash("carol") == LEGACY["long_ascii"][1]
+        assert _login(client, "carol", real).json()["password_change_required"] is True
+
+    def test_a_different_new_password_still_works(self, client):
+        _real, forged, headers = self._forced(client)
+        r = client.put(
+            "/auth/password",
+            json={"current_password": forged, "new_password": GOOD},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+
+    def test_an_exact_account_may_keep_its_long_prefix(self, client):
+        """The refusal is the ambiguous case only: an Argon2id account that saw every byte may set
+        a new long password sharing the old one's first 72 bytes."""
+        old = "z" * 72 + "-old"
+        assert _register(client, "dave", old).status_code == 201
+        token = _login(client, "dave", old).json()["access_token"]
+        r = client.put(
+            "/auth/password",
+            json={"current_password": old, "new_password": "z" * 72 + "-new"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200, r.text
+
+
+class TestALegacyPasswordLongerThanTheNewMaximum:
+    """R7: the previous image accepted a login password of up to 4096 bytes (passlib's
+    MAX_PASSWORD_SIZE; bcrypt read the first 72). A 1024-byte cap on LOGIN would refuse such an
+    account with 422 before the handler — no audit row, no recovery path. A password being SET
+    stays at most 1024 bytes; one being GIVEN (login, current password) may be up to 4096."""
+
+    # The stored hash depends only on the first 72 bytes, so passlib's own long_ascii vector is
+    # the hash it wrote for this 2000-byte password too.
+    LONG = "L" * 72 + "x" * 1928
+
+    def test_inside_the_window_it_logs_in_flagged(self, client):
+        _legacy_account(client, "erin", LEGACY["long_ascii"])
+        r = _login(client, "erin", self.LONG)
+        assert r.status_code == 200, r.text
+        assert r.json()["password_change_required"] is True
+        assert _stored_hash("erin") == LEGACY["long_ascii"][1]
+
+    def test_the_change_accepts_it_as_the_current_password(self, client):
+        _legacy_account(client, "erin", LEGACY["long_ascii"])
+        token = _login(client, "erin", self.LONG).json()["access_token"]
+        r = client.put(
+            "/auth/password",
+            json={"current_password": self.LONG, "new_password": GOOD},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200, r.text
+        assert _stored_hash("erin").startswith("$argon2id$")
+
+    def test_after_the_window_the_refusal_leaves_the_runbook_row(self, client):
+        from app import audit, database
+
+        _legacy_account(client, "erin", LEGACY["long_ascii"])
+        _expand_days_ago(68)
+        assert _login(client, "erin", self.LONG).status_code == 401
+        rows = (
+            sqlite3.connect(database.audit_db_path())
+            .execute(
+                "SELECT detail FROM audit_events WHERE event=? AND actor='erin'",
+                (audit.LOGIN_FAILED,),
+            )
+            .fetchall()
+        )
+        assert any((d or "").startswith("bcrypt-era password") for (d,) in rows), rows
+
+    def test_the_given_maximum_is_4096_bytes(self, client):
+        assert _register(client, "erin").status_code == 201
+        assert _login(client, "erin", "a" * 4096).status_code == 401
+        assert _login(client, "erin", "a" * 4097).status_code == 422
+        assert _login(client, "erin", "ä" * 2049).status_code == 422
