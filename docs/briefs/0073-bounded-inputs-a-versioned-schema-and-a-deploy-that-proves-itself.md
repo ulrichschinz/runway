@@ -236,6 +236,12 @@ Not run here: the container tier (arm64, `RISK-TEST-001`) — see *Gate*. The `E
 - After the review fixes: `make check` **GREEN** on `e494591` (52 s); `make verify` on `e494591`, again in a
   clean detached worktree: **GREEN**, 377 s of 600 s, exit 0; 63 fixture arms passed, 0 failed; 48 of 51
   executable rules proven able to fail.
+- After the second review: `make check` **GREEN** on `de778c6` (53 s). `make verify` on `de778c6` in a clean,
+  bootstrapped, detached worktree: the first run was **RED** — `RULE-GATE-002`, because the fixture suite's
+  sanity `./run check` of its pristine sandbox failed once, while the diagnostic re-run it prints immediately
+  after was GREEN (cause not identified; no tracked file differed). The second run, unchanged: **GREEN**,
+  383 s of 600 s, exit 0; 64 fixture arms passed, 0 failed (the new `SEC-001-ws` among them); 48 of 51
+  executable rules proven able to fail.
 - **The container tier did not run**: `py-test-container` is skipped on arm64 (`RISK-TEST-001`) and runs in CI
   only. No test of this brief is in that tier; none was claimed to pass there. The changed `backend/Dockerfile`
   (`BUILD_ID`) and the deploy compose mount were not built or started here — the first CI build and
