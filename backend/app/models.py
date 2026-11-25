@@ -26,6 +26,31 @@ PROJECT_RE = re.compile(r"^(?![+\-\s])[^\x00-\x1f\x7f()\"'\\:/?#%]{1,100}(?<!\s)
 # reading or filtering by such a name is merely empty, never dangerous.
 RESERVED_PROJECT_NAMES = frozenset({"overview", "plans"})
 
+# Field limits (RISK-SEC-004, plan M8, brief 0073). The body limit (`app.middleware`) bounds a
+# request; these bound a field, so a single value cannot grow a user's Taskwarrior store or reach
+# the kernel's per-argument limit (`MAX_ARG_STRLEN`, 131 072 bytes on Linux), where `execve` fails
+# with E2BIG. Counted in characters, as JSON Schema's `maxLength` is: at 4 UTF-8 bytes a character
+# the largest argument here is 32 000 bytes. Set far above anything the SPA, the skill or an agent
+# writes; one past a limit is 422, raised while the body is parsed — before any handler runs.
+DESCRIPTION_MAX = 2_000
+ANNOTATION_MAX = 8_000
+DATE_FIELD_MAX = 64
+PRIORITY_MAX = 16
+TAG_MAX = 100
+TAGS_MAX_ITEMS = 50
+DEPENDS_ID_MAX = 64
+DEPENDS_MAX_ITEMS = 100
+PROFILE_NAME_MAX = 200
+EMAIL_MAX = 320
+ROLE_MAX = 32
+PLAN_TEXT_MAX = 20_000
+PLAN_ITEM_ID_MAX = 200
+PLAN_ITEM_TEXT_MAX = 4_000
+PLAN_LIST_MAX_ITEMS = 500
+
+Tag = Annotated[str, Field(max_length=TAG_MAX)]
+DependsId = Annotated[str, Field(max_length=DEPENDS_ID_MAX)]
+
 # The complete set of roles. Two is deliberate: `admin` may administer other users and
 # site settings, `user` may not. Every place that writes a role — the API, the bootstrap
 # and the CLI escape hatch — validates against this tuple, so adding a third role is one
@@ -106,53 +131,77 @@ _D_DEPENDS = "UUIDs of tasks that must be done first."
 
 
 class TaskCreate(BaseModel):
-    description: str = Field(description=_D_DESCRIPTION)
+    description: str = Field(max_length=DESCRIPTION_MAX, description=_D_DESCRIPTION)
     project: str | None = Field(default=None, description=f"{_D_PROJECT} Empty means none.")
-    tags: list[str] = Field(default=[], description=_D_TAGS_CREATE)
-    priority: str | None = Field(default=None, description=f"{_D_PRIORITY} Empty means none.")
-    due: str | None = Field(default=None, description=_D_DUE)
-    scheduled: str | None = Field(default=None, description=_D_SCHEDULED)
-    wait: str | None = Field(default=None, description=_D_WAIT)
-    until: str | None = Field(default=None, description=_D_UNTIL)
-    recur: str | None = Field(default=None, description=_D_RECUR)
-    depends: list[str] = Field(default=[], description=_D_DEPENDS)
+    tags: list[Tag] = Field(default=[], max_length=TAGS_MAX_ITEMS, description=_D_TAGS_CREATE)
+    priority: str | None = Field(
+        default=None, max_length=PRIORITY_MAX, description=f"{_D_PRIORITY} Empty means none."
+    )
+    due: str | None = Field(default=None, max_length=DATE_FIELD_MAX, description=_D_DUE)
+    scheduled: str | None = Field(default=None, max_length=DATE_FIELD_MAX, description=_D_SCHEDULED)
+    wait: str | None = Field(default=None, max_length=DATE_FIELD_MAX, description=_D_WAIT)
+    until: str | None = Field(default=None, max_length=DATE_FIELD_MAX, description=_D_UNTIL)
+    recur: str | None = Field(default=None, max_length=DATE_FIELD_MAX, description=_D_RECUR)
+    depends: list[DependsId] = Field(
+        default=[], max_length=DEPENDS_MAX_ITEMS, description=_D_DEPENDS
+    )
 
 
 class TaskModify(BaseModel):
     description: str | None = Field(
         default=None,
+        max_length=DESCRIPTION_MAX,
         description=f"{_D_DESCRIPTION} Null, omitted or empty leaves it unchanged: a "
         "description can be replaced, never cleared.",
     )
     project: str | None = Field(default=None, description=f"{_D_PROJECT} {_CLEARS}")
-    tags: list[str] | None = Field(default=None, description=_D_TAGS_MODIFY)
-    priority: str | None = Field(default=None, description=f"{_D_PRIORITY} {_CLEARS}")
-    due: str | None = Field(default=None, description=f"{_D_DUE} {_CLEARS} {_RECURRING_KEEPS}")
-    scheduled: str | None = Field(default=None, description=f"{_D_SCHEDULED} {_CLEARS}")
-    wait: str | None = Field(default=None, description=f"{_D_WAIT} {_CLEARS}")
-    until: str | None = Field(default=None, description=f"{_D_UNTIL} {_CLEARS}")
-    recur: str | None = Field(default=None, description=f"{_D_RECUR} {_CLEARS} {_RECURRING_KEEPS}")
-    depends: list[str] | None = Field(
+    tags: list[Tag] | None = Field(
+        default=None, max_length=TAGS_MAX_ITEMS, description=_D_TAGS_MODIFY
+    )
+    priority: str | None = Field(
+        default=None, max_length=PRIORITY_MAX, description=f"{_D_PRIORITY} {_CLEARS}"
+    )
+    due: str | None = Field(
         default=None,
+        max_length=DATE_FIELD_MAX,
+        description=f"{_D_DUE} {_CLEARS} {_RECURRING_KEEPS}",
+    )
+    scheduled: str | None = Field(
+        default=None, max_length=DATE_FIELD_MAX, description=f"{_D_SCHEDULED} {_CLEARS}"
+    )
+    wait: str | None = Field(
+        default=None, max_length=DATE_FIELD_MAX, description=f"{_D_WAIT} {_CLEARS}"
+    )
+    until: str | None = Field(
+        default=None, max_length=DATE_FIELD_MAX, description=f"{_D_UNTIL} {_CLEARS}"
+    )
+    recur: str | None = Field(
+        default=None,
+        max_length=DATE_FIELD_MAX,
+        description=f"{_D_RECUR} {_CLEARS} {_RECURRING_KEEPS}",
+    )
+    depends: list[DependsId] | None = Field(
+        default=None,
+        max_length=DEPENDS_MAX_ITEMS,
         description="The complete set of UUIDs of tasks that must be done first: a UUID not "
         "listed is dropped. An empty list clears it; null or omitted leaves it unchanged.",
     )
-    tags_add: list[str] | None = Field(
+    tags_add: list[Tag] | None = Field(
         default=None,
-        max_length=50,
+        max_length=TAGS_MAX_ITEMS,
         description="Tags to add, leaving every other tag as it is. Cannot be combined "
         "with `tags`, which is the complete set and replaces the current one.",
     )
-    tags_remove: list[str] | None = Field(
+    tags_remove: list[Tag] | None = Field(
         default=None,
-        max_length=50,
+        max_length=TAGS_MAX_ITEMS,
         description="Tags to remove, leaving every other tag as it is; an absent tag is "
         "ignored. Cannot be combined with `tags`.",
     )
 
 
 class AnnotationCreate(BaseModel):
-    text: str
+    text: str = Field(max_length=ANNOTATION_MAX)
 
 
 def _checked(new: bool):
@@ -222,8 +271,8 @@ class UserInfo(BaseModel):
 
 
 class UserProfileUpdate(BaseModel):
-    full_name: str | None = None
-    email: str | None = None
+    full_name: str | None = Field(default=None, max_length=PROFILE_NAME_MAX)
+    email: str | None = Field(default=None, max_length=EMAIL_MAX)
 
 
 class PasswordChange(BaseModel):
@@ -236,7 +285,7 @@ class SiteSettings(BaseModel):
 
 
 class RoleUpdate(BaseModel):
-    role: str  # validated against VALID_ROLES in the handler
+    role: str = Field(max_length=ROLE_MAX)  # validated against VALID_ROLES in the handler
 
 
 # A project plan follows the GTD Natural Planning Model, and the five fields only make sense
@@ -246,9 +295,25 @@ _D_PLAN_LIST = "The complete list: what you send replaces the stored one. Omitte
 _D_PLAN_TEXT = "Omitted or null keeps the stored text; an empty string clears it."
 
 
-class BrainstormItem(BaseModel):
+class StoredBrainstormItem(BaseModel):
+    """One item of a stored plan, as it is read back: unbounded, because a plan written before the
+    limits (brief 0073) must still be readable — a response that failed its own model would be a 500."""
+
     id: str = Field(description="Identifier of the item, unique within the list. Any string.")
     text: str = Field(description="One idea, or one organized step, as free text.")
+
+
+class BrainstormItem(BaseModel):
+    """One item of a plan being written: bounded (RISK-SEC-004)."""
+
+    id: str = Field(
+        max_length=PLAN_ITEM_ID_MAX,
+        description="Identifier of the item, unique within the list. Any string.",
+    )
+    text: str = Field(
+        max_length=PLAN_ITEM_TEXT_MAX,
+        description="One idea, or one organized step, as free text.",
+    )
 
 
 class ProjectCreate(BaseModel):
@@ -263,31 +328,36 @@ class ProjectPlan(BaseModel):
     purpose: str = ""
     principles: str = ""
     vision: str = ""
-    brainstorm: list[BrainstormItem] = []
-    organized: list[BrainstormItem] = []
+    brainstorm: list[StoredBrainstormItem] = []
+    organized: list[StoredBrainstormItem] = []
     updated_at: str | None = None
 
 
 class ProjectPlanUpdate(BaseModel):
     purpose: str | None = Field(
         default=None,
+        max_length=PLAN_TEXT_MAX,
         description=f"Why the project exists — the outcome it serves. {_D_PLAN_TEXT}",
     )
     principles: str | None = Field(
         default=None,
+        max_length=PLAN_TEXT_MAX,
         description=f"The standards and constraints the work has to hold to. {_D_PLAN_TEXT}",
     )
     vision: str | None = Field(
         default=None,
+        max_length=PLAN_TEXT_MAX,
         description="What success looks like, described as if it had already happened. "
         f"{_D_PLAN_TEXT}",
     )
     brainstorm: list[BrainstormItem] | None = Field(
         default=None,
+        max_length=PLAN_LIST_MAX_ITEMS,
         description=f"Unsorted ideas, in no particular order. {_D_PLAN_LIST}",
     )
     organized: list[BrainstormItem] | None = Field(
         default=None,
+        max_length=PLAN_LIST_MAX_ITEMS,
         description=f"The ideas worth keeping, in the order they will be acted on. {_D_PLAN_LIST}",
     )
 

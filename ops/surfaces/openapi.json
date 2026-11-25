@@ -4,6 +4,7 @@
       "AnnotationCreate": {
         "properties": {
           "text": {
+            "maxLength": 8000,
             "title": "Text",
             "type": "string"
           }
@@ -237,14 +238,17 @@
         "type": "object"
       },
       "BrainstormItem": {
+        "description": "One item of a plan being written: bounded (RISK-SEC-004).",
         "properties": {
           "id": {
             "description": "Identifier of the item, unique within the list. Any string.",
+            "maxLength": 200,
             "title": "Id",
             "type": "string"
           },
           "text": {
             "description": "One idea, or one organized step, as free text.",
+            "maxLength": 4000,
             "title": "Text",
             "type": "string"
           }
@@ -378,12 +382,14 @@
       "InboxItem": {
         "properties": {
           "description": {
+            "maxLength": 2000,
             "title": "Description",
             "type": "string"
           },
           "note": {
             "anyOf": [
               {
+                "maxLength": 8000,
                 "type": "string"
               },
               {
@@ -395,6 +401,7 @@
           "priority": {
             "anyOf": [
               {
+                "maxLength": 16,
                 "type": "string"
               },
               {
@@ -543,7 +550,7 @@
           "brainstorm": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/BrainstormItem"
+              "$ref": "#/components/schemas/StoredBrainstormItem"
             },
             "title": "Brainstorm",
             "type": "array"
@@ -551,7 +558,7 @@
           "organized": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/BrainstormItem"
+              "$ref": "#/components/schemas/StoredBrainstormItem"
             },
             "title": "Organized",
             "type": "array"
@@ -601,6 +608,7 @@
                 "items": {
                   "$ref": "#/components/schemas/BrainstormItem"
                 },
+                "maxItems": 500,
                 "type": "array"
               },
               {
@@ -616,6 +624,7 @@
                 "items": {
                   "$ref": "#/components/schemas/BrainstormItem"
                 },
+                "maxItems": 500,
                 "type": "array"
               },
               {
@@ -628,6 +637,7 @@
           "principles": {
             "anyOf": [
               {
+                "maxLength": 20000,
                 "type": "string"
               },
               {
@@ -640,6 +650,7 @@
           "purpose": {
             "anyOf": [
               {
+                "maxLength": 20000,
                 "type": "string"
               },
               {
@@ -652,6 +663,7 @@
           "vision": {
             "anyOf": [
               {
+                "maxLength": 20000,
                 "type": "string"
               },
               {
@@ -758,6 +770,7 @@
       "RoleUpdate": {
         "properties": {
           "role": {
+            "maxLength": 32,
             "title": "Role",
             "type": "string"
           }
@@ -844,6 +857,27 @@
           "sha256"
         ],
         "title": "SkillRelease",
+        "type": "object"
+      },
+      "StoredBrainstormItem": {
+        "description": "One item of a stored plan, as it is read back: unbounded, because a plan written before the\nlimits (brief 0073) must still be readable \u2014 a response that failed its own model would be a 500.",
+        "properties": {
+          "id": {
+            "description": "Identifier of the item, unique within the list. Any string.",
+            "title": "Id",
+            "type": "string"
+          },
+          "text": {
+            "description": "One idea, or one organized step, as free text.",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "title": "StoredBrainstormItem",
         "type": "object"
       },
       "Task": {
@@ -1048,19 +1082,23 @@
             "default": [],
             "description": "UUIDs of tasks that must be done first.",
             "items": {
+              "maxLength": 64,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Depends",
             "type": "array"
           },
           "description": {
             "description": "What the task is, as free text. Never parsed for tags or attributes.",
+            "maxLength": 2000,
             "title": "Description",
             "type": "string"
           },
           "due": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1073,6 +1111,7 @@
           "priority": {
             "anyOf": [
               {
+                "maxLength": 16,
                 "type": "string"
               },
               {
@@ -1097,6 +1136,7 @@
           "recur": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1109,6 +1149,7 @@
           "scheduled": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1122,14 +1163,17 @@
             "default": [],
             "description": "Tags, written without `+`. Status tags are `next`, `waiting`, `someday`; contexts are `@name` (`@home`).",
             "items": {
+              "maxLength": 100,
               "type": "string"
             },
+            "maxItems": 50,
             "title": "Tags",
             "type": "array"
           },
           "until": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1142,6 +1186,7 @@
           "wait": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1164,8 +1209,10 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 64,
                   "type": "string"
                 },
+                "maxItems": 100,
                 "type": "array"
               },
               {
@@ -1178,6 +1225,7 @@
           "description": {
             "anyOf": [
               {
+                "maxLength": 2000,
                 "type": "string"
               },
               {
@@ -1190,6 +1238,7 @@
           "due": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1202,6 +1251,7 @@
           "priority": {
             "anyOf": [
               {
+                "maxLength": 16,
                 "type": "string"
               },
               {
@@ -1226,6 +1276,7 @@
           "recur": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1238,6 +1289,7 @@
           "scheduled": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1251,8 +1303,10 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 100,
                   "type": "string"
                 },
+                "maxItems": 50,
                 "type": "array"
               },
               {
@@ -1266,6 +1320,7 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 100,
                   "type": "string"
                 },
                 "maxItems": 50,
@@ -1282,6 +1337,7 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 100,
                   "type": "string"
                 },
                 "maxItems": 50,
@@ -1297,6 +1353,7 @@
           "until": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1309,6 +1366,7 @@
           "wait": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1419,6 +1477,7 @@
           "email": {
             "anyOf": [
               {
+                "maxLength": 320,
                 "type": "string"
               },
               {
@@ -1430,6 +1489,7 @@
           "full_name": {
             "anyOf": [
               {
+                "maxLength": 200,
                 "type": "string"
               },
               {

@@ -2,8 +2,9 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app import audit, mcp_gate, rate_limit, startup_checks, task_storage
 from app.auth import prepare_dummies
@@ -12,6 +13,7 @@ from app.database import init_db, legacy_cutoff, legacy_cutoff_problem
 from app.logging_setup import configure_logging, resolve_level
 from app.middleware import BodyLimitMiddleware, RequestIdMiddleware
 from app.routers import admin, auth, gtd, inbox, projects, skill, tasks
+from app.services import task_service
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +131,13 @@ app.include_router(projects.router)
 app.include_router(inbox.router)
 app.include_router(admin.router)
 app.include_router(skill.router)
+
+
+@app.exception_handler(task_service.ArgumentTooLong)
+async def argument_too_long(_request: Request, exc: task_service.ArgumentTooLong) -> JSONResponse:
+    """413, not 500: the kernel refused a value as too long for `task` (RISK-SEC-004, brief 0073).
+    The request models bound every field below the kernel's limit, so this is the backstop."""
+    return JSONResponse(status_code=413, content={"detail": str(exc)})
 
 
 @app.get("/health", summary="Health check", description="Returns ok if the service is running.")

@@ -81,7 +81,8 @@ class RequestIdMiddleware:
 # send is refused here; the auth routes carry a username, at most a 4096-byte given password and a
 # 1024-byte new one, so 16 KiB is generous for them (unless nearly every byte is a JSON-escaped
 # control character, which no real password is: such a body is 413) and small enough that a login
-# cannot make the server parse a large document. Uniform limits on the other fields are M8's (RISK-SEC-004).
+# cannot make the server parse a large document. Every free-text field is bounded too, in app/models.py
+# (RISK-SEC-004, brief 0073).
 AUTH_BODY_LIMIT = 16 * 1024
 DEFAULT_BODY_LIMIT = 1024 * 1024
 

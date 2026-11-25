@@ -1487,23 +1487,20 @@ residual_risks:
 
   - id: RISK-SEC-004
     statement: >
-      Almost no request field declares a length limit. Since brief 0067 the password fields
-      are bounded (1024 UTF-8 bytes) and every request body is (16 KiB on /auth/*, 1 MiB
-      elsewhere — nginx's default, now enforced by the backend itself as well), but the other
-      string fields in backend/app/models.py constrain types and nothing else, and
-      TaskCreate.description, AnnotationCreate.text and InboxItem.note are the ones that
-      matter, because they travel into the Taskwarrior argv and into that user's task store.
-      So the bound on a single task description is now the 1 MiB body, not a field rule. Two consequences, and their severity is deliberately not overstated: a very
-      large description is storage growth in a per-user data directory on the same partition
-      as users.db and audit.db (the partition RISK-OPS-006 is already about), and an
-      argument long enough to exceed the kernel's per-argument limit makes execve fail,
-      which task_runner surfaces as a 500 rather than a 400. The second was NOT reproduced
-      here: the limit is a Linux constant and this repository's development host is macOS,
-      where a one-megabyte argument executed fine. Both are capacity questions, which
-      decision F1 puts out of scope — recorded rather than silently assumed, which is what
-      F1 asks for.
+      Narrowed 2026-11-25 by brief 0073 (plan M8): every free-text field a request carries is now
+      bounded in backend/app/models.py — a task description at 2 000 characters, an annotation and
+      an inbox note at 8 000, date-like fields at 64, tags at 100 each and 50 per task, plan texts
+      at 20 000 — and one past a limit is 422 while the body is parsed, before any handler runs;
+      MCP tool calls meet the same bounds through the tool input schema and the route. The largest
+      Taskwarrior argument is therefore at most 32 000 bytes, a quarter of Linux's
+      MAX_ARG_STRLEN, and an E2BIG that still occurs is task_runner.ArgumentTooLong, answered 413,
+      not 500. What remains is volume, not size: nothing bounds how many tasks, annotations or plan
+      revisions one account writes, so a user's own store can still grow on the partition that
+      holds users.db and audit.db (RISK-OPS-006). That is a capacity question decision F1 keeps
+      out of scope, recorded rather than assumed. The kernel limit itself was still not reproduced
+      here (the development host is macOS); the 413 path is tested at the subprocess seam.
     owner: maintainer
-    re_open_trigger: "a 500 is observed from a long description or annotation, disk usage grows from task data rather than from logs or audit rows, a body-size limit is set at the proxy, or F1's capacity exclusion is revisited"
+    re_open_trigger: "a 500 is observed from a long field, a field is added to a request model without a bound, disk usage grows from task data rather than from logs or audit rows, or F1's capacity exclusion is revisited"
     decision_record: docs/adr/0027-the-threat-model.md
 
   - id: RISK-SEC-005

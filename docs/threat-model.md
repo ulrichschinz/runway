@@ -187,8 +187,11 @@ is the one place `--` cannot protect. It is now `+LATEST`, Taskwarrior's own vir
 ### Request bodies
 
 Pydantic models at [`backend/app/models.py`](../backend/app/models.py) constrain types. They
-constrain nothing else — there is no `Field(max_length=...)`, no `constr`, no bound of any kind on
-any string field in that file. `RISK-SEC-004`.
+bound every free-text field too, since brief 0073 (plan M8): description 2 000 characters, annotation
+and inbox note 8 000, date-like fields 64, tags 100 each and 50 per task, plan texts 20 000. One past a
+limit is 422 while the body is parsed; an `E2BIG` from `execve` that still occurs is 413
+(`task_runner.ArgumentTooLong`), not 500. Volume — how many tasks one account writes — is not bounded.
+`RISK-SEC-004`.
 
 ### Headers, and the three credential shapes
 
@@ -230,8 +233,8 @@ parameter and no body; the archive is built from a fixed file list under one dir
 no name for a caller to supply and therefore nothing to traverse. What they *disclose* is in §8.
 
 **Asserted**
-- No length limit on any request field, and no body-size limit from uvicorn or Starlette. A capacity
-  question, excluded by decision **F1** and recorded rather than assumed. `RISK-SEC-004`.
+- Field and body sizes are bounded (brief 0067, brief 0073); the number of tasks an account writes is
+  not. A capacity question, excluded by decision **F1** and recorded rather than assumed. `RISK-SEC-004`.
 - `--` is a property of a third-party argument parser. It is pinned and tested, not owned.
 - The audit log's route template protects one sink. Nothing structurally prevents a future call site
   from logging a raw path.
@@ -705,7 +708,8 @@ minutes old — and the re-open trigger is the first field here that is not alre
 Largely **out of scope by decision F1**, and stated rather than assumed. What exists: `timeout=10` on
 the Taskwarrior call, so a hung binary is a failed request rather than a worker that never returns;
 `restart: unless-stopped` and healthchecks in both compose files; container log rotation at 50 MB per
-service, checked in. What does not exist: any request size limit (`RISK-SEC-004`), any pruning of
+service, checked in; request bodies and fields bounded (briefs 0067 and 0073). What does not exist: a
+bound on how much one account writes (`RISK-SEC-004`), any pruning of
 `audit.db` (`RISK-OPS-006`), any capacity budget, and any measurement of the partition all three
 stores share.
 

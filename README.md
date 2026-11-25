@@ -204,6 +204,14 @@ answers `"password_change_required": true` beside the token — set a new passwo
 after a transition window that login is refused. Every failed login is the same
 `401 Invalid credentials`, whether or not the account exists.
 
+**Field limits.** Every text field a request carries has a maximum length, stated as `maxLength` /
+`maxItems` in the OpenAPI schema (`/api/openapi.json`): a task description 2 000 characters, an
+annotation and an inbox note 8 000, `due`/`scheduled`/`wait`/`until`/`recur` 64, a tag 100 and at most
+50 tags, at most 100 `depends`, a profile name 200 and an email 320, each project-plan text 20 000 and
+each plan list at most 500 items of 4 000 characters. A value over its limit is refused with `422`
+before anything is written; MCP tool calls carry the same limits in their input schemas. A value the
+task store still cannot take is `413`, never `500`.
+
 **API key** — per-user, created in the app settings, for agents and automations:
 ```
 X-Api-Key: rwk_<key-id>_<secret>

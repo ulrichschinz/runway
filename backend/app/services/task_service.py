@@ -16,6 +16,10 @@ from app.models import (
 from app.services import task_runner
 from app.task_storage import TaskStore
 
+# Re-exported for `app.main`'s 413 handler: be/app may reach be/services, and this keeps the
+# adapter's name out of the assembly (brief 0073, RISK-SEC-004).
+ArgumentTooLong = task_runner.ArgumentTooLong
+
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
 )
