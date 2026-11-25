@@ -105,7 +105,8 @@ API_KEY_LEGACY_CUTOFF=2027-01-15
 # The MCP endpoint's budget: MCP requests in flight at once, in total and per network source
 # (the source as for the login budget, TRUSTED_PROXIES included). The request above either is
 # refused at once — 503 for the total, 429 for one source, with Retry-After — before any other
-# work; a quarter of the total is the most that requests without a credential header may hold.
+# work; a quarter of the total is the most that requests without a credential header may hold
+# (presence, not validity: a made-up header escapes that share, not the two ceilings).
 # Every MCP request is also bounded by 30 seconds (504). Both compose files pass both through.
 MCP_MAX_INFLIGHT=32
 MCP_SOURCE_MAX_INFLIGHT=8
@@ -305,8 +306,9 @@ request, as the snippets above do: a later release is planned to require it on t
 The transport is **stateless** Streamable HTTP (brief 0071, ADR 0045): the server issues no
 `Mcp-Session-Id`, keeps nothing between requests, and answers `GET` and `DELETE` on `/mcp` with
 `405`. Clients that follow the specification handle that without configuration. A tool call
-reaches only its own route: a path argument is sent as one literal segment, so a project named
-`a/b` or `..` is a name, never a different route.
+reaches only its own route: a path argument is percent-encoded, so `..` is a name rather than a
+step up, and a call whose value would still select another route (a `/` is decoded before routing,
+and `set_project_status` on a project called `plans` would hit the plan route) is refused with `400`.
 
 The MCP tools are an **allowlist** of the REST API: every operation of the `tasks`, `gtd`,
 `projects` and `inbox` routers, plus `GET /health` and `GET /auth/me`. Login, registration,

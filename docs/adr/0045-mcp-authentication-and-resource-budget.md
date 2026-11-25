@@ -37,8 +37,12 @@ the client sent `DELETE` — so anyone who could reach `/api/mcp` could grow ser
 Two controls, both kept:
 
 - **Encode the segment.** Every path argument is percent-encoded as one segment — everything but
-  `A–Z a–z 0–9 - _ ~`, the dot included — before substitution (`mcp_gate.encode_segment`). No value can
-  change the path's structure; Starlette decodes it, so the handler receives exactly the value sent.
+  `A–Z a–z 0–9 - _ ~`, the dot included — before substitution (`mcp_gate.encode_segment`). That stops
+  dot-segment removal and query or fragment splitting; Starlette decodes it, so the handler receives
+  exactly the value sent. It does not stop a `/` (decoded before routing, so `uuid="x/done"` selects
+  `complete_task`) or a plain value that selects a sibling route (`set_project_status(name="plans")` is
+  `PUT /projects/plans/status`, the `upsert_plan` route): only the binding below does
+  (`TestOnlyTheBindingStopsASiblingRoute`, review round 1).
 - **Bind to the selected route.** `RunwayMCP._execute_api_tool` names the tool in a context variable
   around the call; `mcp_gate.bind_mcp_target`, declared on the application and therefore the first
   dependency of every route, compares it with the operation id of the route Starlette actually selected
@@ -69,7 +73,8 @@ ceiling (`MCP_MAX_INFLIGHT`, 32), a per-source ceiling (`MCP_SOURCE_MAX_INFLIGHT
 login budget determines it), and, for a request without any credential header, a quarter of the global
 ceiling. Presence, not validity: a made-up header escapes the anonymous share but not the other two. Full: 503 (global, anonymous share) or 429 (source), `Retry-After: 1`, no database work. Every
 MCP request is bounded by 30 seconds and answered 504 past it, which also bounds a client that
-disconnects. The body limit (1 MiB, `BodyLimitMiddleware`) already applied. Per-worker and in-process,
+disconnects (observed: `test_a_client_that_disconnects_mid_call_gives_its_slot_back`; the server task
+is cancelled in the request's `finally` and unwinds within a few loop turns after the response). The body limit (1 MiB, `BodyLimitMiddleware`) already applied. Per-worker and in-process,
 like the login budget (`RISK-SEC-003`).
 
 ## Decision 4 — authentication at the handshake: designed, deferred

@@ -944,7 +944,8 @@ answer `405` by design.
 **Capacity.** Every MCP request takes a slot before any work: at most `MCP_MAX_INFLIGHT` (32) at once in
 total and `MCP_SOURCE_MAX_INFLIGHT` (8) per network source — the source as for the login budget, so with
 `TRUSTED_PROXIES` unset every client behind nginx counts against the total only — and requests without a
-credential header at most a quarter of the total. Above that: `503` (total) or `429` (source), `Retry-After:
+credential header at most a quarter of the total (presence, not validity: a made-up header escapes the
+share, not the two ceilings; `RISK-MCP-002`). Above that: `503` (total) or `429` (source), `Retry-After:
 1`. A request longer than 30 seconds is cancelled and answered `504`. Both compose files pass the two
 variables through; raise them in `/opt/services/runway/.env` and `docker compose up -d backend`. Like the
 login budget they are per process (`RISK-SEC-003`).

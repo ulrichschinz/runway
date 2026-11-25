@@ -275,3 +275,65 @@ class TestTheReproducedImpact:
         )
         assert result.isError
         assert "list_apikeys_auth_apikeys_get" not in [s["operation_id"] for s in seen]
+
+
+class TestOnlyTheBindingStopsASiblingRoute:
+    """Values no encoding can make harmless: the call is well-formed, every character is ordinary,
+    and the route it would select is a sibling the tool was not made from.
+
+    `encode_segment` stops dot segments and query or fragment splitting, and nothing else: an
+    encoded `/` is decoded before Starlette routes, and a plain word like `plans` or `overview`
+    needs no encoding at all. In these cases `bind_mcp_target` is the only control between the
+    tool and another handler, so a change that drops it — or a library bump after which the
+    expected operation no longer reaches the inner request — fails here, not only in a review.
+    """
+
+    def test_set_project_status_on_plans_does_not_upsert_a_plan_called_status(self, registered):
+        # `PUT /projects/plans/status` is `upsert_plan(name="status")`, declared first (ADR 0039).
+        result, seen = _run(
+            {"X-Api-Key": registered["api_key"]},
+            "set_project_status_projects__name__status_put",
+            {"name": "plans", "status": "active"},
+        )
+        assert "upsert_plan_projects_plans__name__put" in [s["selected"] for s in seen], seen
+        assert [s["operation_id"] for s in seen if s["operation_id"]] == [], seen
+        assert result.isError
+        assert MCP_UNBOUND_DETAIL in _text(result)
+        con = sqlite3.connect(settings.db_path)
+        try:
+            written = con.execute("SELECT COUNT(*) FROM projects WHERE name='status'").fetchone()
+        finally:
+            con.close()
+        assert written == (0,)
+
+    def test_project_tasks_of_overview_does_not_run_the_overview(self, registered):
+        # `/gtd/projects/overview` is declared before `/gtd/projects/{name}` (routers/gtd.py).
+        result, seen = _run(
+            {"X-Api-Key": registered["api_key"]},
+            "project_tasks_gtd_projects__name__get",
+            {"name": "overview"},
+        )
+        assert "projects_overview_gtd_projects_overview_get" in [s["selected"] for s in seen]
+        _assert_bound("project_tasks_gtd_projects__name__get", seen)
+        assert result.isError
+        assert MCP_UNBOUND_DETAIL in _text(result)
+
+    def test_a_refusal_is_counted(self, registered):
+        from app import mcp_gate
+
+        mcp_gate.reset_all()
+        _run(
+            {"X-Api-Key": registered["api_key"]},
+            "project_tasks_gtd_projects__name__get",
+            {"name": "overview"},
+        )
+        assert mcp_gate.counters()["refused_unbound_target"] == 1
+        mcp_gate.reset_all()
+
+    def test_the_binding_is_the_applications_first_dependency(self):
+        """The structural half: every route, the MCP-only ones included, evaluates it first."""
+        from app import mcp_gate
+        from app.main import app
+
+        assert app.router.dependencies, "the application declares no dependency"
+        assert app.router.dependencies[0].dependency is mcp_gate.bind_mcp_target

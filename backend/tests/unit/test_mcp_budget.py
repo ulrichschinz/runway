@@ -319,13 +319,80 @@ class TestCapacity:
         monkeypatch.setattr(mcp, "_execute_api_tool", held)
 
         async def run(app, c):
-            return await _post(c, CALL_HEALTH, {"X-Api-Key": registered["api_key"]})
+            r = await _post(c, CALL_HEALTH, {"X-Api-Key": registered["api_key"]})
+            # Inside the running loop, as in the disconnect test below.
+            await _until(lambda: mcp_gate.counters()["live_transports"] == 0, limit=1.0)
+            return r
 
         r = _arun(_with_app(run))
         assert r.status_code == 504
         assert mcp_gate.counters()["timed_out"] == 1
         assert mcp_gate.counters()["inflight"] == 0
         assert mcp_gate.counters()["live_transports"] == 0
+
+    def test_a_client_that_disconnects_mid_call_gives_its_slot_back(self, registered, monkeypatch):
+        """Plan M5: a disconnected request frees its capacity. Driven as raw ASGI, because httpx's
+        in-process transport cannot drop a connection: the body arrives, the tool call is held,
+        and every later `receive` says `http.disconnect`. Starlette does not cancel a handler on
+        disconnect, so the deadline is what ends it — observed here, not inferred."""
+        from app import mcp_gate
+        from app.main import app, mcp
+
+        monkeypatch.setattr(mcp_gate, "REQUEST_DEADLINE_SECONDS", 0.5)
+        held = _Held()  # never released: only the disconnect and the deadline remain
+        monkeypatch.setattr(mcp, "_execute_api_tool", held)
+        body = json.dumps(CALL_HEALTH).encode()
+        headers = [
+            (b"host", b"mcp-under-test"),
+            (b"accept", ACCEPT["Accept"].encode()),
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+            (b"x-api-key", registered["api_key"].encode()),
+        ]
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/mcp",
+            "raw_path": b"/mcp",
+            "root_path": "",
+            "query_string": b"",
+            "headers": headers,
+            "client": ("203.0.113.7", 50000),
+            "server": ("mcp-under-test", 80),
+        }
+        sent_body = {"done": False}
+        statuses: list[int] = []
+
+        async def receive():
+            if not sent_body["done"]:
+                sent_body["done"] = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                statuses.append(message["status"])
+
+        async def run():
+            async with app.router.lifespan_context(app):
+                call = asyncio.create_task(app(scope, receive, send))
+                await _until(lambda: held.entered == 1)
+                assert mcp_gate.counters()["inflight"] == 1
+                await asyncio.wait_for(call, 5)  # ends by the deadline, not by the test's limit
+                # The server task is cancelled in the request's `finally`; it unwinds on the
+                # next turns of the loop. Observed inside the running loop, so the loop's own
+                # shutdown (which cancels every task) cannot be what brings it to zero.
+                await _until(lambda: mcp_gate.counters()["live_transports"] == 0, limit=1.0)
+                return mcp_gate.counters()
+
+        after = _arun(run())
+        assert after["inflight"] == 0
+        assert after["live_transports"] == 0
+        assert after["timed_out"] == 1
+        assert statuses == [504]
 
 
 class TestTheBudgetUnit:

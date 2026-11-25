@@ -171,8 +171,10 @@ Two exclusions are worth naming. `/ ? # %` are refused not because Taskwarrior m
 because fastapi-mcp 0.4.0 substitutes a path parameter into the URL unencoded, so a project
 named `a/b` would address a different route over MCP. That refusal only ever covered *new*
 names, and an MCP caller can send any value: finding REV-005 showed `uuid="../auth/apikey"`
-reaching a REST-only route. Since brief 0071 every MCP path argument is sent as one encoded
-segment and `bind_mcp_target` refuses a call whose selected route is not its tool's own
+reaching a REST-only route. Since brief 0071 every MCP path argument is percent-encoded (which
+stops dot segments and query or fragment splitting; an encoded `/` is still decoded before routing)
+and `bind_mcp_target` refuses a call whose selected route is not its tool's own — the only control
+for a value that selects a sibling route, such as a `/` or the name `plans`
 (enforced: `backend/tests/unit/test_mcp_target_binding.py`, ADR 0045). And a value a client merely resends —
 a tag the task already carries, the project it already has — is deliberately **not** validated:
 live users hold data that predates these rules, and re-checking it would lock their tasks.
@@ -686,9 +688,13 @@ stores share.
 cap. It is now stateless (nothing outlives a request; `live_transports` returns to zero), reserves a slot
 before any work under a global, a per-source and an anonymous ceiling, and cancels a request after 30
 seconds. Enforced: `backend/tests/unit/test_mcp_budget.py` (the request above each ceiling refused,
-capacity returned after completion and after the deadline, a 50-request burst leaving no transport). The
-ceilings are per process (`RISK-SEC-003`), and anyone who can reach the endpoint may still list the
-tools (`RISK-MCP-002`).
+capacity returned after completion, after the deadline and after a client disconnects mid-call, a
+50-request burst leaving no transport). The anonymous ceiling counts the presence of a credential
+header, not its validity: a made-up header escapes it but not the global and per-source ceilings, and
+with `TRUSTED_PROXIES` unset behind nginx the per-source ceiling does not apply, so the global one is
+all that bounds unauthenticated traffic; closing that needs the deferred handshake authentication
+(`RISK-MCP-002`). The ceilings are per process (`RISK-SEC-003`), and anyone who can reach the endpoint
+may still list the tools (`RISK-MCP-002`).
 
 ---
 

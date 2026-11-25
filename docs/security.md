@@ -221,13 +221,20 @@ argument is sent as one percent-encoded segment, and `mcp_gate.bind_mcp_target` 
 dependency of every route — refuses with 400 a tool call whose selected route is not the tool's own,
 before the credential is looked up. `backend/tests/unit/test_mcp_target_binding.py` asserts the final
 handler for every path-parameter tool against traversal, encoded, double-encoded, query, fragment and
-Unicode look-alike values, not the status code.
+Unicode look-alike values, not the status code. Encoding stops dot segments and query or fragment
+splitting only; an encoded `/` is decoded before routing, and a plain value like `plans` in
+`set_project_status(name="plans")` would select the sibling `upsert_plan` route. Those cases are
+stopped by the binding alone, and `TestOnlyTheBindingStopsASiblingRoute` fails when it is removed.
 
 **The transport holds no session and has a budget** (finding REV-004). Stateless Streamable HTTP: no
 `Mcp-Session-Id`, a fresh transport per request torn down when it ends; `GET`/`DELETE` are 405. Every
 request reserves a slot before any work — 32 in total, 8 per source, a quarter of the total for requests
 without a credential header (`MCP_MAX_INFLIGHT`, `MCP_SOURCE_MAX_INFLIGHT`) — and is cancelled after 30
-seconds. `backend/tests/unit/test_mcp_budget.py`.
+seconds, which is also what frees the slot of a client that disconnects. The anonymous share counts the
+*presence* of a credential header, not its validity: a made-up `X-Api-Key` escapes the share but not the
+total and per-source ceilings, and with `TRUSTED_PROXIES` unset behind nginx the total is the only
+ceiling, so unauthenticated traffic can still crowd out real users up to it. Closing that needs the
+deferred handshake authentication (`RISK-MCP-002`). `backend/tests/unit/test_mcp_budget.py`.
 
 **The handshake is not authenticated yet** (`RISK-MCP-002`): anyone who can reach the endpoint may
 list the tools; every call is authenticated by its route. The dated switch to 401 is designed and

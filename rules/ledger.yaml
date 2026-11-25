@@ -1402,7 +1402,8 @@ residual_risks:
       tests/unit/test_mcp_target_binding.py). Since brief 0071 an anonymous handshake also costs
       no session: the transport is stateless, a request without a credential header holds at
       most a quarter of the in-flight budget, and it is torn down when it ends (REV-004,
-      tests/unit/test_mcp_budget.py). What remains is disclosure of the inventory, which is
+      tests/unit/test_mcp_budget.py). The share counts a header's presence, not its validity:
+      a made-up header escapes it, though not the global and per-source ceilings. What remains is disclosure of the inventory, which is
       published in README.md and ops/surfaces/mcp-tools.json anyway, so it stays accepted.
       Closing it — authenticating every MCP request before the transport, behind a dated soak —
       is designed (ADR 0045) and deferred: it makes backend/app/mcp_gate.py an importer of

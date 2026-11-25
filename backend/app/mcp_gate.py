@@ -10,14 +10,17 @@ template unencoded; `httpx` then removes `.`/`..` segments while parsing the URL
 the allowlist (ADR 0037) promises an MCP session cannot reach. Two controls, each sufficient for the
 reproduced cases and both kept, because they fail in different ways:
 
-1. `encode_segment` percent-encodes every path argument as ONE segment — everything but
-   `A-Z a-z 0-9 - _ ~`, the dot included — so no value can change the path's structure. Starlette
-   decodes it back, so the handler receives exactly what the client sent (`Büro`, `.`, `a/b`).
+1. `encode_segment` percent-encodes every path argument — everything but `A-Z a-z 0-9 - _ ~`, the
+   dot included — so `.`/`..` cannot be dot segments and `?`/`#` cannot split off a query or a
+   fragment. That is all it does: Starlette routes on the *decoded* path, so an encoded `/` is a
+   separator again (`uuid="x/done"` selects `complete_task`), and a plain word needs no encoding
+   (`set_project_status(name="plans")` is `PUT /projects/plans/status`, the `upsert_plan` route).
 2. `RunwayMCP._execute_api_tool` names the tool in `MCP_EXPECTED_OPERATION` around the
    call, and `bind_mcp_target` — the application's first dependency on every route —
    refuses with 400, before any credential lookup or handler, a tool call whose *selected* route has
    another operation id. The binding is to the route that is about to run, after normalisation and
-   routing, not to a URL string parsed a second time (plan M5.1).
+   routing, not to a URL string parsed a second time (plan M5.1). It is the only control for the
+   sibling-route cases above; `TestOnlyTheBindingStopsASiblingRoute` fails without it.
 
 **No session outlives its request (REV-004).** The transport is stateless Streamable HTTP: every POST
 gets a fresh server transport that is torn down in a `finally` — and its server task cancelled — when
@@ -29,7 +32,7 @@ byte: a global ceiling, a per-source ceiling, and — for a request that present
 at all — a quarter of the global ceiling. Every
 request is bounded by `REQUEST_DEADLINE_SECONDS`; past it, it is cancelled and answered 504, which is
 also what bounds a client that disconnects (Starlette does not cancel a buffered handler on
-disconnect). In-process and per-worker, like the login budget (`RISK-SEC-003`).
+disconnect; `test_a_client_that_disconnects_mid_call_gives_its_slot_back`). In-process and per-worker, like the login budget (`RISK-SEC-003`).
 
 **Not yet: authentication at the handshake.** The handshake and the tool list are still served
 without a credential (`RISK-MCP-002`); every tool call is authenticated by the route behind it. The
@@ -444,8 +447,9 @@ class BudgetedTransport(FastApiHttpSessionManager):
 
 
 def encode_segment(value: Any) -> str:
-    """A path argument as exactly one path segment: unreserved characters stay, the rest — the dot
-    included, so `..` cannot be a dot segment — is percent-encoded."""
+    """A path argument percent-encoded: unreserved characters stay, the rest — the dot included,
+    so `..` cannot be a dot segment — is encoded. An encoded `/` is decoded again before routing;
+    `bind_mcp_target`, not this, keeps such a value on its own route."""
     return quote(str(value), safe="").replace(".", "%2E")
 
 
