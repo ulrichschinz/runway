@@ -186,10 +186,24 @@ printf '{{"digest": "{registry_digest}"}}\\n'
     }
 
 
+# What the steps read from the checkout, copied into a scratch working directory: the step downloads
+# skill.zip into its working directory, which must not be this repository.
+CHECKOUT_FILES = (
+    "ops/deploy/docker-compose.yml",
+    "ops/surfaces/db-schema.sql",
+    "ops/skill-release.json",
+    "integrations/claude/.claude-plugin/plugin.json",
+)
+
+
 def _run(job: str, step: str, env: dict[str, str]) -> subprocess.CompletedProcess:
+    checkout = Path(env["HOME"]) / "checkout"
+    for name in CHECKOUT_FILES:
+        (checkout / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO / name, checkout / name)
     return subprocess.run(  # noqa: S603  # a fixed interpreter and a script read from this repository
         ["/bin/sh", "-c", _step(job, step)],
-        cwd=REPO,
+        cwd=checkout,
         env=env,
         capture_output=True,
         text=True,
