@@ -186,14 +186,22 @@ class TestTheRuntimeImageCheck:
             env=env,
         )
 
-    def _lock(self, tmp_path: Path, edit) -> Path:
-        text = (BACKEND / "requirements-dev.lock").read_text(encoding="utf-8")
-        path = tmp_path / "doctored.lock"
-        path.write_text(edit(text), encoding="utf-8")
+    def _lock(self, tmp_path: Path, edit=lambda text: text) -> Path:
+        """A lock of what this interpreter actually has installed, for every package the dev lock
+        names. A bootstrapped venv installs the intent, not the lock, so its transitives may be newer
+        than the lock's; the script's logic is tested against a lock that is true here by construction."""
+        lines = []
+        for name in pins(BACKEND / "requirements-dev.lock"):
+            try:
+                lines.append(f"{name}=={metadata.version(name)} \\\n    --hash=sha256:00\n")
+            except metadata.PackageNotFoundError:
+                continue
+        path = tmp_path / "installed.lock"
+        path.write_text(edit("".join(lines)), encoding="utf-8")
         return path
 
-    def test_positive_control_this_venv_matches_its_lock(self):
-        result = self._run(BACKEND / "requirements-dev.lock")
+    def test_positive_control_a_lock_of_what_is_installed_passes(self, tmp_path):
+        result = self._run(self._lock(tmp_path))
         assert result.returncode == 0, result.stderr
         assert result.stdout.startswith("ok")
 
@@ -217,9 +225,10 @@ class TestTheRuntimeImageCheck:
         assert installed != "0.0.12"
 
     def test_an_importable_jose_fails(self, tmp_path):
+        lock = self._lock(tmp_path)
         (tmp_path / "jose").mkdir()
         (tmp_path / "jose" / "__init__.py").write_text("", encoding="utf-8")
-        result = self._run(BACKEND / "requirements-dev.lock", pythonpath=tmp_path)
+        result = self._run(lock, pythonpath=tmp_path)
         assert result.returncode == 1 and "jose" in result.stderr
 
     def test_an_unreadable_or_tiny_lock_fails(self, tmp_path):
