@@ -236,3 +236,12 @@ Seven reviewer issues on `dc96c67`, each re-checked here before acting.
 | 5 | *minor* — 1423 vs 1410, old counter names, a repeated fragment | **Confirmed** | Fixed |
 | 6 | *minor* — no test drops a client mid-request | **Confirmed** | `test_a_client_that_disconnects_mid_call_gives_its_slot_back`: raw ASGI, the body delivered, the tool call held, every later `receive` returns `http.disconnect`; the request ends with `504` by the deadline and `inflight`/`live_transports` reach 0 inside the running loop. **Observed red** with the deadline removed (`asyncio.timeout(None)`): the request never ends. Writing it showed that `live_transports` reaches 0 a few loop turns *after* the response, not at the moment the response is sent; the deadline test's assertion had been read only after `asyncio.run` had cancelled every task, so it now also waits for 0 inside the loop (≤ 1 s) |
 | 7 | *minor* — `2c6933c` fails `make check` and stays in the branch history | **Confirmed, not fixable inside this package's rules** (history on the branch is not rewritten by the implementing agent) | Remains deferred: squash `2c6933c` into `de6c9f7` (or squash-merge) before merging to `main` |
+
+### Gate (review round 1)
+
+- `make check` on `74c95e7` after `make fix` (formatting and the index only): **GREEN** (42 s of 180 s;
+  1415 unit tests, five more than `de6c9f7`).
+- `make verify` on `74c95e7` in a clean, bootstrapped detached worktree: **GREEN** (300 s of 600 s) — unit
+  1415 passed, 60 fixture arms passed, 0 failed, 47 of 50 executable rules proven able to fail. The
+  **container tier was skipped** on this arm64 host (`RISK-TEST-001`) and was **not** observed.
+- `2c6933c` still fails the gate (above); squash before merging.
