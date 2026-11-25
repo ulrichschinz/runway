@@ -198,9 +198,11 @@ public random key id, with expiry and revocation.**
    immutable. Expiry 1–365 days (default 365); at most 10 active issued keys per account; the inactive
    history is bounded.
 3. **Shown once.** `POST /auth/apikeys` returns the key in its `201` and nowhere else; `GET /auth/apikeys`
-   returns metadata only; `DELETE /auth/apikeys/{key_id}` revokes. Creating and revoking need a
-   signed-in session: an API key gets `403`, so a stolen key cannot mint a successor that would survive
-   its own revocation. Listing accepts any credential.
+   returns metadata only; `DELETE /auth/apikeys/{key_id}` revokes. Creating, revoking and the deprecated
+   `regenerate` need a signed-in session: an API key gets `403`, so a stolen key cannot mint a successor
+   that would survive its own revocation or expiry, and a legacy key from a backup cannot be swapped for
+   one that outlives the cutoff (corrected in review: `regenerate` first kept accepting a key, on the
+   argument that it replaces rather than multiplies — which missed both). Listing accepts any credential.
 4. **Authentication by hash only, one answer.** An issued key is looked up by its id and its hash
    compared in constant time; a legacy key by its hash. `users.api_key` is never compared. Unknown,
    malformed, expired, revoked and post-cutoff legacy keys get the same 401 per credential shape.
@@ -213,8 +215,13 @@ public random key id, with expiry and revocation.**
    refusal is by date and needs no deploy; **the first boot at or after the cutoff revokes every legacy row
    and empties `users.api_key` in every row**, which also empties a pre-migration backup restored later
    before it serves a request. Revoking the legacy key, or the deprecated `regenerate` (which ends every key
-   of the account and mints one), empties that account's column at once. Registration writes no cleartext;
-   `init_db` no longer back-fills one.
+   of the account and mints one), empties that account's column at once and **closes** it
+   (`users.api_key_closed_at`); registration writes no cleartext and closes the new account from the start;
+   `init_db` no longer back-fills one. A closed account's column is never imported again — the boot empties
+   it instead — because the previous image's boot back-fills a cleartext key into every NULL row, so a
+   rollback would otherwise hand every moved and every new account a working key (corrected in review).
+   Every pre-cutoff boot also lowers the `expires_at` of live legacy rows to the cutoff in force, so an
+   earlier `API_KEY_LEGACY_CUTOFF` is the expiry the metadata announces.
 6. **The old routes** keep path, method and schema, are `deprecated` in OpenAPI and answer with
    `Deprecation`, `Sunset` (the cutoff) and `Link: rel="successor-version"`. `GET /auth/apikey` returns a
    live legacy value until the cutoff, `""` otherwise; `auth.apikey.disclosed` is written only when a value
@@ -223,14 +230,18 @@ public random key id, with expiry and revocation.**
 **Expand → migrate → switch → contract:**
 
 - *Expand and migrate (this change):* everything above. The previous image still reads `users.api_key`, so a
-  rollback inside the window keeps legacy keys working; keys minted by this image do not work under it.
+  rollback inside the window keeps legacy keys working; keys minted by this image do not work under it, and
+  the keys the previous image back-fills for closed accounts stop at the roll-forward.
 - *Switch (by date, 2027-01-15):* legacy keys refused, the GET silent; the first boot after it ends and wipes
   them. Not rolled back: rolling back past this image after the cutoff would let the previous image mint
   cleartext keys into the emptied column (`docs/operations.md`, *API keys*).
 - *Contract (deferred, its own change, after 2027-01-15 and before 2027-01-31):* drop `users.api_key` by a
   versioned table rebuild rather than another ad-hoc `ALTER` (SQLite cannot drop a UNIQUE column in place),
   remove the legacy lookup, answer `410` on the two old routes, add the gate rule that fails on a
-  cleartext-shaped key in a DB dump or an API response, and only then remove `WAIVER-SEC-003`.
+  cleartext-shaped key in a DB dump or an API response, and only then remove `WAIVER-SEC-003`. Trigger
+  besides the date: the first-party clients that still read `GET /auth/apikey` — the old web UI (`?ui=alt`)
+  and the Android app's password login (`docs/design/2026-10-31-unified-ui/shared/inventory.md` §3.8) —
+  create their key with `POST /auth/apikeys` instead.
 
 Rejected: **bcrypt or Argon2id over the key** (the waiver's first sketch) — a deliberately slow hash on every
 authenticated agent request buys nothing against a 256-bit secret; **a server pepper / HMAC key** — a new

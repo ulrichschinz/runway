@@ -38,8 +38,9 @@ guard = "user"
 route = "POST /auth/apikey/regenerate"
 guard = "user"
 
-# Brief 0070: hashed API keys. `user` is the guard; creating and revoking additionally refuse an
-# API key as the credential inside the handler (403) — only a signed-in session may mint or end one.
+# Brief 0070: hashed API keys. `user` is the guard; creating, revoking and the deprecated regenerate
+# above additionally refuse an API key as the credential inside the handler (403) — only a
+# signed-in session may mint or end one.
 [[routes]]
 route = "POST /auth/apikeys"
 guard = "user"

@@ -578,8 +578,9 @@ async def get_apikey(
     "/apikey/regenerate",
     response_model=ApiKeyInfo,
     deprecated=True,
-    description=_DEPRECATED + "Ends EVERY key of the account and returns one new key, shown "
-    "in this response only. Use `POST /auth/apikeys` and `DELETE /auth/apikeys/{key_id}`.",
+    description=_DEPRECATED + "Needs a signed-in session (`Authorization: Bearer <jwt>`); an "
+    "API key gets 403. Ends EVERY key of the account and returns one new key, shown in this "
+    "response only. Use `POST /auth/apikeys` and `DELETE /auth/apikeys/{key_id}`.",
 )
 async def regenerate_apikey(
     request: Request,
@@ -588,6 +589,9 @@ async def regenerate_apikey(
     db: Connection = Depends(get_db),
 ):
     _deprecation_headers(response)
+    # Like create and revoke: a key that could call this would swap itself for a fresh 365-day
+    # key — a legacy one from a backup outliving the cutoff that way — and end its owner's keys.
+    _require_session(request)
     now = database.api_key_clock()
     made = await rotate_api_keys(
         db, username, label="regenerated", now=now, expires_at=now + API_KEY_MAX_DAYS * _KEY_DAY

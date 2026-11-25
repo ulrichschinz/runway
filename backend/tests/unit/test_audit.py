@@ -286,7 +286,11 @@ class TestEvents:
 
         legacy = generate_api_key()
         con = sqlite3.connect(settings.db_path)
-        con.execute("UPDATE users SET api_key=? WHERE username='alice'", (legacy,))
+        # As the previous image left an account: the cleartext column set, and never closed by
+        # this image (a value written into a closed account is not imported — brief 0070).
+        con.execute(
+            "UPDATE users SET api_key=?, api_key_closed_at=NULL WHERE username='alice'", (legacy,)
+        )
         con.commit()
         con.close()
         from app.main import app

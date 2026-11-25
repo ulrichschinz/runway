@@ -31,9 +31,10 @@ Two credentials reach the same principal, checked in this order by `get_current_
    compared. Unknown, malformed, expired, revoked and post-cutoff legacy keys get one answer, `401
    Invalid API key`. Checked **first**, before any token work, which is why rotating `JWT_SECRET`
    does not disturb agents, MCP clients or automations, and why an account locked out of password
-   login can still be used by them. A key is shown once, by `POST /auth/apikeys`; creating and
-   revoking keys needs a signed-in session (a key gets 403), so a stolen key cannot mint its own
-   successor. `GET /auth/apikeys` lists metadata only.
+   login can still be used by them. A key is shown once, by `POST /auth/apikeys`; creating,
+   revoking and the deprecated `regenerate` need a signed-in session (a key gets 403), so a stolen
+   key cannot mint its own successor — and a legacy key from a backup cannot be swapped for one that
+   outlives the cutoff. `GET /auth/apikeys` lists metadata only.
 2. **`Authorization: Bearer <jwt>`** — signed with `JWT_SECRET`, `HS256`, 24h. A valid
    signature is not enough: the account the token names must still exist, or the request
    gets the same **401** as no credential at all, on every route. A token outlives the row

@@ -1803,7 +1803,7 @@
     "/auth/apikey/regenerate": {
       "post": {
         "deprecated": true,
-        "description": "Deprecated since 2026-11-25 (brief 0070): API keys are stored as hashes. Ends EVERY key of the account and returns one new key, shown in this response only. Use `POST /auth/apikeys` and `DELETE /auth/apikeys/{key_id}`.",
+        "description": "Deprecated since 2026-11-25 (brief 0070): API keys are stored as hashes. Needs a signed-in session (`Authorization: Bearer <jwt>`); an API key gets 403. Ends EVERY key of the account and returns one new key, shown in this response only. Use `POST /auth/apikeys` and `DELETE /auth/apikeys/{key_id}`.",
         "operationId": "regenerate_apikey_auth_apikey_regenerate_post",
         "parameters": [
           {

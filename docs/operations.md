@@ -747,7 +747,9 @@ sqlite3 -header -column users.db "
 
 Tell those users to create a new key in Einstellungen → API-Key and put it where the old one was. Moving
 the cutoff earlier (once that list is empty, or in an incident) is `API_KEY_LEGACY_CUTOFF=<YYYY-MM-DD>` in
-the host `.env` and a redeploy; it cannot be moved later.
+the host `.env` and a redeploy; it cannot be moved later. The boot after the change also moves the
+`expires_at` of every live legacy row to the new date, so the settings page announces the day the key
+really stops working. That is one-way: moving the setting back later again does not extend those rows.
 
 **On the cutoff day — restart the backend once** (`docker compose up -d --force-recreate backend`, or any
 deploy). Authentication refuses legacy keys from 00:00 UTC without it; the boot is what **revokes every
@@ -766,10 +768,26 @@ After a restore, end every key that was revoked since the backup again (below).
 
 **Rollback.** Until the contract step the previous image still reads `users.api_key`, so a rollback
 inside the window keeps legacy keys working; keys created with this image (`rwk_…`) do not work under the
-previous image, and its regenerate writes a new cleartext value, which the next boot of this image hashes
-and treats as that account's legacy key. **Do not roll back past this image after the cutoff** without first
-checking `users.api_key` is empty: the previous image would mint a cleartext key for every empty row at its
-boot. The cutoff is never rolled back.
+previous image. **Every rollback, before the cutoff as after it, re-mints cleartext keys:** the previous
+image's boot gives every row whose `users.api_key` is NULL a fresh cleartext key — every account registered
+under this image, and every account whose legacy key was revoked or rotated here — and its
+`GET /auth/apikey` returns that key to the account. While the previous image runs, those keys work and lie in
+`users.db` and in every backup taken then. **After rolling forward**, this image's boot imports nothing for
+those accounts: `users.api_key_closed_at` marks the account as closed, and the boot empties its column
+instead (brief 0070, review round 1). A key one of them obtained from the previous image therefore stops at
+the roll-forward; the user creates a new one. An account that never met this image — one with
+`api_key_closed_at` NULL, including one the previous image registered during the rollback — keeps its key as
+a legacy key until the cutoff, and a regenerate by the previous image replaces that account's legacy key.
+Check after the roll-forward boot that the closed accounts hold no cleartext:
+
+```sh
+sqlite3 users.db "SELECT COUNT(*) FROM users WHERE api_key IS NOT NULL AND api_key_closed_at IS NOT NULL;"  # 0
+```
+
+Backups taken while the previous image ran hold those re-minted keys; after the roll-forward they are not
+credentials to this image, but they are to the previous one — replace them by the retention policy.
+**Do not roll back past this image after the cutoff** unless you accept that re-minting for every row. The
+cutoff is never rolled back.
 
 ### Ending API keys
 
@@ -781,7 +799,8 @@ key of one account (an incident; the account's owner does it with the deprecated
 sqlite3 users.db "
   UPDATE api_keys SET revoked_at = strftime('%s','now')
     WHERE revoked_at IS NULL AND user_id = (SELECT id FROM users WHERE username = 'alice');
-  UPDATE users SET api_key = NULL WHERE username = 'alice';"
+  UPDATE users SET api_key = NULL, api_key_closed_at = COALESCE(api_key_closed_at, strftime('%s','now'))
+    WHERE username = 'alice';"
 ```
 
 Without the `WHERE … username` / `user_id` conditions the same two statements end every key of every

@@ -150,6 +150,13 @@ MIGRATIONS = (
     BEFORE UPDATE OF auth_version ON users
     WHEN NEW.auth_version < OLD.auth_version
     BEGIN SELECT RAISE(ABORT, 'auth_version may only increase'); END""",
+    # WAIVER-SEC-003, brief 0070 (review round 1) — expand. The moment this image took the account
+    # off the cleartext column for good: registered here, its legacy key revoked or rotated, or the
+    # cutoff passed. From then on a value in `users.api_key` is never imported as a key again — the
+    # previous image fills one into every NULL row at its boot, so without this a rollback before
+    # the cutoff would hand every moved account a working cleartext key. NULL for every row the
+    # previous image wrote, which is what keeps an account it registered during a rollback working.
+    "ALTER TABLE users ADD COLUMN api_key_closed_at INTEGER",
 )
 
 # The `site_settings` key holding the moment (UTC epoch seconds) this image first booted on this
@@ -385,9 +392,9 @@ async def create_account(db, username: str, hashed_password: str) -> Account:
     creates its first key, shown once, through `POST /auth/apikeys`."""
     storage_id = new_storage_id()
     cur = await db.execute(
-        "INSERT INTO users (username, hashed_password, storage_id, storage_layout)"
-        " VALUES (?, ?, ?, ?)",
-        (username, hashed_password, storage_id, LAYOUT_STORAGE_ID),
+        "INSERT INTO users (username, hashed_password, storage_id, storage_layout,"
+        " api_key_closed_at) VALUES (?, ?, ?, ?, ?)",
+        (username, hashed_password, storage_id, LAYOUT_STORAGE_ID, api_key_clock()),
     )
     await db.commit()
     return Account(
@@ -681,11 +688,18 @@ def _as_dict(row) -> dict:
 async def migrate_legacy_api_keys(db, now: int, cutoff: int) -> tuple[int, int]:
     """Hash the cleartext keys the previous image kept, or, once the cutoff has passed, end them.
 
-    Runs at every boot. Before the cutoff, every non-empty `users.api_key` that has no `legacy`
-    row with its hash gets one (expiring at the cutoff); an account whose earlier legacy row has a
-    different hash was rotated by the previous image (a rollback) and that row is revoked — the
-    previous image's rotation ended it there too. The cleartext column is left as it is: the
-    previous image authenticates by it, and this one never compares it.
+    Runs at every boot. Before the cutoff, every non-empty `users.api_key` of an account this image
+    has not closed (`api_key_closed_at` NULL) that has no `legacy` row with its hash gets one
+    (expiring at the cutoff); an account whose earlier legacy row has a different hash was rotated
+    by the previous image (a rollback) and that row is revoked — the previous image's rotation
+    ended it there too. The cleartext column of an open account is left as it is: the previous
+    image authenticates by it, and this one never compares it.
+
+    A closed account's column is emptied instead, and nothing is imported from it: a value there
+    was written by the previous image after this one closed the account — its boot backfill,
+    which mints a key for every NULL row — and must not become a credential (brief 0070, review
+    round 1). And a live legacy row never expires later than the cutoff now in force, so moving
+    `API_KEY_LEGACY_CUTOFF` earlier moves the expiry the settings page announces with it.
 
     From the cutoff on, every legacy row is revoked and `users.api_key` is emptied in every row, so
     the database holds no cleartext key — including a pre-migration backup restored later, which
@@ -699,10 +713,22 @@ async def migrate_legacy_api_keys(db, now: int, cutoff: int) -> tuple[int, int]:
         )
         ended = cur.rowcount
         await db.execute("UPDATE users SET api_key=NULL WHERE api_key IS NOT NULL")
+        await db.execute(
+            "UPDATE users SET api_key_closed_at=? WHERE api_key_closed_at IS NULL", (now,)
+        )
         await db.commit()
         return 0, ended
+    await db.execute(
+        "UPDATE users SET api_key=NULL WHERE api_key IS NOT NULL AND api_key_closed_at IS NOT NULL"
+    )
+    await db.execute(
+        "UPDATE api_keys SET expires_at=? WHERE kind='legacy' AND revoked_at IS NULL"
+        " AND (expires_at IS NULL OR expires_at > ?)",
+        (cutoff, cutoff),
+    )
     async with db.execute(
         "SELECT id, api_key FROM users WHERE api_key IS NOT NULL AND api_key != ''"
+        " AND api_key_closed_at IS NULL"
     ) as cur:
         rows = await cur.fetchall()
     imported = ended = 0
@@ -844,8 +870,9 @@ async def rotate_api_keys(
     db, username: str, *, label: str, now: int, expires_at: int
 ) -> tuple[IssuedKey, dict] | None:
     """The deprecated `POST /auth/apikey/regenerate`: end EVERY key of the account — issued and
-    legacy — empty its cleartext column, and mint one new key, in one transaction. It replaces,
-    it never multiplies, so it may keep accepting an API key as the credential."""
+    legacy — empty and close its cleartext column, and mint one new key, in one transaction. The
+    router lets only a signed-in session call it: a key that could rotate would mint its own
+    successor, and a legacy one would outlive the cutoff that way (brief 0070, review round 1)."""
     async with _write(db):
         user_id = await _account_id(db, username)
         if user_id is None:
@@ -854,7 +881,11 @@ async def rotate_api_keys(
             "UPDATE api_keys SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
             (now, user_id),
         )
-        await db.execute("UPDATE users SET api_key=NULL WHERE id=?", (user_id,))
+        await db.execute(
+            "UPDATE users SET api_key=NULL, api_key_closed_at=COALESCE(api_key_closed_at, ?)"
+            " WHERE id=?",
+            (now, user_id),
+        )
         issued = await _insert_issued(db, user_id, label, now, expires_at)
     meta = await _key_row(db, issued.key_id)
     if meta is None:  # written in the transaction above; absent only if the file changed under us
@@ -886,8 +917,9 @@ async def list_api_keys(db, username: str) -> list[dict]:
 async def revoke_api_key(db, username: str, key_id: str, now: int) -> str | None:
     """End one key of the account. Returns its kind, or None when the account holds no key with
     this id (another account's key is "no such key"). Idempotent: an ended key stays as it was.
-    Revoking the legacy key also empties the account's cleartext column, in the same transaction:
-    an account that has moved holds no cleartext from that moment on."""
+    Revoking the legacy key also empties and closes the account's cleartext column, in the same
+    transaction: an account that has moved holds no cleartext from that moment on, and the next
+    boot imports nothing a rollback writes there."""
     async with _write(db):
         user_id = await _account_id(db, username)
         if user_id is None:
@@ -903,7 +935,11 @@ async def revoke_api_key(db, username: str, key_id: str, now: int) -> str | None
             (now, user_id, key_id),
         )
         if row["kind"] == "legacy":
-            await db.execute("UPDATE users SET api_key=NULL WHERE id=?", (user_id,))
+            await db.execute(
+                "UPDATE users SET api_key=NULL, api_key_closed_at=COALESCE(api_key_closed_at, ?)"
+                " WHERE id=?",
+                (now, user_id),
+            )
     return str(row["kind"])
 
 

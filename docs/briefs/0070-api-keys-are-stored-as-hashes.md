@@ -7,8 +7,8 @@
 | **Applicable contracts** | [`AGENTS.md`](../../AGENTS.md) §5 (REST through the migration pattern; the SQLite schema forward-only and additive; env vars documented in README, `RULE-SURF-002`), §6 (`AGENTS.md`, `rules/ledger.yaml`, `rules/waivers.yaml` and the gate configuration need owner approval — `RISK-GOV-001`: not independent), §8, §9 (**the META-RULE is engaged**: `RULE-DEP-003`'s check changes, so check, ledger entry, negative fixture and documentation change in one commit); [`backend/AGENTS.md`](../../backend/AGENTS.md) (only `database.py` opens a connection; migrations in `init_db()`; an audit write never fails a request); [`frontend/AGENTS.md`](../../frontend/AGENTS.md) (two UIs until M17 — the old one is left as it is; tests cover the pure logic). |
 | **Governed by** | Amends [ADR 0044](../adr/0044-credential-lifecycle-jwt-password-and-api-key.md) with **Decision 6** (the API-key lifecycle the record reserved for M4). Respected: [ADR 0026](../adr/0026-the-audit-log.md) (no credential and no caller fingerprint in an audit row — the public key id is neither), [ADR 0037](../adr/0037-the-mcp-surface-is-an-allowlist.md) (the `auth` tag stays off the MCP allowlist: no tool is added), [ADR 0025](../adr/0025-narrowing-the-migration-except.md) (the new table is a `CREATE TABLE IF NOT EXISTS`, not an `ALTER`), [ADR 0018](../adr/0018-cors-startup-refusal-and-the-inbox-shim.md) (`SHIM-SEC-006`, the Bearer-as-API-key shape, is kept and carries the new keys too). |
 | **Rule IDs introduced** | None. `RULE-DEP-003` (committed credentials) is **extended** to the new key shape; `RULE-OPS-002` (credentials reaching a logger) is unchanged in code and gets two fixture arms that log the new credential parts. |
-| **Entry points** | New, REST-only (`auth` tag): `POST /auth/apikeys` (create; the only response that carries a secret), `GET /auth/apikeys` (metadata), `DELETE /auth/apikeys/{key_id}` (revoke). Changed: `GET /auth/apikey` (deprecated; legacy value only until the cutoff), `POST /auth/apikey/regenerate` (deprecated; now mints a hashed key and revokes every other key of the account). Every authenticated route through `get_current_user` (`X-Api-Key`, and `Authorization: Bearer <key>` under `SHIM-SEC-006`), REST and MCP alike. `init_db()` at every boot. |
-| **Affected public surfaces** | **REST/OpenAPI: additive plus a deprecation.** Three routes added (40 → 43); `GET /auth/apikey` and `POST /auth/apikey/regenerate` keep their paths, methods and response schema (`{"api_key": str}`) and are marked `deprecated: true`; both answer with `Deprecation`, `Sunset` and `Link: rel="successor-version"` headers. Behaviour changes inside the documented shapes, each stated in the README: an account registered from now on has no legacy key, so its `GET /auth/apikey` answers `""`; after the cutoff every account's does; `regenerate` returns a key in the new format (`rwk_…`, 64 characters instead of 43) and ends **every** other key of the account. **MCP tools: unchanged (27)** — the `auth` tag is not on the allowlist. **DB schema: additive** — a new table `api_keys` with two indexes and three triggers; `users.api_key` is kept (the rollback target reads it) and emptied by the migration as it goes. **Env vars: one added** — `API_KEY_LEGACY_CUTOFF` (default `2027-01-15`; it can move the cutoff earlier, never later). **SPA:** routes and `localStorage` keys unchanged; the new UI's settings page no longer reads `GET /auth/apikey`. |
+| **Entry points** | New, REST-only (`auth` tag): `POST /auth/apikeys` (create; the only response that carries a secret), `GET /auth/apikeys` (metadata), `DELETE /auth/apikeys/{key_id}` (revoke). Changed: `GET /auth/apikey` (deprecated; legacy value only until the cutoff), `POST /auth/apikey/regenerate` (deprecated; now mints a hashed key and revokes every other key of the account; since review round 1 a signed-in session only, an API key gets 403). Every authenticated route through `get_current_user` (`X-Api-Key`, and `Authorization: Bearer <key>` under `SHIM-SEC-006`), REST and MCP alike. `init_db()` at every boot. |
+| **Affected public surfaces** | **REST/OpenAPI: additive plus a deprecation.** Three routes added (40 → 43); `GET /auth/apikey` and `POST /auth/apikey/regenerate` keep their paths, methods and response schema (`{"api_key": str}`) and are marked `deprecated: true`; both answer with `Deprecation`, `Sunset` and `Link: rel="successor-version"` headers. Behaviour changes inside the documented shapes, each stated in the README: an account registered from now on has no legacy key, so its `GET /auth/apikey` answers `""`; after the cutoff every account's does; `regenerate` returns a key in the new format (`rwk_…`, 64 characters instead of 43) and ends **every** other key of the account. **MCP tools: unchanged (27)** — the `auth` tag is not on the allowlist. **DB schema: additive** — a new table `api_keys` with two indexes and three triggers, and (review round 1) one nullable column `users.api_key_closed_at` (the previous image ignores it; NULL for every row it writes); `users.api_key` is kept (the rollback target reads it) and emptied by the migration as it goes. **Env vars: one added** — `API_KEY_LEGACY_CUTOFF` (default `2027-01-15`; it can move the cutoff earlier, never later). **SPA:** routes and `localStorage` keys unchanged; the new UI's settings page no longer reads `GET /auth/apikey`. |
 | **Known dependents** | From `./run impact` (index `current`, revision `1e1e2297d154`, 1796 nodes / 2924 edges): `database.py` → `audit.py`, `dependencies.py`, `main.py`, `routers/{admin,auth,gtd,projects}.py`, `services/{password_reset,storage_migration}.py`, transitively `routers/{inbox,tasks}.py`; `dependencies.py` → every router; `routers/auth.py` → `main.py`; `models.py` → every router and `services/task_service.py`; `logging_setup.py` → `audit.py`, `main.py`, `middleware.py`, transitively every router; `config.py` → eleven modules; `useAccount.js` → `AdminSettings.vue`, `SettingsPage.vue`; `views/SettingsView.vue` (old UI) → `router/index.js`. `tools/checks/{secret_scan,log_secrets}.py`: unit `ops`, no import dependents. |
 | **Uncertain / dynamic areas** | `BLIND-TEST-001` — no router and not `dependencies.py` has import-derived test protection; they are exercised through the TestClient. `BLIND-MCP-001`/`RISK-MCP-001` — `./run impact` lists `mcp_tools: ['get_apikey']` and `['regenerate_apikey']`; that is the index's name-derived guess, not the surface: `ops/surfaces/mcp-tools.json` has neither, and `test_mcp_session.py` proves both are absent. **Production facts this repository cannot see** (plan M0): how many accounts hold a legacy key, which clients read their key back through `GET /auth/apikey`, how many backups of `users.db` exist and where. |
 | **Analogous implementations** | `SHIM-SEC-008` / ADR 0044 Decision 3 (a legacy credential form accepted until a moment written at the first boot, then refused without a deploy); `users_storage_id_immutable` / `users_auth_version_monotone` (a trigger that makes a security property of a row unrevertable); `admin_preserving_write` (one `BEGIN IMMEDIATE` transaction per multi-statement change). |
@@ -28,6 +28,14 @@
    change does not end.
 3. **The multiplied key** (what a naive fix would add). If a stolen API key could mint further keys,
    revoking the stolen one would not end the intrusion: the attacker would already hold a second.
+4. **The laundered key** (review round 1). Mallory's legacy key from scenario 1 calls the deprecated
+   `regenerate` before the cutoff and receives a fresh `rwk_` key valid for 365 days — the backup key dies at
+   the cutoff, the access it gave does not; the same call ends every key the owner holds. Any issued key can
+   do the same just before it expires, indefinitely.
+5. **The rollback's backfill** (review round 1). The previous image's boot gives every NULL
+   `users.api_key` a fresh cleartext key. Every account this image registered or moved has a NULL there; after
+   a rollback and a roll-forward the next boot would import those values as valid legacy keys, and the
+   deprecated GET would hand them out.
 
 ## Decisions
 
@@ -52,8 +60,8 @@
 - **Key management needs a session.** `POST /auth/apikeys` and `DELETE /auth/apikeys/{key_id}` accept
   only `Authorization: Bearer <jwt>`; an API key gets `403`. Scenario 3: otherwise a stolen key mints
   its own successor. Listing accepts any credential (it returns nothing secret). The deprecated
-  `regenerate` keeps accepting an API key, as it always did, because it **ends every other key** of the
-  account: it cannot multiply keys, only replace them.
+  `regenerate` needs a session too (review round 1 — the first version kept accepting a key, on the
+  argument that it cannot multiply keys, only replace them; that missed scenarios 4 and 5).
 - **One answer per shape.** An unknown, malformed, expired or revoked key, and a legacy key after the
   cutoff, all get the same `401`: `Invalid API key` on `X-Api-Key`, `Not authenticated` on the Bearer
   shim — the details those shapes already had.
@@ -153,6 +161,28 @@ recorded as such; the redaction tests build the key string themselves so that th
 Of the 50 tests in `test_api_keys.py`, 46 were red before the control (45 failed, 1 error) and 4 green: the
 regression pins named above.
 
+## Review round 1
+
+Eight reviewer issues, each verified here before anything changed. The red column is the new tests run
+against `126b7f3` (the tests added, nothing else).
+
+| # | Issue | Verdict | Control | Test (red on `126b7f3` → green) |
+|---|---|---|---|---|
+| 1, 5 | `regenerate` accepts an API key: a legacy backup key is swapped for a 365-day `rwk_` key that works after the cutoff, and the owner's keys end (scenario 4) | **real, blocker** | `regenerate_apikey` calls `_require_session` (403 for a key, both shapes); the old UI calls it with its JWT | `TestRegenerateNeedsASession::test_a_legacy_backup_key_cannot_be_laundered_into_a_key_that_outlives_the_cutoff` — **red: `laundered`, `assert 200 == 401`** (the minted key answered 200 thirty days after the cutoff); `::test_an_issued_key_cannot_regenerate_and_lock_its_owner_out` — **red: `assert 200 == 403`**; `::test_a_signed_in_session_still_regenerates` — green pin |
+| 6 | the same route lets a key extend its own life indefinitely; the docs claim a stolen key cannot mint its successor | **real** (same root) | same; README, `docs/security.md`, `docs/threat-model.md`, ADR 0044 now say regenerate needs a session | covered by the two red tests above |
+| 2, 8 | a rollback before the cutoff: the previous image back-fills a cleartext key into every NULL `users.api_key`, and the next boot of this image imports them as legacy keys (scenario 5) | **real** | new nullable column `users.api_key_closed_at`, set by registration, by revoking the legacy key, by `regenerate` and by the cutoff boot; the boot imports nothing from a closed account's column and empties it instead. An account the previous image wrote keeps `NULL` and its key. Runbook *Rollback* rewritten: every rollback re-mints, what survives the roll-forward, the check query; the operator's "end every key" statement closes the account too | `TestARollbackBeforeTheCutoff::test_a_moved_and_a_new_account_get_no_working_key_from_the_previous_images_backfill` — **red: `alice`, `assert 200 == 401`**; `::test_a_regenerated_account_gets_no_working_key_from_the_backfill` — **red: `assert 200 == 401`**; `::test_an_account_the_previous_image_registered_during_the_rollback_keeps_its_key` — green pin (the other side of the line) |
+| 3 | the Android app's password login reads the deprecated GET and gets `""` for every new account | **real** (documentation and trigger; the app is not in this repository) | README states it and names the "Key einfügen" workaround; ADR 0044 and *Deferred* name the app as a client that must move before the 410 | — (no code here can migrate it) |
+| 4 | an earlier `API_KEY_LEGACY_CUTOFF` after the import leaves `expires_at` (and the settings page's deadline) at the later date | **real, minor** | every pre-cutoff boot lowers live legacy rows' `expires_at` to the cutoff in force (one-way); runbook says so | `TestAnEarlierCutoff::test_moving_the_cutoff_earlier_moves_the_announced_expiry` — **red: `'2027-01-15T00:00:00+00:00' == '2027-01-05T00:00:00+00:00'`** |
+| 7 | `docs/threat-model.md` *API key theft* still describes cleartext, permanent keys | **real, minor** | section rewritten: what is mitigated for new keys, what stays open until the cutoff and the contract | — |
+
+Also fixed while there: `TestTheSchema::test_a_revoked_key_cannot_be_unrevoked_and_a_key_cannot_be_repointed`
+was flaky — it "changed" the hash's first digit to `0`, a no-op for one hash in sixteen, which the trigger
+rightly lets through; it now flips the digit. `test_audit.py::TestEvents::test_the_api_key_disclosure` plants
+its legacy value as the previous image would leave it (`api_key_closed_at` NULL), since a value planted into
+an account this image registered is, correctly, no longer imported. Surfaces: `db-schema.sql` (+1 column) and
+`openapi.json` (regenerate's description) updated by `./run surfaces --update`; `rules/route-guards.toml`
+comment names regenerate.
+
 ## Results
 
 - Plan M4 acceptance, as far as it can be met before the cutoff: a synthetic DB, audit and log search finds
@@ -204,6 +234,15 @@ regression pins named above.
   `docs/operations.md`.
 - **The old UI** (`?ui=alt`) still calls the deprecated routes; it goes with M17 (frontend contract), before
   the M4 contract answers 410.
+- **The Android app's password login** (`docs/design/2026-10-31-unified-ui/shared/inventory.md` §3.8:
+  `POST /auth/login` → `GET /auth/apikey` → `GET /auth/me`, keeping only the key) — a first-party client
+  outside this repository that reads the deprecated GET. Since this change it stores an empty key for every
+  account registered from 2026-11-25, for every account whose legacy key was revoked or rotated, and for
+  everyone from the cutoff; its "Key einfügen" way works (README says so). Trigger: the app must create its
+  key with `POST /auth/apikeys` (session JWT) **before the M4.4 contract answers 410, at the latest
+  2027-01-15**; the contract change checks that a released app version does. Rejected alternative: a GET that
+  mints a show-once key for a session caller without one — a GET with a side effect that hands out a secret
+  is what this change removes, and the old UI's GET on every page load would rotate a user's working key.
 - **The container tier** — `register_user` now creates its key through `POST /auth/apikeys`; CI's amd64
   container tier is its first run (`RISK-TEST-001`).
 - **`SHIM-SEC-006` expires today (2026-11-25)** — outside this package; it carries the new keys too.

@@ -19,6 +19,7 @@ import re
 import secrets
 import sqlite3
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -238,16 +239,14 @@ class TestTheSchema:
             for statement in (
                 "UPDATE api_keys SET revoked_at=NULL WHERE key_id=?",
                 "UPDATE api_keys SET user_id=user_id+1 WHERE key_id=?",
-                "UPDATE api_keys SET secret_hash=? || substr(secret_hash, 2) WHERE key_id=?",
+                # The first hex digit flipped to another one: a fixed "0" would be no change at
+                # all for one hash in sixteen, and the trigger rightly lets a no-op through.
+                "UPDATE api_keys SET secret_hash=(CASE substr(secret_hash, 1, 1) WHEN '0'"
+                " THEN '1' ELSE '0' END) || substr(secret_hash, 2) WHERE key_id=?",
                 "UPDATE api_keys SET kind='legacy' WHERE key_id=?",
             ):
-                params = (
-                    ("0", created["key_id"])
-                    if "secret_hash=?" in statement
-                    else (created["key_id"],)
-                )
                 with pytest.raises(sqlite3.IntegrityError):
-                    con.execute(statement, params)
+                    con.execute(statement, (created["key_id"],))
         finally:
             con.close()
 
@@ -680,3 +679,151 @@ def test_no_database_audit_row_or_log_line_holds_a_key_or_its_hash(
             assert secret not in text, f"a secret reached {where}"
         for where, text in (("audit.db", audit_dump), ("log", logs)):
             assert _sha256(key) not in text, f"a hash reached {where}"
+
+
+# --- review round 1 (brief 0070): the paths the first implementation left open ------------------
+
+
+def _login(client: TestClient, username: str = "alice") -> dict[str, str]:
+    token = client.post("/auth/login", json={"username": username, "password": PASSWORD}).json()[
+        "access_token"
+    ]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _previous_image_backfill() -> None:
+    """What the previous image's `init_db` did at every boot, verbatim in effect: give every row
+    whose `users.api_key` is NULL a fresh cleartext key (`secrets.token_urlsafe(32)`)."""
+    con = _db()
+    for (username,) in con.execute("SELECT username FROM users WHERE api_key IS NULL").fetchall():
+        con.execute(
+            "UPDATE users SET api_key=? WHERE username=?", (secrets.token_urlsafe(32), username)
+        )
+    con.commit()
+    con.close()
+
+
+class TestRegenerateNeedsASession:
+    """A stolen key — a legacy one from a pre-migration backup above all — must not be able to
+    swap itself for a fresh key that outlives the cutoff, nor end every key its owner holds."""
+
+    def test_a_legacy_backup_key_cannot_be_laundered_into_a_key_that_outlives_the_cutoff(
+        self, legacy_client, legacy_key, clock
+    ):
+        r = legacy_client.post("/auth/apikey/regenerate", headers={"X-Api-Key": legacy_key})
+        minted = r.json().get("api_key", "") if r.status_code == 200 else ""
+        clock["now"] = database.legacy_cutoff() + 30 * 86400
+        assert _me(legacy_client, {"X-Api-Key": legacy_key}).status_code == 401
+        if minted:
+            assert _me(legacy_client, {"X-Api-Key": minted}).status_code == 401, "laundered"
+        assert r.status_code == 403, r.text
+
+    def test_an_issued_key_cannot_regenerate_and_lock_its_owner_out(self, client):
+        account = _register(client)
+        owners = _create(client, account)
+        stolen = _create(client, account)
+        for headers in (
+            {"X-Api-Key": stolen["api_key"]},
+            {"Authorization": f"Bearer {stolen['api_key']}"},
+        ):
+            r = client.post("/auth/apikey/regenerate", headers=headers)
+            assert r.status_code == 403, r.text
+        assert _me(client, {"X-Api-Key": owners["api_key"]}).status_code == 200
+        con = _db()
+        assert con.execute("SELECT COUNT(*) FROM api_keys").fetchone()[0] == 2
+        con.close()
+
+    def test_a_signed_in_session_still_regenerates(self, legacy_client, legacy_key):
+        r = legacy_client.post("/auth/apikey/regenerate", headers=_login(legacy_client))
+        assert r.status_code == 200 and KEY_SHAPE.fullmatch(r.json()["api_key"])
+
+
+class TestARollbackBeforeTheCutoff:
+    """The previous image fills a cleartext key into every NULL `users.api_key` at its boot. An
+    account this image moved off the column (or registered) must not get that value back as a
+    working key when this image boots again."""
+
+    def test_a_moved_and_a_new_account_get_no_working_key_from_the_previous_images_backfill(
+        self, legacy_client, legacy_key
+    ):
+        session = _login(legacy_client)
+        (legacy,) = legacy_client.get("/auth/apikeys", headers=session).json()
+        assert (
+            legacy_client.delete(f"/auth/apikeys/{legacy['key_id']}", headers=session).status_code
+            == 204
+        )
+        bob = _register(legacy_client, "bob")
+        _previous_image_backfill()
+        con = _db()
+        minted = dict(con.execute("SELECT username, api_key FROM users").fetchall())
+        con.close()
+        assert all(minted.values())
+        _boot()
+        from app.main import app
+
+        with TestClient(app) as again:
+            for name, value in minted.items():
+                assert _me(again, {"X-Api-Key": value}).status_code == 401, name
+                assert _me(again, {"Authorization": f"Bearer {value}"}).status_code == 401, name
+            assert again.get("/auth/apikey", headers=_session(bob)).json() == {"api_key": ""}
+        con = _db()
+        dump = "\n".join(con.iterdump())
+        con.close()
+        for value in minted.values():
+            assert value not in dump
+
+    def test_a_regenerated_account_gets_no_working_key_from_the_backfill(
+        self, legacy_client, legacy_key
+    ):
+        assert (
+            legacy_client.post("/auth/apikey/regenerate", headers=_login(legacy_client)).status_code
+            == 200
+        )
+        _previous_image_backfill()
+        con = _db()
+        (value,) = con.execute("SELECT api_key FROM users WHERE username='alice'").fetchone()
+        con.close()
+        _boot()
+        from app.main import app
+
+        with TestClient(app) as again:
+            assert _me(again, {"X-Api-Key": value}).status_code == 401
+
+    def test_an_account_the_previous_image_registered_during_the_rollback_keeps_its_key(
+        self, legacy_client, legacy_key
+    ):
+        """The other side of the line: an account that never met this image has its key from the
+        previous image, and that key goes on working until the cutoff, like every legacy key."""
+        carol = secrets.token_urlsafe(32)
+        con = _db()
+        con.execute(
+            "INSERT INTO users (username, hashed_password, api_key) VALUES ('carol', ?, ?)",
+            (auth.hash_password(PASSWORD), carol),
+        )
+        con.commit()
+        con.close()
+        _boot()
+        from app.main import app
+
+        with TestClient(app) as again:
+            assert _me(again, {"X-Api-Key": carol}).status_code == 200
+            assert _me(again, {"X-Api-Key": legacy_key}).status_code == 200
+
+
+class TestAnEarlierCutoff:
+    def test_moving_the_cutoff_earlier_moves_the_announced_expiry(
+        self, legacy_client, legacy_key, monkeypatch
+    ):
+        earlier = datetime.fromtimestamp(database.legacy_cutoff() - 10 * 86400, UTC)
+        monkeypatch.setattr(settings, "api_key_legacy_cutoff", earlier.strftime("%Y-%m-%d"))
+        _boot()
+        session = _login(legacy_client)
+        (legacy,) = legacy_client.get("/auth/apikeys", headers=session).json()
+        assert (
+            legacy["expires_at"]
+            == datetime.fromtimestamp(database.legacy_cutoff(), UTC).isoformat()
+        )
+        con = _db()
+        (stored,) = con.execute("SELECT expires_at FROM api_keys WHERE kind='legacy'").fetchone()
+        con.close()
+        assert stored == database.legacy_cutoff()

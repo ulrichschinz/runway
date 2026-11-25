@@ -266,8 +266,9 @@ offline-attackable; the log redaction knows both shapes.
 was.** A key is now stored only as the SHA-256 of itself in the `api_keys` table
 ([`backend/app/database.py`](../backend/app/database.py), `CREATE_API_KEYS`), shown once by
 `POST /auth/apikeys`, and it expires (at most 365 days), can be revoked, and records its last use.
-Creating and revoking keys needs a signed-in session, so a stolen key cannot mint a successor that
-survives its revocation. The keys of the previous image (`secrets.token_urlsafe(32)`, held in
+Creating and revoking keys, and the deprecated `regenerate`, need a signed-in session, so a stolen key
+cannot mint a successor that survives its revocation or its expiry, and a legacy key read from a backup
+cannot be swapped for an `rwk_` key that outlives the cutoff. The keys of the previous image (`secrets.token_urlsafe(32)`, held in
 cleartext in `users.api_key`) were hashed into `legacy` rows at the first boot and only the hash
 authenticates; they are refused from the legacy cutoff (`API_KEY_LEGACY_CUTOFF`, default and latest
 2027-01-15), and the first boot after it revokes them and empties the column. **Until then finding
@@ -586,15 +587,24 @@ version after rolling forward.
 
 ### API key theft
 
-**The exposure:** the key is stored in cleartext, is permanent, unscoped and un-expiring, and
-authenticates on every route including the admin ones when the account holds that role. A stolen key
-survives a password change. `users.db` is a bind-mounted file and is in every backup.
+**The exposure:** a key is unscoped — it authenticates on every route including the admin ones when
+the account holds that role — and a stolen key survives a password change. `users.db` is a bind-mounted
+file and is in every backup.
 
-**Partially mitigated:** every disclosure through `GET /auth/apikey` writes an
-`auth.apikey.disclosed` row, and every authenticated request records the credential shape and the
-route, so a stolen key's *use* is reconstructable and rotation is one `POST` away. That is
-observation, not prevention, and it says nothing about a key read from the file directly.
-`WAIVER-SEC-003`, expiring 2027-01-31.
+**Mitigated for new keys** (brief 0070, ADR 0044 Decision 6): a key is `rwk_<id>_<256-bit secret>`,
+stored only as its SHA-256, shown once by `POST /auth/apikeys`, expires after at most 365 days, can be
+revoked one by one, and records its last use. A read of the file or a backup yields hashes, not keys.
+Creating, revoking and the deprecated `regenerate` need a signed-in session, so a stolen key can neither
+mint its successor nor extend its own life nor end its owner's other keys. Every authenticated request
+records the credential shape and the route, so a stolen key's *use* is reconstructable.
+
+**Still open until the cutoff and the contract step:** the keys of the previous image are hashed into
+`legacy` rows and authenticate until `API_KEY_LEGACY_CUTOFF` (at the latest 2027-01-15); until then the
+column still holds the cleartext of every account that has not moved, `GET /auth/apikey` (deprecated)
+returns it and writes an `auth.apikey.disclosed` row, and every backup taken before the cutoff holds
+working keys until that day. An account this image has closed (registered here, legacy key revoked or
+rotated) gets nothing imported from the column again, so a rollback's backfill does not hand it a
+working key. `WAIVER-SEC-003`, expiring 2027-01-31, stays open until the contract step drops the column.
 
 **Mitigated for agent sessions:** the MCP surface is an allowlist (ADR 0037). No authentication,
 API-key, user or admin operation is a tool, so an agent — or a prompt injected into one — holding a
