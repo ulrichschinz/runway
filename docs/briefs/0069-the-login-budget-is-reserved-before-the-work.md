@@ -137,6 +137,20 @@ by its absence, which is recorded as such and is not evidence of anything else.
 - Rollback: reverting restores the old limiter; no stored data changed shape, and the previous image ignores
   the new variables. `--no-proxy-headers` and the nginx header revert with it.
 
+- `make check` on `158da0d`: **GREEN** (37 s of 180 s).
+- `make verify` on `158da0d` in a clean, bootstrapped detached worktree: **RED** (266 s of 600 s) —
+  `RULE-GATE-002`: the `OPS-002-fstring` arm of `tools/fixtures/negative.sh` anchors its injected
+  credential-logging line on `rate_limit.clear(body.username)`, which this change removed, so the arm
+  could not run. The rule itself did not change; the fixture was re-anchored on the new success line
+  (`attempt.succeed()`), injecting the same f-string with the password in scope, in `c51be52`. The fixture
+  file is gate configuration, so this needs owner approval (`RISK-GOV-001`: not independent).
+- `make check` on `c51be52`: red once (run before `make fix` had rebuilt the index after the fixture edit;
+  the failing line was not captured), then **GREEN** (37 s of 180 s).
+- `make verify` on `c51be52` in a clean, bootstrapped detached worktree: **GREEN** (271 s of 600 s) — unit
+  1033 passed, frontend 767 passed, 57 fixture arms passed, 0 failed; 47 of 50 executable rules proven able
+  to fail. The **container tier was skipped** on this arm64 host (`RISK-TEST-001`: no arm64 archlinux
+  image); it runs in CI only and was not observed here. No Taskwarrior path changed in this package.
+
 ### Deferred, with trigger
 
 - **Production `TRUSTED_PROXIES`** — operator, on the host (plan M0 class: production facts this repository
