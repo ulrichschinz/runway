@@ -34,7 +34,9 @@ Two credentials reach the same principal, checked in this order by `get_current_
    login can still be used by them. A key is shown once, by `POST /auth/apikeys`; creating,
    revoking and the deprecated `regenerate` need a signed-in session (a key gets 403), so a stolen
    key cannot mint its own successor — and a legacy key from a backup cannot be swapped for one that
-   outlives the cutoff. `GET /auth/apikeys` lists metadata only.
+   outlives the cutoff. The deprecated `GET /auth/apikey` returns the legacy key only to a session or
+   to that legacy key itself (any other key gets `""`), so a stolen `rwk_` key cannot read back a
+   second credential that would survive its revocation. `GET /auth/apikeys` lists metadata only.
 2. **`Authorization: Bearer <jwt>`** — signed with `JWT_SECRET`, `HS256`, 24h. A valid
    signature is not enough: the account the token names must still exist, or the request
    gets the same **401** as no credential at all, on every route. A token outlives the row

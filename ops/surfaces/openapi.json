@@ -1747,7 +1747,7 @@
     "/auth/apikey": {
       "get": {
         "deprecated": true,
-        "description": "Deprecated since 2026-11-25 (brief 0070): API keys are stored as hashes. Returns a key issued before then until the legacy cutoff (`API_KEY_LEGACY_CUTOFF`, at the latest 2027-01-15), and an empty string after it and for every key created since. Use `GET /auth/apikeys` (metadata) and `POST /auth/apikeys`.",
+        "description": "Deprecated since 2026-11-25 (brief 0070): API keys are stored as hashes. Returns a key issued before then until the legacy cutoff (`API_KEY_LEGACY_CUTOFF`, at the latest 2027-01-15), and an empty string after it and for every key created since. Only a signed-in session, or the legacy key itself, reads it; any other API key gets `\"\"`. Use `GET /auth/apikeys` (metadata) and `POST /auth/apikeys`.",
         "operationId": "get_apikey_auth_apikey_get",
         "parameters": [
           {

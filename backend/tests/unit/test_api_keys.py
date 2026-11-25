@@ -557,6 +557,75 @@ class TestKeyManagementNeedsASession:
         assert r.status_code == 200 and len(r.json()) == 1
 
 
+class TestTheReadBackNeedsASessionOrTheKeyItself:
+    """Scenario 6 (review round 2): the deprecated GET turned any key into the legacy key.
+
+    The legacy key is a second credential, valid until the cutoff and independent of the key that
+    fetched it. If an `rwk_` key could read it back, a stolen short-lived key would become a
+    long-lived one, and revoking the stolen key would not end the intrusion — scenario 3 through
+    the read-back route. A session may still read it (the old UI, the Android login), and a legacy
+    key may still read itself back (that discloses nothing it does not already hold).
+    """
+
+    def _login(self, client: TestClient) -> dict[str, str]:
+        token = client.post("/auth/login", json={"username": "alice", "password": PASSWORD}).json()[
+            "access_token"
+        ]
+        return {"username": "alice", "token": token}
+
+    def test_a_new_key_cannot_read_the_legacy_key(self, legacy_client, legacy_key):
+        account = self._login(legacy_client)
+        stolen = _create(legacy_client, account, expires_in_days=1)
+        for headers in (
+            {"X-Api-Key": stolen["api_key"]},
+            {"Authorization": f"Bearer {stolen['api_key']}"},  # SHIM-SEC-006
+        ):
+            r = legacy_client.get("/auth/apikey", headers=headers)
+            assert r.status_code == 200, r.text
+            assert r.json() == {"api_key": ""}
+            assert legacy_key not in r.text
+
+    def test_revoking_the_stolen_key_ends_the_intrusion(self, legacy_client, legacy_key):
+        account = self._login(legacy_client)
+        stolen = _create(legacy_client, account, expires_in_days=1)
+        harvested = {
+            legacy_client.get("/auth/apikey", headers={"X-Api-Key": stolen["api_key"]}).json()[
+                "api_key"
+            ],
+            legacy_client.get(
+                "/auth/apikey", headers={"Authorization": f"Bearer {stolen['api_key']}"}
+            ).json()["api_key"],
+        } - {""}
+        r = legacy_client.delete(f"/auth/apikeys/{stolen['key_id']}", headers=_session(account))
+        assert r.status_code == 204
+        assert _me(legacy_client, {"X-Api-Key": stolen["api_key"]}).status_code == 401
+        for value in harvested:
+            assert _me(legacy_client, {"X-Api-Key": value}).status_code == 401, (
+                "a credential read back through the stolen key outlived its revocation"
+            )
+
+    def test_a_legacy_key_still_reads_itself_back(self, legacy_client, legacy_key):
+        for headers in (
+            {"X-Api-Key": legacy_key},
+            {"Authorization": f"Bearer {legacy_key}"},
+        ):
+            r = legacy_client.get("/auth/apikey", headers=headers)
+            assert r.json() == {"api_key": legacy_key}
+
+    def test_a_session_still_reads_it_and_revocation_ends_it(self, legacy_client, legacy_key):
+        account = self._login(legacy_client)
+        r = legacy_client.get("/auth/apikey", headers=_session(account))
+        assert r.json() == {"api_key": legacy_key}
+        listed = legacy_client.get("/auth/apikeys", headers=_session(account)).json()
+        (legacy,) = [k for k in listed if k["kind"] == "legacy"]
+        r = legacy_client.delete(f"/auth/apikeys/{legacy['key_id']}", headers=_session(account))
+        assert r.status_code == 204
+        assert _me(legacy_client, {"X-Api-Key": legacy_key}).status_code == 401
+        assert legacy_client.get("/auth/apikey", headers=_session(account)).json() == {
+            "api_key": ""
+        }
+
+
 class TestTheDeprecatedRoutes:
     def test_the_get_is_marked_deprecated(self, legacy_client, legacy_key):
         r = legacy_client.get("/auth/apikey", headers={"X-Api-Key": legacy_key})

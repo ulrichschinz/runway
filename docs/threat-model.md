@@ -594,8 +594,10 @@ file and is in every backup.
 **Mitigated for new keys** (brief 0070, ADR 0044 Decision 6): a key is `rwk_<id>_<256-bit secret>`,
 stored only as its SHA-256, shown once by `POST /auth/apikeys`, expires after at most 365 days, can be
 revoked one by one, and records its last use. A read of the file or a backup yields hashes, not keys.
-Creating, revoking and the deprecated `regenerate` need a signed-in session, so a stolen key can neither
-mint its successor nor extend its own life nor end its owner's other keys. Every authenticated request
+Creating, revoking and the deprecated `regenerate` need a signed-in session, and the deprecated
+`GET /auth/apikey` hands the legacy key only to a session or to the legacy key itself (any other key gets
+`""`), so a stolen key can neither mint its successor, nor read back a second credential, nor extend its
+own life, nor end its owner's other keys. Every authenticated request
 records the credential shape and the route, so a stolen key's *use* is reconstructable.
 
 **Still open until the cutoff and the contract step:** the keys of the previous image are hashed into

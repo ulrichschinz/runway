@@ -207,7 +207,8 @@ An unknown, expired or revoked key gets the same `401` (`Invalid API key` on `X-
 
 **Deprecated, until the contract step:** `GET /api/auth/apikey` returns a key issued before
 2026-11 (a 43-character one) until the legacy cutoff (`API_KEY_LEGACY_CUTOFF`, at the latest
-**2027-01-15**), and `""` after it and for every key created since. `POST /api/auth/apikey/regenerate`
+**2027-01-15**), and `""` after it and for every key created since — and only to a signed-in session
+or to that legacy key itself; called with any other API key it answers `""`. `POST /api/auth/apikey/regenerate`
 now ends **every** key of the account and returns one new key, once; like creating and revoking it
 needs a signed-in session (an API key gets `403`). Both answer with
 `Deprecation`, `Sunset` and `Link: rel="successor-version"` headers. **Keys from before 2026-11 stop

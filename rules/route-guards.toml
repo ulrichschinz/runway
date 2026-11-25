@@ -40,7 +40,8 @@ guard = "user"
 
 # Brief 0070: hashed API keys. `user` is the guard; creating, revoking and the deprecated regenerate
 # above additionally refuse an API key as the credential inside the handler (403) — only a
-# signed-in session may mint or end one.
+# signed-in session may mint or end one. The deprecated `GET /auth/apikey` above returns the legacy
+# key only to a signed-in session or to the legacy key itself; any other key gets "" (review round 2).
 [[routes]]
 route = "POST /auth/apikeys"
 guard = "user"

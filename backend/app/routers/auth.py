@@ -1,3 +1,4 @@
+import hmac
 import logging
 import time
 from datetime import UTC, datetime
@@ -441,12 +442,29 @@ def _metadata(row: dict, now: int, cutoff: int) -> dict:
 
 def _require_session(request: Request) -> None:
     """Key management needs a signed-in session, not a key: a stolen key must not be able to mint
-    its own successor, or revoking it would not end the intrusion (brief 0070, scenario 3)."""
+    its own successor, or revoking it would not end the intrusion (brief 0070, scenario 3). The
+    deprecated read-back holds the same line in `_may_read_legacy_key` (scenario 6)."""
     if getattr(request.state, "auth_shape", None) != audit.SHAPE_BEARER_JWT:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Managing API keys needs a signed-in session, not an API key",
         )
+
+
+def _may_read_legacy_key(request: Request, value: str) -> bool:
+    """A signed-in session may read the legacy key; an API key only if it IS that key."""
+    shape = getattr(request.state, "auth_shape", None)
+    if shape == audit.SHAPE_BEARER_JWT:
+        return True
+    if shape == audit.SHAPE_API_KEY_HEADER:
+        presented = request.headers.get("x-api-key", "")
+    elif shape == audit.SHAPE_BEARER_API_KEY:
+        scheme, _, presented = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer":
+            return False
+    else:
+        return False
+    return hmac.compare_digest(presented.strip().encode(), value.encode())
 
 
 def _deprecation_headers(response: Response) -> None:
@@ -549,7 +567,8 @@ async def revoke_apikey(
     deprecated=True,
     description=_DEPRECATED + "Returns a key issued before then until the legacy cutoff "
     "(`API_KEY_LEGACY_CUTOFF`, at the latest 2027-01-15), and an empty string after it and for "
-    "every key created since. Use `GET /auth/apikeys` (metadata) and `POST /auth/apikeys`.",
+    "every key created since. Only a signed-in session, or the legacy key itself, reads it; any "
+    'other API key gets `""`. Use `GET /auth/apikeys` (metadata) and `POST /auth/apikeys`.',
 )
 async def get_apikey(
     request: Request,
@@ -561,6 +580,12 @@ async def get_apikey(
     value = ""
     if database.api_key_clock() < database.legacy_cutoff():
         value = await legacy_api_key(db, username)
+    if value and not _may_read_legacy_key(request, value):
+        # Brief 0070, scenario 6 (review round 2): the legacy key is a second credential, alive
+        # until the cutoff and independent of the key asking. Handed to an `rwk_` key it would
+        # turn a stolen short-lived key into a long-lived one that survives the stolen key's
+        # revocation. Only a session, or the legacy key reading itself back, gets it.
+        value = ""
     # Recorded only when a value actually leaves: what an operator asks this row is "when was a
     # cleartext key last disclosed, and to whom" (finding SEC-5).
     if value:

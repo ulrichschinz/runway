@@ -224,8 +224,10 @@ public random key id, with expiry and revocation.**
    earlier `API_KEY_LEGACY_CUTOFF` is the expiry the metadata announces.
 6. **The old routes** keep path, method and schema, are `deprecated` in OpenAPI and answer with
    `Deprecation`, `Sunset` (the cutoff) and `Link: rel="successor-version"`. `GET /auth/apikey` returns a
-   live legacy value until the cutoff, `""` otherwise; `auth.apikey.disclosed` is written only when a value
-   leaves.
+   live legacy value until the cutoff, `""` otherwise — and only to a signed-in session or to the legacy
+   key itself; any other API key gets `""`, because the legacy key is a second credential independent of
+   the one asking, and a stolen `rwk_` key that could read it back would survive its own revocation
+   (corrected in review round 2). `auth.apikey.disclosed` is written only when a value leaves.
 
 **Expand → migrate → switch → contract:**
 
