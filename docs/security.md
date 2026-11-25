@@ -474,10 +474,13 @@ third-party argument parser, and it could change in any release — as the theme
   `localStorage`, so a viewer can make the admin UI appear. Every `/admin` route is guarded
   server-side, so the result is 403s rather than access — a display bug, not a privilege
   escalation. Recorded as `RISK-SEC-001`.
-- **`role` has no database-level constraint.** The column is `TEXT DEFAULT 'user'` and would
-  accept anything written outside the application. Every in-application writer validates
-  against `VALID_ROLES`; a value written by hand would not be an admin, so it fails closed.
-  Recorded as `RISK-SEC-002`.
+- **`role` is constrained only from schema version 1 on.** Version 1 (brief 0073, ADR 0047)
+  rebuilds `users` with `role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin'))`, so a
+  value written outside the application is refused by the database. A database that already holds
+  such a value refuses the rebuild instead (ERROR `schema migration refused`, counted, never named)
+  and stays at version 0, where the column is the old `TEXT DEFAULT 'user'`; every in-application
+  writer validates against `VALID_ROLES` and an unrecognised value is not an admin, so it still fails
+  closed. Recorded as `RISK-SEC-002` until production reports version 1.
 - **The login limiter is in-process and per-worker** (`RISK-SEC-003`). Under one host and
   one worker — decision F1 — that is the whole population; a second worker would multiply the
   effective limit by the process count. The re-open trigger is executable:

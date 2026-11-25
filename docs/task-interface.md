@@ -192,9 +192,15 @@ Reports drift in the protected public surfaces, and with `--update` rewrites the
 ```
 
 Five surfaces are snapshotted: the served OpenAPI schema, the **runtime-observed** MCP tool list, the
-migrated database schema, the Taskwarrior template, and the SPA routes and localStorage keys. Environment
-variables are cross-checked against `README.md` instead of snapshotted — `RULE-SURF-002` fails when a
-documented variable is unread or a read variable is undocumented.
+migrated database schema (with the schema version it reached), the Taskwarrior template, and the SPA routes
+and localStorage keys. Environment variables are cross-checked against `README.md` instead of snapshotted —
+`RULE-SURF-002` fails when a documented variable is unread or a read variable is undocumented.
+
+The database schema is also built the way production got it. `RULE-SURF-005` creates a database from every
+historical baseline in `backend/tests/fixtures/schema_history/`, runs `init_db()` on it, and fails when the
+result means something different from a fresh database — a column, default, `CHECK`, index, trigger or the
+schema version (brief 0073, ADR 0047). A schema change is a step in `VERSIONED_MIGRATIONS` in
+`backend/app/database.py`; editing a `CREATE` statement alone is exactly what this rule catches.
 
 Updating a snapshot is not a way around the rule; it is the rule working. The diff is what makes a
 public-surface change something a human commits rather than something that happens.

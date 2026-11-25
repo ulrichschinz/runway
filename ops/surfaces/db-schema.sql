@@ -72,6 +72,13 @@ CREATE TABLE reviews (
     UNIQUE(username, kind, scope)
 );
 
+-- table schema_migrations
+CREATE TABLE schema_migrations (
+    version INTEGER PRIMARY KEY CHECK (version >= 1),
+    name TEXT NOT NULL,
+    applied_at INTEGER NOT NULL
+);
+
 -- table site_settings
 CREATE TABLE site_settings (
     key TEXT PRIMARY KEY,
@@ -93,13 +100,22 @@ CREATE TABLE storage_migrations (
 );
 
 -- table users
-CREATE TABLE users (
+CREATE TABLE "users" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     hashed_password TEXT NOT NULL,
-    api_key TEXT UNIQUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-, role TEXT DEFAULT 'user', full_name TEXT DEFAULT '', email TEXT DEFAULT '', storage_id TEXT CHECK (storage_id IS NULL OR (length(storage_id) = 32 AND storage_id NOT GLOB '*[^0-9a-f]*')), storage_layout TEXT NOT NULL DEFAULT 'legacy' CHECK (storage_layout IN ('legacy', 'storage_id')), auth_version INTEGER NOT NULL DEFAULT 1 CHECK (auth_version >= 1), api_key_closed_at INTEGER);
+    api_key TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+    full_name TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    storage_id TEXT CHECK (storage_id IS NULL OR (length(storage_id) = 32
+        AND storage_id NOT GLOB '*[^0-9a-f]*')),
+    storage_layout TEXT NOT NULL DEFAULT 'legacy'
+        CHECK (storage_layout IN ('legacy', 'storage_id')),
+    auth_version INTEGER NOT NULL DEFAULT 1 CHECK (auth_version >= 1),
+    api_key_closed_at INTEGER
+);
 
 -- trigger api_keys_identity_is_immutable
 CREATE TRIGGER api_keys_identity_is_immutable
@@ -125,3 +141,5 @@ CREATE TRIGGER users_storage_id_immutable
     BEFORE UPDATE OF storage_id ON users
     WHEN OLD.storage_id IS NOT NULL AND NEW.storage_id IS NOT OLD.storage_id
     BEGIN SELECT RAISE(ABORT, 'storage_id is immutable'); END;
+
+-- schema_version 1

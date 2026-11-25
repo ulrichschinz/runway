@@ -73,8 +73,18 @@ def migration_lines() -> Iterator[io.StringIO]:
         logger.setLevel(previous_level)
 
 
+# The one line a database's FIRST boot through a versioned step writes (ADR 0047, brief 0073): once
+# per database, never per boot, and pinned by test_schema_versions.py. Every other line this module
+# logs is what the tests below are about, so this one is set aside rather than asserted around.
+VERSIONED_STEP_APPLIED = "schema migration applied"
+
+
 def lines(buffer: io.StringIO) -> list[dict]:
-    return [json.loads(line) for line in buffer.getvalue().splitlines()]
+    return [
+        entry
+        for entry in (json.loads(line) for line in buffer.getvalue().splitlines())
+        if entry.get("message") != VERSIONED_STEP_APPLIED
+    ]
 
 
 def columns(db_path: str, table: str = "users") -> set[str]:
@@ -114,7 +124,7 @@ async def test_a_second_init_db_is_green_and_says_nothing(isolated_storage: Path
     with migration_lines() as buffer:
         await init_db()
 
-    assert buffer.getvalue() == ""
+    assert lines(buffer) == []
     assert {"api_key", "role", "full_name", "email"} <= columns(str(isolated_storage / "users.db"))
 
 
@@ -135,7 +145,7 @@ async def test_a_pre_existing_database_missing_every_column_is_migrated_quietly(
     with migration_lines() as buffer:
         await init_db()
 
-    assert buffer.getvalue() == ""
+    assert lines(buffer) == []
     assert {"api_key", "role", "full_name", "email"} <= columns(path)
 
 
@@ -280,7 +290,7 @@ async def test_a_database_from_before_the_reviews_table_gains_it_quietly(isolate
     with migration_lines() as buffer:
         await init_db()
 
-    assert buffer.getvalue() == ""
+    assert lines(buffer) == []
     assert "reviews" in tables(path)
 
 
@@ -335,7 +345,7 @@ async def test_a_database_from_before_the_project_status_table_gains_it_quietly(
     with migration_lines() as buffer:
         await init_db()
 
-    assert buffer.getvalue() == ""
+    assert lines(buffer) == []
     assert "project_status" in tables(path)
 
 
@@ -406,7 +416,7 @@ async def test_an_upgraded_database_gets_storage_ids_and_keeps_the_legacy_layout
     with migration_lines() as buffer:
         await init_db()
         await init_db()
-    assert buffer.getvalue() == ""
+    assert lines(buffer) == []
 
     connection = sqlite3.connect(path)
     rows = list(connection.execute("SELECT storage_id, storage_layout FROM users ORDER BY id"))
@@ -527,7 +537,7 @@ async def test_an_upgraded_database_starts_every_account_at_version_one(isolated
     with migration_lines() as buffer:
         await init_db()
         await init_db()
-    assert buffer.getvalue() == ""
+    assert lines(buffer) == []
 
     from app.database import AUTH_VERSION_EXPAND_KEY
 

@@ -441,6 +441,23 @@ p.write_text(t.replace(old, "urgency.user.tag.next.coefficient=99.0", 1))
 MOVESURFACE
 expect_red "SURF-001" "tools/checks/surfaces.sh" "RULE-SURF-001"
 
+# --- RULE-SURF-005 — a CREATE statement edited instead of migrated -----------
+# The drift RISK-SURF-001 was: a fresh database gets the new shape, a database that already has the
+# table never sees it. Add a column to a CREATE, accept the snapshot (so RULE-SURF-001 is satisfied,
+# as it was for seven months), and require the upgrade comparison to say so.
+python3 - "$SANDBOX/backend/app/database.py" <<'EDITCREATE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "    status TEXT NOT NULL CHECK (status IN ('active', 'on_hold', 'done')),\n"
+assert old in t, "project_status CREATE not found"
+p.write_text(t.replace(old, old + "    note TEXT DEFAULT '',\n", 1))
+EDITCREATE
+(cd "$SANDBOX" && backend/.venv/bin/python tools/surfaces.py --update >/dev/null 2>&1) || true
+expect_red "SURF-005" "tools/checks/surfaces.sh" "RULE-SURF-005"
+
 # --- RULE-SURF-002 — README documents a variable nothing reads --------------
 # Exactly the PORT drift this rule was written for: an operator sets it and gets silence.
 python3 - "$SANDBOX/README.md" <<'PHANTOMVAR'

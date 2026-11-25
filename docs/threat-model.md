@@ -96,8 +96,8 @@ filesystem without working locks would void it (not a supported deployment).
   included). What it cannot see: a path nginx answers itself, and a handler that authenticates inside
   its body instead of by dependency (classified `open`, so it must be declared with a reason).
   `RISK-SEC-005`.
-- The `role` column is `TEXT` with no database constraint, so a value written outside the application
-  is not rejected — closed rather than open, since an unrecognised value is not `admin`. `RISK-SEC-002`.
+- The `role` column refuses anything but `user` and `admin` (`CHECK`, schema version 1, brief 0073) —
+  once the database has reached version 1, which a hand-written role prevents. `RISK-SEC-002`.
 - One maintainer means no independent review of a change to the rules themselves. `RISK-GOV-001`.
 - The deploy host operator is trusted absolutely and nothing here observes them. `RISK-OPS-002`.
 
@@ -474,16 +474,18 @@ and CORS is closed.
 - `RULE-SURF-001` — the migrated database schema, the served OpenAPI schema, the runtime MCP tool
   list, the Taskwarrior template and the SPA's routes and `localStorage` keys are all snapshotted, so
   none of them moves silently.
+- `RULE-SURF-005` — the schema a fresh database gets and the one every historical baseline is migrated
+  to are semantically identical (brief 0073).
 - `RULE-HYG-001` and `RULE-HYG-002` — no store is tracked in git, and `.gitignore` covers each.
 - `RULE-TEST-002` — cross-tenant isolation is tested against the real binary, so the boundary these
   directories provide is exercised rather than reasoned about.
 
 **Asserted**
-- **A fresh database and a migrated one do not have the same schema, and the snapshot only ever
-  describes the fresh one.** `CREATE_USERS` declares `api_key TEXT UNIQUE`; the migration that
-  back-fills the column declares plain `TEXT`, because SQLite cannot add a `UNIQUE` column by
-  `ALTER TABLE`. Production is the migrated kind. `RULE-SURF-001` compares the snapshot against
-  itself and passes. `RISK-SURF-001`.
+- **That production has reached schema version 1 is not visible from here.** Since brief 0073 a fresh
+  and a migrated database end with the same `users` table (version 1 rebuilds it, with the role
+  `CHECK`), and `RULE-SURF-005` builds every historical baseline and compares it with a fresh one. A
+  production database with a hand-written role refuses the step and stays at version 0 with an ERROR;
+  `verify-deploy` fails on that. `RISK-SURF-001`, `RISK-SEC-002`.
 - **Nothing prunes `audit.db`**, and nothing measures it. Roughly one row per authenticated request,
   on the same partition as `users.db` and the task data. `RISK-OPS-006`.
 - There are now two files to back up. `users.db` alone is no longer a complete backup of this
@@ -673,8 +675,9 @@ administrator cannot be demoted. Both branches are audited, including the refusa
 `noop: an admin already exists`, which is the evidence that the recovery path did *not* fire on a
 given start ([`backend/app/main.py:38-42`](../backend/app/main.py)).
 
-**Not stopped:** anyone with shell on the deploy host can write the `role` column directly, and
-nothing at the database level would refuse it. `RISK-SEC-002`.
+**Not stopped:** anyone with shell on the deploy host can write the `role` column directly. Since
+schema version 1 (brief 0073) the database refuses a value that is not a role, but `admin` is a role:
+the constraint stops a typo or a third role, not an operator. `RISK-SEC-002`.
 
 ### Log and audit poisoning
 

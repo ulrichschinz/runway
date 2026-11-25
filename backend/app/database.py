@@ -113,10 +113,10 @@ CREATE TABLE IF NOT EXISTS project_status (
 )
 """
 
-# The additive schema migrations, applied on every start. There is no migrations/ directory
-# and no version table: with four statements against two shapes of database, re-running an
-# idempotent list is cheaper than a framework, and the point at which that stops being true
-# is written down in docs/adr/0025-narrowing-the-migration-except.md.
+# The additive schema migrations, applied on every start (ADR 0025). FROZEN since brief 0073
+# (ADR 0047): this loop is how every historical database reaches the common baseline, schema
+# version 0, and nothing new is appended to it. A schema change from now on is a step in
+# VERSIONED_MIGRATIONS below, which knows whether it already ran and is applied whole or not at all.
 MIGRATIONS = (
     "ALTER TABLE users ADD COLUMN api_key TEXT",
     "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
@@ -323,6 +323,309 @@ API_KEY_KEEP_INACTIVE = 40
 # `last_used_at` is written at most this often per key, so an agent's stream of requests does not
 # turn every read into a write.
 API_KEY_LAST_USED_RESOLUTION = 60
+
+
+# --- versioned migrations (ADR 0047, brief 0073) ---------------------------------------------
+#
+# After the additive baseline, every schema change is a numbered step. `apply_versioned_migrations`
+# runs the pending ones in order, each in ONE `BEGIN IMMEDIATE` transaction that also records it in
+# `schema_migrations` — SQLite DDL is transactional, so a step is applied whole or not at all. A step
+# that fails is rolled back, logged at ERROR, and stops the chain; the boot continues at the last
+# version applied (the judgement of ADR 0025: a retryable failure must not become an outage). A step
+# must leave a database the previous image can still boot and serve.
+
+CREATE_SCHEMA_MIGRATIONS = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY CHECK (version >= 1),
+    name TEXT NOT NULL,
+    applied_at INTEGER NOT NULL
+)
+"""
+
+# Version 1: `users` in one declared shape. The same columns, types and defaults the additive loop
+# leaves on every database, in the order a fresh one had them, plus the role constraint
+# (RISK-SEC-002). `api_key` is plain TEXT, as every migrated database — production — has it: the
+# UNIQUE only fresh databases had is relied on by nothing (the legacy lookup refuses a hash two rows
+# share), and the column goes with the API-key contract (version 2, after the legacy cutoff).
+CREATE_USERS_V1 = """
+CREATE TABLE users_v1 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    hashed_password TEXT NOT NULL,
+    api_key TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+    full_name TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    storage_id TEXT CHECK (storage_id IS NULL OR (length(storage_id) = 32
+        AND storage_id NOT GLOB '*[^0-9a-f]*')),
+    storage_layout TEXT NOT NULL DEFAULT 'legacy'
+        CHECK (storage_layout IN ('legacy', 'storage_id')),
+    auth_version INTEGER NOT NULL DEFAULT 1 CHECK (auth_version >= 1),
+    api_key_closed_at INTEGER
+)
+"""
+
+USERS_V1_COLUMNS = (
+    "id",
+    "username",
+    "hashed_password",
+    "api_key",
+    "created_at",
+    "role",
+    "full_name",
+    "email",
+    "storage_id",
+    "storage_layout",
+    "auth_version",
+    "api_key_closed_at",
+)
+
+
+# Written out rather than built from USERS_V1_COLUMNS, so no SQL is assembled at run time;
+# test_schema_versions.py holds the two together. NULL and '' become 'user' — the one normalisation.
+COPY_USERS_V1 = """
+INSERT INTO users_v1 (id, username, hashed_password, api_key, created_at, role, full_name, email,
+    storage_id, storage_layout, auth_version, api_key_closed_at)
+SELECT id, username, hashed_password, api_key, created_at,
+    CASE WHEN role IS NULL OR role = '' THEN 'user' ELSE role END, full_name, email,
+    storage_id, storage_layout, auth_version, api_key_closed_at
+FROM users
+"""
+
+
+class MigrationRefused(Exception):
+    """A versioned step found data it cannot carry over unchanged. Nothing was written. The message
+    holds counts and column names only — never a row's contents or an account name."""
+
+
+async def _users_v1(db) -> None:
+    """Rebuild `users` into `CREATE_USERS_V1`. Runs inside the caller's transaction."""
+    async with db.execute("PRAGMA table_info(users)") as cur:
+        present = [row[1] for row in await cur.fetchall()]
+    unknown = sorted(set(present) - set(USERS_V1_COLUMNS))
+    missing = sorted(set(USERS_V1_COLUMNS) - set(present))
+    if unknown or missing:
+        raise MigrationRefused(
+            f"users has columns this step does not carry ({unknown}) or lacks ones it needs "
+            f"({missing}); nothing was rebuilt"
+        )
+    # NULL and '' are what every reader already treats as `user` (set_role, the guards); any other
+    # value outside the two roles was written by hand on the host, and what it meant is not ours to
+    # decide. Counted, never named.
+    async with db.execute(
+        "SELECT COUNT(*) FROM users WHERE role IS NOT NULL AND role != ''"
+        " AND role NOT IN ('user', 'admin')"
+    ) as cur:
+        row = await cur.fetchone()
+    invalid = int(row[0]) if row else 0
+    if invalid:
+        raise MigrationRefused(
+            f"{invalid} account(s) carry a role that is neither 'user' nor 'admin'; set each to one "
+            "of the two (docs/operations.md, Schema migrations) and restart"
+        )
+    async with db.execute("SELECT COUNT(*) FROM users") as cur:
+        row = await cur.fetchone()
+    before = int(row[0]) if row else 0
+    # The AUTOINCREMENT high-water mark: DROP TABLE forgets it, and an id that came back would make
+    # a new account the owner of rows in api_keys or storage_migrations that name the old one.
+    async with db.execute("SELECT name FROM sqlite_master WHERE name='sqlite_sequence'") as cur:
+        has_sequence = await cur.fetchone() is not None
+    sequence = 0
+    if has_sequence:
+        async with db.execute("SELECT seq FROM sqlite_sequence WHERE name='users'") as cur:
+            row = await cur.fetchone()
+        sequence = int(row[0]) if row and row[0] is not None else 0
+    # Every index and trigger on the old table, from its own stored SQL, so one this code does not
+    # know about survives too. Autoindexes (sql IS NULL) belong to the constraints and come back
+    # with the new table.
+    async with db.execute(
+        "SELECT sql FROM sqlite_master WHERE tbl_name='users' AND type IN ('index', 'trigger')"
+        " AND sql IS NOT NULL ORDER BY type, name"
+    ) as cur:
+        dependents = [row[0] for row in await cur.fetchall()]
+
+    await db.execute(CREATE_USERS_V1)
+    await db.execute(COPY_USERS_V1)
+    await db.execute("DROP TABLE users")
+    await db.execute("ALTER TABLE users_v1 RENAME TO users")
+    for statement in dependents:
+        await db.execute(statement)
+
+    async with db.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM users") as cur:
+        row = await cur.fetchone()
+    after, highest = (int(row[0]), int(row[1])) if row else (0, 0)
+    if after != before:
+        raise MigrationRefused(f"the rebuild carried {after} of {before} rows")
+    target = max(sequence, highest)
+    if target:
+        cur = await db.execute("UPDATE sqlite_sequence SET seq=? WHERE name='users'", (target,))
+        if cur.rowcount == 0:
+            await db.execute(
+                "INSERT INTO sqlite_sequence (name, seq) VALUES ('users', ?)", (target,)
+            )
+
+
+# (version, name, step). Append only; never renumber, never edit a step that has shipped.
+# Version 2 — the API-key contract (drop users.api_key, api_key_closed_at) — is deferred until after
+# API_KEY_LEGACY_CUTOFF and its soak (ADR 0044, ADR 0047).
+VERSIONED_MIGRATIONS = ((1, "users_declared_shape", _users_v1),)
+
+# The version this code brings a database to. `ops/surfaces/db-schema.sql` records it, and the
+# post-deploy check compares what production reports against it.
+SCHEMA_VERSION = max(version for version, _, _ in VERSIONED_MIGRATIONS)
+
+# What the last `init_db()` of this process left the database at, for `GET /skill` and the boot
+# line. None until it has run.
+applied_schema_version: int | None = None
+
+
+async def schema_version(db) -> int:
+    async with db.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations") as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+async def apply_versioned_migrations(db, now: int) -> int:
+    """Apply every pending step in order; return the version the database is at afterwards."""
+    await db.execute(CREATE_SCHEMA_MIGRATIONS)
+    await db.commit()
+    current = await schema_version(db)
+    for version, name, step in VERSIONED_MIGRATIONS:
+        if version <= current:
+            continue
+        if db.in_transaction:
+            await db.commit()
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            await step(db)
+            await db.execute(
+                "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+                (version, name, now),
+            )
+        except (sqlite3.Error, MigrationRefused) as failure:
+            await db.rollback()
+            logger.error(
+                "schema migration refused",
+                extra={
+                    "schema_version": current,
+                    "migration_version": version,
+                    "migration": name,
+                    "migration_error": str(failure),
+                },
+            )
+            return current
+        await db.commit()
+        current = version
+        logger.info(
+            "schema migration applied",
+            extra={"schema_version": current, "migration": name},
+        )
+    return current
+
+
+# --- the schema, as a comparable value (RULE-SURF-005, ADR 0047) -------------------------------
+
+
+def _normalised(sql: str | None) -> str:
+    return " ".join((sql or "").replace('"', "").split())
+
+
+def _check_clauses(sql: str) -> list[str]:
+    """Every `CHECK (...)` in a CREATE TABLE statement, whitespace-normalised, sorted."""
+    found: list[str] = []
+    text = _normalised(sql)
+    upper = text.upper()
+    start = upper.find("CHECK")
+    while start != -1:
+        open_at = text.find("(", start)
+        depth, end = 0, open_at
+        for end in range(open_at, len(text)):
+            if text[end] == "(":
+                depth += 1
+            elif text[end] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+        found.append(text[open_at + 1 : end].strip())
+        start = upper.find("CHECK", end)
+    return sorted(found)
+
+
+def schema_fingerprint(path: str | Path) -> dict:
+    """What a database's schema means, independent of how it got there: per table its columns in
+    order (type, NOT NULL, default, key), CHECK clauses, AUTOINCREMENT, indexes by their columns,
+    uniqueness and predicate, foreign keys; every trigger; and the applied schema version. Statement
+    text is compared only where it is the meaning (CHECK clauses, triggers, partial indexes)."""
+    connection = sqlite3.connect(str(path))
+    try:
+        tables = [
+            (name, sql)
+            for name, sql in connection.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type='table'"
+                " AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        ]
+        result: dict = {"tables": {}, "triggers": {}, "schema_version": 0}
+        for name, sql in tables:
+            columns = [
+                (row[1], (row[2] or "").upper(), bool(row[3]), _normalised(row[4]), row[5])
+                for row in connection.execute(f"PRAGMA table_xinfo('{name}')")
+            ]
+            indexes = []
+            for _, index_name, unique, origin, partial in connection.execute(
+                f"PRAGMA index_list('{name}')"
+            ):
+                cols = [row[2] for row in connection.execute(f"PRAGMA index_info('{index_name}')")]
+                where = ""
+                if partial:
+                    stored = connection.execute(
+                        "SELECT sql FROM sqlite_master WHERE name=?", (index_name,)
+                    ).fetchone()
+                    where = _normalised(stored[0] if stored else "").partition(" WHERE ")[2]
+                key = index_name if origin == "c" else f"<{origin}>"
+                indexes.append((key, tuple(cols), bool(unique), where))
+            foreign = sorted(
+                tuple(row[2:5]) for row in connection.execute(f"PRAGMA foreign_key_list('{name}')")
+            )
+            result["tables"][name] = {
+                "columns": columns,
+                "checks": _check_clauses(sql or ""),
+                "autoincrement": "AUTOINCREMENT" in (sql or "").upper(),
+                "indexes": sorted(indexes),
+                "foreign_keys": foreign,
+            }
+        for name, sql in connection.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='trigger' ORDER BY name"
+        ):
+            result["triggers"][name] = _normalised(sql)
+        if "schema_migrations" in result["tables"]:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+            ).fetchone()
+            result["schema_version"] = int(row[0]) if row else 0
+        return result
+    finally:
+        connection.close()
+
+
+def schema_differences(expected: dict, actual: dict) -> list[str]:
+    """Human-readable differences between two fingerprints, for a gate message."""
+    out: list[str] = []
+    for name in sorted(set(expected["tables"]) | set(actual["tables"])):
+        a, b = expected["tables"].get(name), actual["tables"].get(name)
+        if a is None or b is None:
+            out.append(f"table {name}: {'missing' if b is None else 'unexpected'}")
+            continue
+        for part in ("columns", "checks", "autoincrement", "indexes", "foreign_keys"):
+            if a[part] != b[part]:
+                out.append(f"table {name}: {part} differ: {a[part]!r} vs {b[part]!r}")
+    for name in sorted(set(expected["triggers"]) | set(actual["triggers"])):
+        if expected["triggers"].get(name) != actual["triggers"].get(name):
+            out.append(f"trigger {name} differs")
+    if expected["schema_version"] != actual["schema_version"]:
+        out.append(f"schema_version {expected['schema_version']} vs {actual['schema_version']}")
+    return out
 
 
 # SQLite's own words for "this column is already there", observed rather than guessed: on
@@ -1156,4 +1459,7 @@ async def init_db() -> str:
             FROM project_plans
         """)
         await db.commit()
+        # Last, so every step sees every table (ADR 0047).
+        global applied_schema_version
+        applied_schema_version = await apply_versioned_migrations(db, int(time.time()))
     return bootstrap_reason

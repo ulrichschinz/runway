@@ -571,6 +571,29 @@ rules:
       skill does, and a stale copy of it is worse than stale skill text — the skill is read
       by a model that can notice it is wrong, the hook is executed.
 
+  - id: RULE-SURF-005
+    statement: >
+      The schema init_db() produces from an empty file and from every historical baseline in
+      backend/tests/fixtures/schema_history/ MUST be semantically identical — columns in order with
+      type, NOT NULL, default and key; CHECK clauses; AUTOINCREMENT; indexes by columns, uniqueness
+      and predicate; foreign keys; triggers; and the applied schema version.
+    class: executable
+    check: tools/checks/surfaces.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#make-surfaces
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      RULE-SURF-001 snapshots the schema a fresh database gets, and production is not a fresh
+      database: it was created in April 2026 and migrated by ALTER TABLE ever since. For seven months
+      the snapshot recorded an api_key UNIQUE constraint and a column order production did not have,
+      and the rule compared the snapshot against itself and passed (RISK-SURF-001). The upgrade path
+      has to be built and compared, not assumed. Statement text is not compared — the same schema is
+      spelled differently by CREATE and by ALTER — what it means is. A schema change now goes into
+      VERSIONED_MIGRATIONS, which runs on both paths; a CREATE edited instead fails here because a
+      database that already has the table never sees the edit. Brief 0073, ADR 0047.
+
   - id: RULE-DEP-002
     statement: >
       Every dependency's licence MUST be classified by policy/licenses.yaml, and MUST NOT be
@@ -1054,29 +1077,20 @@ residual_risks:
 
   - id: RISK-SURF-001
     statement: >
-      A fresh database and a migrated one do not have the same schema, and the snapshot that
-      is supposed to be the truth about the schema only ever describes the fresh one.
-      CREATE_USERS declares `api_key TEXT UNIQUE`; the migration that back-fills that column
-      into an existing database declares plain `TEXT`, because SQLite cannot add a UNIQUE
-      column by ALTER TABLE at all. So an instance created after the column existed enforces
-      uniqueness and an instance migrated into it does not — and production is the second
-      kind. tools/surfaces.py captures the schema by running init_db() against an empty
-      temporary file, which is the fresh path, so ops/surfaces/db-schema.sql records the
-      UNIQUE constraint that production does not have. RULE-SURF-001 compares that snapshot
-      against itself and passes: the mechanism cannot see this class of drift, because both
-      sides of the comparison are generated the same way. The practical exposure is small —
-      api_key is secrets.token_urlsafe(32), so a collision is not a real event — but the
-      snapshot is relied on as a description of production and on this point it is wrong.
-
-      Brief 0070 (2026-11-25) kept the drift from spreading: API keys moved to a new table,
-      `api_keys`, created by the same CREATE TABLE IF NOT EXISTS on both paths, and
-      test_api_keys.py generates a fresh and an upgraded database and compares that table's
-      schema. The legacy lookup does not assume `users.api_key` was unique — a hash that two
-      rows carry is refused. `users.api_key` itself, and so this drift, goes with the M4
-      contract step (a versioned table rebuild), after the legacy cutoff of 2027-01-15.
+      Closed in this repository on 2026-11-25 (brief 0073, ADR 0047); open until production
+      reports it. The drift: CREATE_USERS declared `api_key TEXT UNIQUE` while a database migrated by
+      ALTER TABLE — production, created in April 2026 — had plain TEXT and another column order, and
+      ops/surfaces/db-schema.sql described only the fresh path, so RULE-SURF-001 compared the snapshot
+      against itself and passed. Now: versioned step 1 rebuilds `users` into one declared shape on
+      both paths (plain `api_key TEXT`, as production has it; the column goes with the API-key
+      contract), and RULE-SURF-005 builds every historical baseline in
+      backend/tests/fixtures/schema_history/ and requires it to mean what a fresh database means.
+      What is not yet evidence: that production ran step 1. A role that is neither 'user' nor 'admin'
+      refuses the step and leaves the old shape in place; verify-deploy compares the
+      `schema_version` production reports with the snapshot's and fails until it matches.
     owner: maintainer
-    re_open_trigger: "a migrations/ directory with a version table exists, or a second column diverges between the created and migrated schemas, or a uniqueness assumption is written against api_key"
-    decision_record: docs/adr/0025-narrowing-the-migration-except.md
+    re_open_trigger: "verify-deploy reports a schema_version below the snapshot's, a historical database shape is found that the baselines do not cover, or a schema change lands outside VERSIONED_MIGRATIONS"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   - id: RISK-OPS-002
     statement: >
@@ -1223,18 +1237,18 @@ residual_risks:
 
   - id: RISK-SEC-002
     statement: >
-      The users.role column is TEXT DEFAULT 'user' with no database-level constraint, so a
-      value written outside the application — by hand on the host, or by a future migration
-      — is not rejected. Every in-application writer validates against VALID_ROLES, and an
-      unrecognised value is not equal to 'admin', so the failure is closed rather than open.
-      A CHECK constraint cannot be added by ALTER TABLE at all; it needs the table copied,
-      which is a different shape of migration from the additive loop init_db runs. Half of
-      this risk's re-open trigger fired on 2026-08-28: WAIVER-OPS-001 is resolved and a failed
-      migration now reports itself (docs/adr/0025-narrowing-the-migration-except.md), so a
-      half-applied rebuild would at least be loud. It would still be half-applied, and the
-      rebuild has no home until there is a migrations/ directory with a version table.
+      Closed in this repository on 2026-11-25 (brief 0073, ADR 0047); open until production
+      reports it. Versioned step 1 rebuilds `users` with `role TEXT NOT NULL DEFAULT 'user'
+      CHECK (role IN ('user', 'admin'))`, so a value written outside the application — by hand on the
+      host or by a future migration — is refused by the database; NULL and '' (what every reader
+      already treated as 'user') become 'user'. A database that already holds another value refuses
+      the step, logs `schema migration refused` with a count, and keeps the old unconstrained column,
+      where every in-application writer still validates against VALID_ROLES and an unrecognised value
+      is not 'admin' (fail closed). Whether production holds such a row is a production read; until
+      verify-deploy has seen schema_version 1 the constraint is not known to be in force there. The
+      constraint does not stop an operator writing 'admin': that is a role.
     owner: maintainer
-    re_open_trigger: "a migrations/ directory with a version table exists, or a third role is introduced"
+    re_open_trigger: "verify-deploy reports schema_version 0, a third role is introduced, or the users table is rebuilt again"
     decision_record: docs/security.md
 
   - id: RISK-SEC-006

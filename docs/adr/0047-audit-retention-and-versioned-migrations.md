@@ -91,7 +91,7 @@ operator's.
 **Version 2 — the API-key contract (deferred).** Drop `users.api_key` and `api_key_closed_at` by the same
 rebuild, after `API_KEY_LEGACY_CUTOFF` (2027-01-15) and its soak, in its own change (ADR 0044).
 
-the schema-equality rule (numbered in the commit that adds it) holds the mechanism to its purpose: the schema `init_db()` builds from an empty file and from
+`RULE-SURF-005` holds the mechanism to its purpose: the schema `init_db()` builds from an empty file and from
 every recorded historical baseline (`backend/tests/fixtures/schema_history/`) must be semantically identical
 — columns with types, defaults, `NOT NULL` and keys in order, indexes with their columns, uniqueness and
 predicates, `CHECK` clauses, triggers, and the applied version.
@@ -131,7 +131,7 @@ stays readable. `E2BIG` is `ArgumentTooLong` → 413 from one handler in `app.ma
 
 - `RISK-SEC-004` narrowed (size bounded, volume not). `RISK-OPS-006` narrowed (measured and warned, not
   bounded) — it closes only with D7 and the retention job. `RISK-SURF-001` and `RISK-SEC-002` are closed in
-  this repository by version 1 and the schema-equality rule (numbered in the commit that adds it); in production when `verify-deploy` has seen
+  this repository by version 1 and `RULE-SURF-005`; in production when `verify-deploy` has seen
   `schema_version` 1. `RISK-SEC-005` narrowed to what the application object does not serve. `RISK-OPS-002`
   narrowed to the indirect digest.
 - The SQLite promise in `AGENTS.md` changes from "forward-only, additive" to "forward-only; additive

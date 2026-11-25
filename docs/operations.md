@@ -613,6 +613,47 @@ wrapped, and a failure is logged at `ERROR` as `the audit event could not be wri
 served anyway. So if a row seems absent, grep the log stream for that message before concluding the event
 did not happen.
 
+## Schema migrations
+
+`init_db()` runs at every start (ADR 0025, ADR 0047). First the **additive baseline** — the frozen list of
+`ALTER TABLE` statements every historical database needs — then the **versioned steps**, each applied once,
+in one transaction, and recorded in `schema_migrations`:
+
+```sh
+# on the deploy host: which version is this database at?
+cd /opt/services/runway
+sqlite3 users.db 'SELECT version, name, datetime(applied_at, "unixepoch") FROM schema_migrations;'
+```
+
+The boot also says it: one INFO line `schema migration applied` (with `schema_version`) the first time a
+step runs, and `GET /api/skill` reports `server.schema_version`, which `verify-deploy` compares with the
+`-- schema_version` line of `ops/surfaces/db-schema.sql`.
+
+**Version 1 — `users` in one declared shape** (brief 0073). The table is rebuilt with the same columns and
+data, a `CHECK (role IN ('user', 'admin'))`, and without the `UNIQUE` on `api_key` that only fresh databases
+had. Ids and the id sequence are kept; every index and trigger is re-created. `role` NULL or empty becomes
+`user`. **A role that is neither refuses the step**: the boot continues at version 0 and logs
+
+```
+ERROR schema migration refused  migration_version=1  migration_error="N account(s) carry a role ..."
+```
+
+and `verify-deploy` fails on `schema_version`. Find and fix the rows, then restart the backend — the step
+runs again at the next boot:
+
+```sh
+sqlite3 users.db "SELECT id, role FROM users WHERE role NOT IN ('user', 'admin');"
+sqlite3 users.db "UPDATE users SET role='user' WHERE id=<id>;"   # or 'admin', deliberately
+docker compose restart backend
+```
+
+**Rollback.** The previous image boots on a rebuilt database and serves it unchanged: it ignores
+`schema_migrations`, and its additive loop finds every column present. Rolling forward again does not re-run
+a step. Taking a copy of `users.db` before the first deploy of a new step stays the rule (plan §7).
+
+**Version 2 — the API-key contract — is not shipped.** It drops `users.api_key` after the legacy cutoff
+(2027-01-15) and its soak, in its own change (ADR 0044).
+
 ## Moving task storage off the username
 
 Finding SEC-001, [ADR 0043](adr/0043-account-identity-and-taskwarrior-storage.md), brief
