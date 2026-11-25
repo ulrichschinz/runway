@@ -188,7 +188,9 @@ hash is rehashed or reset.
 
 Units touched by the fixes: `be/leaves` (`auth.py`), `be/routers` (`routers/auth.py`), `be/adapters/db`
 (`database.py`: `reset_password`), `be/services` (`services/password_reset.py`, new — added to the unit's
-paths in `architecture.toml`, which needs owner approval, `RISK-GOV-001`), `fe/shared` (message text),
+paths in `architecture.toml`; its imports raise the recorded fan-in of `database.py` 8→9 and `audit.py`
+6→7 and record `auth.py` at 5 in `ops/structure-baseline.toml`, each with its reason, as brief 0065 did for
+the storage migration CLI — both files need owner approval, `RISK-GOV-001`), `fe/shared` (message text),
 `docs`, `tests`. Public surfaces: the REST bodies are unchanged (the soak refusal is a 422 in FastAPI's own
 validation shape, which the OpenAPI document already declares); MCP, DB schema, env vars, SPA unchanged.
 

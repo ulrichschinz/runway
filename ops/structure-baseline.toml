@@ -36,7 +36,11 @@ allowlist = [
 # Raised from 7 on 2026-11-24 (brief 0065, SEC-001; owner approval not independent, RISK-GOV-001):
 # the eighth importer is the storage migration CLI, which records its protocol rows and flips the
 # layout through database.py because only that module may open a connection.
-"backend/app/database.py" = 8
+# Raised from 8 on 2026-11-25 (brief 0067, SEC-006 review fix R4; owner approval not independent,
+# RISK-GOV-001): the ninth is the operator password reset CLI (`services/password_reset.py`), the
+# plan's recovery path for refused bcrypt-era accounts; it writes hash and auth_version through
+# `database.reset_password` for the same reason — only database.py opens a connection.
+"backend/app/database.py" = 9
 # Recorded on 2026-08-28 with the audit log. Five dependents is the shape of the thing: an
 # audit writer is a single sink that everything with an event to record reaches — the auth
 # dependency, three routers and the lifespan. Concentration here is the design, exactly as it
@@ -45,7 +49,17 @@ allowlist = [
 # Raised from 5 on 2026-11-24 (brief 0065): the sixth is exactly the case the note above asks to
 # review — a new class of event (`storage.migrated`, `storage.rolled_back`) from the storage
 # migration CLI. Its rows carry a user id and a file count; no path, no task text, no credential.
-"backend/app/audit.py" = 6
+# Raised from 6 on 2026-11-25 (brief 0067, SEC-006 review fix R4; owner approval not independent,
+# RISK-GOV-001): the seventh is the operator password reset CLI. No new event class — it records the
+# existing `auth.password.changed`, actor `operator`, subject the username; never the password or
+# its hash.
+"backend/app/audit.py" = 7
+# Recorded on 2026-11-25 (brief 0067, SEC-006 review fix R4; owner approval not independent,
+# RISK-GOV-001): the password policy and KDF. Importers: dependencies.py, main.py, models.py,
+# routers/auth.py and the operator reset CLI, which must apply exactly the rule and the hash a
+# password change applies — a second copy of either would be the defect. A sixth importer is a new
+# place that sets or checks a password; review it against brief 0067.
+"backend/app/auth.py" = 5
 # Recorded on 2026-11-24 (brief 0065, ADR 0043): the account-identity and storage-path type that
 # every layer touching Taskwarrior carries — routers and be/di hand a TaskStore down, services and
 # the adapter take nothing else. Concentration is the control: one resolver instead of two copies of

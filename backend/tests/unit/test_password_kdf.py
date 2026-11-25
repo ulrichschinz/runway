@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from app.config import settings
+from app.services import password_reset
 
 # (password, hash) — passlib 1.7.4 CryptContext(schemes=["bcrypt"], bcrypt__rounds=4).hash(password)
 LEGACY = {
@@ -750,8 +751,6 @@ class TestTheOperatorResetEntryPoint:
 
     def _run(self, monkeypatch, argv: list[str], typed: list[str]) -> int:
         import getpass
-
-        from app.services import password_reset
 
         answers = iter(typed)
         monkeypatch.setattr(getpass, "getpass", lambda prompt="": next(answers))
