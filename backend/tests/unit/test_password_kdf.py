@@ -175,15 +175,35 @@ class TestPasswordLimitsInBytes:
         assert _login(client, "alice", "pw").status_code == 401
 
     def test_an_oversized_login_is_refused_before_any_hash_or_query(self, client, monkeypatch):
+        """Plan M2.2: "Überlange Requests werden vor KDF/DB-Arbeit mit 4xx abgewiesen". The patch
+        goes on the name the ROUTER calls (it imports `check_password` directly — patching
+        `app.auth` would not reach it), and every SQL statement is counted. FastAPI opens the
+        injected connection before the body is validated, so the claim is "no statement", not "no
+        connection"."""
         assert _register(client, "alice").status_code == 201
-        from app import auth
+        import aiosqlite
+
+        from app.routers import auth as auth_router
 
         def boom(*_a: Any, **_k: Any):
             raise AssertionError("password work ran for an oversized password")
 
-        monkeypatch.setattr(auth, "check_password", boom)
+        statements: list[str] = []
+        real_execute = aiosqlite.Connection.execute
+
+        def counting_execute(self, sql, *a: Any, **k: Any):
+            statements.append(sql)
+            return real_execute(self, sql, *a, **k)
+
+        monkeypatch.setattr(auth_router, "check_password", boom)
+        monkeypatch.setattr(aiosqlite.Connection, "execute", counting_execute)
         r = _login(client, "alice", "a" * 1025)
         assert r.status_code == 422
+        assert statements == []
+        # The probe itself is live: an ordinary login does reach both.
+        with pytest.raises(AssertionError, match="password work ran"):
+            _login(client, "alice", GOOD)
+        assert statements
 
     def test_a_password_that_is_not_encodable_is_refused(self):
         """A lone surrogate is valid JSON and not UTF-8. Over HTTP pydantic already refuses it as
@@ -606,33 +626,218 @@ class TestRehashCompareAndSwap:
         assert _stored_hash("alice") == "$argon2id$changed-by-the-owner"
 
 
-class TestTheOperatorReset:
-    """The recovery path of docs/operations.md, statement for statement: an account refused after
-    Switch 2 gets a temporary Argon2id password and every session ends."""
+# --- review fixes of 2026-11-25 (brief 0067, "Review fixes") -----------------------------------
 
-    def test_the_runbook_statement_recovers_a_refused_account(self, client):
-        from app.auth import hash_password, password_problem
 
+@pytest.fixture
+def real_soak(monkeypatch):
+    """The production soak (7 days), on a timeline that started just now."""
+    from datetime import timedelta
+
+    from app import auth
+
+    monkeypatch.setattr(auth, "KDF_SOAK", timedelta(days=7))
+
+
+class TestNoAliasDuringTheSoak:
+    """R2: while new hashes are still bcrypt, a new password bcrypt cannot store whole (72 bytes or
+    more) is refused, so the 72-byte alias is never created new — in any phase."""
+
+    PREFIX = "x" * 72
+    ONE = PREFIX + "-the-real-suffix"
+    TWO = PREFIX + "-anything-else"
+
+    def test_a_long_password_is_refused_at_register_during_the_soak(self, client, real_soak):
+        assert _register(client, "bob", self.ONE).status_code == 422
+        assert _sql("SELECT COUNT(*) FROM users WHERE username='bob'")[0][0] == 0
+        # Nothing exists that the other suffix could log in to.
+        assert _login(client, "bob", self.TWO).status_code == 401
+
+    def test_the_refusal_is_the_validation_shape_and_echoes_no_password(self, client, real_soak):
+        r = _register(client, "bob", self.ONE)
+        assert r.status_code == 422
+        assert self.ONE not in r.text
+        detail = r.json()["detail"]
+        assert isinstance(detail, list) and detail[0]["loc"] == ["body", "password"]
+
+    def test_seventy_one_bytes_is_still_accepted_and_exact(self, client, real_soak):
+        assert _register(client, "bob", "y" * 71).status_code == 201
+        assert _stored_hash("bob").startswith("$2b$")
+        assert _login(client, "bob", "y" * 71).status_code == 200
+        assert _login(client, "bob", "y" * 70).status_code == 401
+
+    def test_a_password_change_to_a_long_password_is_refused_during_the_soak(
+        self, client, real_soak
+    ):
+        assert _register(client, "bob").status_code == 201
+        before = _stored_hash("bob")
+        token = _login(client, "bob", GOOD).json()["access_token"]
+        r = client.put(
+            "/auth/password",
+            json={"current_password": GOOD, "new_password": self.ONE},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 422
+        assert _stored_hash("bob") == before
+
+    def test_the_way_out_of_the_ambiguous_case_works_during_the_soak(self, client, real_soak):
+        """A user told to change a long legacy password, inside the soak, sets a shorter one: it is
+        stored exactly, the next login is not flagged, and after Switch 1 it migrates."""
+        password = _legacy_account(client, "alice", LEGACY["long_ascii"])
+        answer = _login(client, "alice", password).json()
+        assert answer["password_change_required"] is True
+        new = "a new passphrase under 72 bytes"  # secret-scan: allow — synthetic test value
+        r = client.put(
+            "/auth/password",
+            json={"current_password": password, "new_password": new},
+            headers={"Authorization": f"Bearer {answer['access_token']}"},
+        )
+        assert r.status_code == 200, r.text
+        assert _login(client, "alice", new).json()["password_change_required"] is False
+        assert _login(client, "alice", password).status_code == 401
+        _expand_days_ago(8)
+        assert _login(client, "alice", new).status_code == 200
+        assert _stored_hash("alice").startswith("$argon2id$")
+
+    def test_after_the_soak_a_long_password_is_accepted_and_not_aliased(self, client, real_soak):
+        _expand_days_ago(8)
+        assert _register(client, "bob", self.ONE).status_code == 201
+        assert _stored_hash("bob").startswith("$argon2id$")
+        assert _login(client, "bob", self.TWO).status_code == 401
+
+
+class TestNulInANewPassword:
+    """R3: a NUL byte in a password being set is refused in every phase — passlib refused it before,
+    and a bcrypt hash of it would be one `check_password` never accepts."""
+
+    NUL = "abcdefgh\x00ijk"
+
+    @pytest.mark.parametrize("soak", [True, False])
+    def test_register_with_nul_is_422(self, client, monkeypatch, soak):
+        if soak:
+            from datetime import timedelta
+
+            from app import auth
+
+            monkeypatch.setattr(auth, "KDF_SOAK", timedelta(days=7))
+        assert _register(client, "bob", self.NUL).status_code == 422
+        assert _sql("SELECT COUNT(*) FROM users WHERE username='bob'")[0][0] == 0
+
+    def test_change_to_nul_is_422(self, client, real_soak):
+        assert _register(client, "bob").status_code == 201
+        token = _login(client, "bob", GOOD).json()["access_token"]
+        r = client.put(
+            "/auth/password",
+            json={"current_password": GOOD, "new_password": self.NUL},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 422
+        assert _login(client, "bob", GOOD).status_code == 200
+
+    def test_the_policy_itself(self):
+        from app.auth import password_problem
+
+        assert password_problem(self.NUL, new=True) is not None
+        # A login may still carry one: it is a mismatch (401), never a 500.
+        assert password_problem(self.NUL, new=False) is None
+
+
+class TestTheOperatorResetEntryPoint:
+    """R4: the recovery path is the command the runbook prints, run as the operator runs it — not
+    a copy of its SQL."""
+
+    TEMPORARY = "temporary pass 42"  # secret-scan: allow — synthetic test value
+
+    def _run(self, monkeypatch, argv: list[str], typed: list[str]) -> int:
+        import getpass
+
+        from app.services import password_reset
+
+        answers = iter(typed)
+        monkeypatch.setattr(getpass, "getpass", lambda prompt="": next(answers))
+        return password_reset.main(argv)
+
+    def test_it_recovers_an_account_refused_after_switch_2(self, client, monkeypatch):
         password = _legacy_account(client, "alice", LEGACY["long_ascii"])
         token = _login(client, "alice", password).json()["access_token"]
         _expand_days_ago(68)
         assert _login(client, "alice", password).status_code == 401
+        before = _version("alice")
 
-        temporary = "temporary pass 42"  # secret-scan: allow — synthetic test value
-        assert password_problem(temporary, new=True) is None
-        con = sqlite3.connect(settings.db_path)
-        n = con.execute(
-            "UPDATE users SET hashed_password = ?, auth_version = auth_version + 1"
-            " WHERE username = ?",
-            (hash_password(temporary), "alice"),
-        ).rowcount
-        con.commit()
-        con.close()
-        assert n == 1
-        r = _login(client, "alice", temporary)
+        assert self._run(monkeypatch, ["alice"], [self.TEMPORARY, self.TEMPORARY]) == 0
+        assert _version("alice") == before + 1
+        assert _stored_hash("alice").startswith("$argon2id$")
+        r = _login(client, "alice", self.TEMPORARY)
         assert r.status_code == 200
         assert r.json()["password_change_required"] is False
-        # The session from before the reset is over.
         assert (
             client.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
         )
+        from app import audit, database
+
+        rows = (
+            sqlite3.connect(database.audit_db_path())
+            .execute(
+                "SELECT actor, subject, outcome FROM audit_events WHERE event=?",
+                (audit.PASSWORD_CHANGED,),
+            )
+            .fetchall()
+        )
+        assert ("operator", "alice", "success") in rows
+
+    def test_during_the_soak_it_writes_what_the_previous_image_can_read(
+        self, client, monkeypatch, real_soak
+    ):
+        assert _register(client, "alice").status_code == 201
+        assert self._run(monkeypatch, ["alice"], [self.TEMPORARY, self.TEMPORARY]) == 0
+        assert _stored_hash("alice").startswith("$2b$")
+        assert _login(client, "alice", self.TEMPORARY).status_code == 200
+        # ... and so it cannot set a password bcrypt would truncate.
+        long = "z" * 80
+        before = _stored_hash("alice")
+        assert self._run(monkeypatch, ["alice"], [long, long]) != 0
+        assert _stored_hash("alice") == before
+
+    @pytest.mark.parametrize(
+        ("argv", "typed"),
+        [
+            (["nobody"], ["temporary pass 42", "temporary pass 42"]),
+            (["alice"], ["temporary pass 42", "temporary pass 43"]),
+            (["alice"], ["short", "short"]),
+            ([], []),
+        ],
+        ids=["unknown-account", "mismatch", "policy", "no-account-given"],
+    )
+    def test_it_changes_nothing_when_refused(self, client, monkeypatch, argv, typed):
+        assert _register(client, "alice").status_code == 201
+        before = (_stored_hash("alice"), _version("alice"))
+        assert self._run(monkeypatch, argv, typed) != 0
+        assert (_stored_hash("alice"), _version("alice")) == before
+
+    def test_the_runbook_runs_this_entry_point_and_no_stdin_script(self):
+        from pathlib import Path
+
+        text = (Path(__file__).parents[3] / "docs" / "operations.md").read_text()
+        assert "docker compose exec -it backend python -m app.services.password_reset" in text
+        assert "python - <<" not in text
+
+
+class TestTheMeasurement:
+    """R5: the operator's budget check times what a login costs — the Argon2id verification AND the
+    bcrypt check every login does until the contract step — not the Argon2id part alone."""
+
+    def test_it_times_a_whole_failed_login(self, monkeypatch):
+        from app import auth
+
+        calls: list[tuple] = []
+        real = auth.check_password
+
+        def spy(password: str, stored: Any, **k: Any):
+            calls.append((stored,))
+            return real(password, stored, **k)
+
+        monkeypatch.setattr(auth, "check_password", spy)
+        out = auth.measure(rounds=3)
+        assert calls and all(stored is None for (stored,) in calls)
+        assert "per login" in out and "500 ms" in out
+        assert "argon2id" in out and "bcrypt" in out

@@ -176,9 +176,9 @@ role. The list fails closed — a router with a new tag is not a tool until it i
 Since brief 0067 (finding SEC-006, ADR 0044 Decision 5):
 
 - **Hash: Argon2id** (argon2-cffi; t=3, 64 MiB, one lane — measured against a 250 ms / 64 MiB
-  budget). Hashes from before are passlib-era bcrypt and are still verified (`SHIM-SEC-009`).
+  budget per verification and 500 ms per login, bcrypt check included). Hashes from before are passlib-era bcrypt and are still verified (`SHIM-SEC-009`).
 - **Limits, in UTF-8 bytes:** every password field at most **1024**; a password being set
-  (register, change) at least **8**. Outside the rule is **422**, before any hash or query. A login
+  (register, change) at least **8** and without a NUL character. Outside the rule is **422**, before any hash or query. A login
   has no minimum, so a password set before the rule still works.
 - **Body limit:** **16 KiB** on `/auth/*`, **1 MiB** elsewhere, **413** before routing — in the
   backend itself and, for `/api/auth/`, at nginx.
@@ -190,7 +190,8 @@ Since brief 0067 (finding SEC-006, ADR 0044 Decision 5):
 - **No oracle:** every login costs one Argon2id and one bcrypt operation whatever the account, and
   every failure is the same 401 `Invalid credentials`. A NUL byte is a 401, no longer a 500.
 - **Timeline**, from the image's first boot (`site_settings.password_kdf_expand_at`): 7 days of
-  bcrypt writes (so a rollback can still verify), then Argon2id writes and rehash-on-login, and from
+  bcrypt writes (so a rollback can still verify — and in that week a new password must be shorter
+  than 72 bytes, so bcrypt stores it whole), then Argon2id writes and rehash-on-login, and from
   day 67 the ambiguous case refused. No deploy and no setting moves a step; a missing row fails
   closed.
 

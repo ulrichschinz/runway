@@ -789,20 +789,30 @@ sqlite3 users.db "SELECT value FROM site_settings WHERE key = 'password_kdf_expa
 
 | From | What happens |
 |---|---|
-| first boot | Policy (8–1024 bytes), body limits (16 KiB on `/auth/*`, 1 MiB elsewhere) and uniform login work apply. **New and changed passwords are still bcrypt** — the soak. |
+| first boot | Policy (8–1024 bytes, no NUL), body limits (16 KiB on `/auth/*`, 1 MiB elsewhere) and uniform login work apply. **New and changed passwords are still bcrypt** — the soak — and so must be **shorter than 72 bytes** until Switch 1 (422 otherwise): bcrypt would store a longer one truncated, and any password with the same first 72 bytes would log in to it. |
 | + 7 days | **Switch 1.** New and changed passwords are Argon2id; an exact bcrypt login is rehashed (`auth.password.rehashed` in the audit log). |
 | + 67 days | **Switch 2.** A bcrypt login with a password of 72 bytes or more is refused; those accounts need the reset below. |
 
 **Before Switch 1, measure on this host** — the parameters were measured on a development machine, not here.
-The budget is 250 ms and 64 MiB per verification:
+Two budgets: **250 ms and 64 MiB per Argon2id verification**, and **500 ms per login** — until the contract
+step every login also runs a bcrypt check at cost 12 (against the stored hash or a dummy, so that an
+unknown account costs the same), and that part is about twice the Argon2id one:
 
 ```sh
 docker compose exec backend python -m app.auth
 ```
 
-If the median is over budget, lower `ARGON2_TIME_COST` in `backend/app/auth.py` (never the memory below
-19 MiB or the time below 2 — the OWASP floor, held by a test) and deploy; hashes at the old parameters are
-rehashed on their next login, and nothing else moves.
+It prints the median of each part and of a whole failed login, and `within budget` or `OVER BUDGET`. If
+either is over, lower `ARGON2_TIME_COST` in `backend/app/auth.py` (never the memory below 19 MiB or the time
+below 2 — the OWASP floor, held by a test) and deploy. The bcrypt cost cannot be lowered: it is fixed by the
+hashes already stored.
+
+**Change the Argon2id parameters only before Switch 1**, while no Argon2id hash exists yet. After it, an
+account whose hash is still at the old parameters is measurably slower (or faster) to refuse than an
+unknown account, until it logs in once and is rehashed — a timing oracle for "this account exists and has
+not logged in since". If a later change is unavoidable, record it as a residual in the brief of that change
+and the threat model until no hash at the old parameters is left (`SELECT COUNT(*) FROM users WHERE
+hashed_password LIKE '$argon2id$v=19$m=65536,t=3,p=1$%'` counts the current ones), or reset those accounts.
 
 **How far the migration is** (counts only, no hashes in the output):
 
@@ -820,24 +830,17 @@ sqlite3 data/audit.db "SELECT DISTINCT actor FROM audit_events WHERE event = 'au
 
 **Operator reset** — the recovery path for an account refused after Switch 2 (an `auth.login.failed` row
 whose detail starts `bcrypt-era password`), and for any account still on bcrypt at the contract step.
-Confirm the person out of band first. It sets a temporary password typed at a prompt — never on the
-command line, so it reaches no shell history — and ends every session of the account:
+Confirm the person out of band first. It reads a temporary password twice at a terminal prompt — never on
+the command line, so it reaches no shell history — applies the same rule as a password change, and ends
+every session of the account (`auth.password.changed`, actor `operator`, in the audit log):
 
 ```sh
-docker compose exec -it backend python - <<'PY'
-import getpass, sqlite3
-from app.auth import hash_password, password_problem
-from app.config import settings
-user = input("account: ")
-temporary = getpass.getpass("temporary password (8-1024 bytes): ")
-assert password_problem(temporary, new=True) is None, password_problem(temporary, new=True)
-con = sqlite3.connect(settings.db_path)
-n = con.execute("UPDATE users SET hashed_password = ?, auth_version = auth_version + 1 WHERE username = ?",
-                (hash_password(temporary), user)).rowcount
-con.commit()
-print(n, "account(s) reset")
-PY
+docker compose exec -it backend python -m app.services.password_reset alice
 ```
+
+Exit code 0 is done; 1 means no such account; 2 means the two entries differed or the password broke the
+rule (nothing changed). During the soak the temporary password is stored as bcrypt, so it must be shorter
+than 72 bytes then, and the previous image can still verify it.
 
 Hand the temporary password over out of band and ask the person to change it in Einstellungen at once. The
 API key is untouched; rotate it as well if the account may be compromised.

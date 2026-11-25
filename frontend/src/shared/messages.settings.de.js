@@ -18,7 +18,7 @@ export default {
   'set.pw.done': 'Passwort geändert. Alle anderen Anmeldungen sind beendet; der API-Key gilt weiter. Falls ihn jemand haben könnte: unten einen neuen erzeugen.',
   'set.pw.tooShort': 'Das neue Passwort braucht mindestens 8 Bytes (ein Umlaut zählt zwei).',
   'set.pw.tooLong': 'Ein Passwort darf höchstens 1024 Bytes lang sein (ein Umlaut zählt zwei).',
-  'set.pw.rule': 'Der Server nimmt dieses Passwort nicht an: 8 bis 1024 Bytes (ein Umlaut zählt zwei).',
+  'set.pw.rule': 'Der Server nimmt dieses Passwort nicht an: 8 bis 1024 Bytes, ohne Nullzeichen (ein Umlaut zählt zwei). In der ersten Woche nach einem Server-Update höchstens 71 Bytes.',
   'set.pw.required': 'Bitte setz jetzt ein neues Passwort. Dein bisheriges wurde nur zu den ersten 72 Bytes geprüft; nach einer Übergangsfrist meldet es dich nicht mehr an.',
   'set.pw.hint': 'Ändern meldet dich auf allen anderen Geräten und Browsern ab. Der API-Key bleibt gültig.',
   'set.apiKey': 'API-Key', 'set.apiKeyP': 'Für die Android-App („Key einfügen“) und für Claude. Wer ihn hat, kann in runway alles, was du kannst.',

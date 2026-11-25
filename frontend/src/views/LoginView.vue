@@ -84,7 +84,10 @@ async function submit() {
     // A 422 carries pydantic's list, not a sentence (SEC-006: the password rule).
     const detail = e.response?.data?.detail
     error.value = e.response?.status === 422
-      ? 'A new password needs 8 to 1024 bytes (an umlaut counts as two).'
+      // The server's own sentence where it gives one: the rule has parts no local check knows
+      // (no NUL; shorter than 72 bytes in the week after an upgrade).
+      ? (Array.isArray(detail) && typeof detail[0]?.msg === 'string' && detail[0].msg)
+        || 'A new password needs 8 to 1024 bytes (an umlaut counts as two).'
       : (typeof detail === 'string' && detail) || 'Something went wrong'
   } finally {
     loading.value = false

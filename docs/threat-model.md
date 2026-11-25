@@ -245,7 +245,9 @@ which read only the first 72 UTF-8 bytes; they are still verified (`SHIM-SEC-009
 Argon2id on the next exact login. A bcrypt match for an input of 72 bytes or more is ambiguous —
 the hash cannot tell the real password from its prefix plus anything — so it is never written as
 the new hash: it is accepted for a window with `password_change_required` and refused after it.
-Every password field is bounded at 1024 UTF-8 bytes, a new one needs 8, and the body of an auth
+During the 7-day soak, when new hashes are still bcrypt, a new password must be shorter than 72 bytes,
+so the alias is never created new. Every password field is bounded at 1024 UTF-8 bytes, a new one needs
+8 and no NUL, and the body of an auth
 request at 16 KiB. A hash is treated as credential-equivalent throughout, because it is
 offline-attackable; the log redaction knows both shapes.
 
@@ -302,8 +304,11 @@ a literal.
 - Secret scanning is pattern-based and reads only the current tree. `RISK-DEP-002`.
 - `bcrypt` 4.0.1 stays only to verify the hashes passlib wrote, until `SHIM-SEC-009`'s contract;
   passlib itself is gone (brief 0067). `RISK-DEP-003`.
-- The Argon2id latency on the deploy host is the operator's measurement, not a test's.
-  `RISK-TEST-003`.
+- The Argon2id latency on the deploy host is the operator's measurement, not a test's
+  (`python -m app.auth` times a whole login, bcrypt check included). `RISK-TEST-003`.
+- Uniform login work holds only while every Argon2id hash is at the current parameters. Changing them
+  after Switch 1 makes a not-yet-rehashed account slower or faster to refuse than an unknown one until
+  it logs in once; the runbook allows a change only before Switch 1 (brief 0067).
 
 ---
 

@@ -164,7 +164,11 @@ def _checked(new: bool):
 # `maxLength` counts characters, and 1024 bytes are never more than 1024 characters, so it is a
 # true (weaker) bound that pydantic checks first; the validator then counts bytes. A refusal is
 # 422, raised while the body is parsed — before any hash is computed or any row is read.
-_SET_RULE = f"{PASSWORD_MIN_BYTES} to {PASSWORD_MAX_BYTES} bytes in UTF-8 (counted in bytes, not characters)."
+_SET_RULE = (
+    f"{PASSWORD_MIN_BYTES} to {PASSWORD_MAX_BYTES} bytes in UTF-8 (counted in bytes, not "
+    "characters), no NUL character. For up to 7 days after the server's password-hashing upgrade, "
+    "shorter than 72 bytes."
+)
 NewPassword = Annotated[
     str,
     Field(max_length=PASSWORD_MAX_BYTES, description=f"The password to set: {_SET_RULE}"),

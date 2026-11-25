@@ -3,6 +3,7 @@ import time
 
 from aiosqlite import Connection
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
 
 from app import audit, rate_limit
 from app.auth import (
@@ -12,6 +13,7 @@ from app.auth import (
     hash_for,
     hash_password,
     kdf_phase,
+    new_password_problem,
 )
 from app.database import (
     create_account,
@@ -47,6 +49,17 @@ logger = logging.getLogger(__name__)
 async def _phase(db: Connection) -> KdfPhase:
     """Where the password-hash timeline stands (ADR 0044 Decision 5)."""
     return kdf_phase(await get_password_kdf_expand_at(db), time.time())
+
+
+def _refuse_new_password(phase: KdfPhase, password: str, field: str) -> None:
+    """422 in FastAPI's own validation shape — the one the OpenAPI document already declares for
+    these routes — for a password the current phase cannot store safely (brief 0067, R2). Raised
+    before any hash is computed. The rejected value is not echoed."""
+    problem = new_password_problem(phase, password)
+    if problem:
+        raise RequestValidationError(
+            [{"type": "value_error", "loc": ("body", field), "msg": problem}]
+        )
 
 
 @router.get(
@@ -86,9 +99,11 @@ async def register(request: Request, body: UserCreate, db: Connection = Depends(
             detail="username is not a plain name",
         )
         raise HTTPException(status_code=400, detail=problem)
+    phase = await _phase(db)
+    _refuse_new_password(phase, body.password, "password")
     try:
         account = await create_account(
-            db, body.username, hash_for(await _phase(db), body.password), generate_api_key()
+            db, body.username, hash_for(phase, body.password), generate_api_key()
         )
     except Exception as e:
         audit.record(
@@ -248,9 +263,10 @@ async def change_password(
     db: Connection = Depends(get_db),
 ):
     route = audit.route_of(request)
+    phase = await _phase(db)
+    _refuse_new_password(phase, body.new_password, "new_password")
     async with db.execute("SELECT hashed_password FROM users WHERE username=?", (username,)) as cur:
         row = await cur.fetchone()
-    phase = await _phase(db)
     if not row or not check_password(body.current_password, row["hashed_password"], phase=phase).ok:
         audit.record(
             audit.PASSWORD_CHANGED,

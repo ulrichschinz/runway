@@ -31,6 +31,7 @@ export default {
   'login.failed': 'Das hat nicht geklappt. Bitte noch einmal.',
   'login.pw.tooShort': 'Das Passwort braucht mindestens 8 Bytes (ein Umlaut zählt zwei).',
   'login.pw.tooLong': 'Ein Passwort darf höchstens 1024 Bytes lang sein (ein Umlaut zählt zwei).',
+  'login.pw.rule': 'Der Server nimmt dieses Passwort nicht an: 8 bis 1024 Bytes, ohne Nullzeichen (ein Umlaut zählt zwei). In der ersten Woche nach einem Server-Update höchstens 71 Bytes.',
   // headings: [before, accent word, after]; exactly one Fraunces word each
   'h.inbox': ['Was ist ', 'das', '?'], 'h.inboxEmpty': ['Inbox ist ', 'leer', '.'], 'h.next': ['Was jetzt ', 'zählt', ''],
   'h.waiting': ['Worauf du ', 'wartest', ''], 'h.projects': ['Was du ', 'bewegst', ''], 'h.someday': ['Später, ', 'vielleicht', ''],

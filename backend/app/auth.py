@@ -33,16 +33,23 @@ def password_problem(value: str, *, new: bool) -> str | None:
         return f"password must be at most {PASSWORD_MAX_BYTES} bytes in UTF-8"
     if new and size < PASSWORD_MIN_BYTES:
         return f"password must be at least {PASSWORD_MIN_BYTES} bytes in UTF-8"
+    # passlib refused a NUL byte, and a bcrypt hash of one is a hash `check_password` never
+    # accepts: set during the soak, it would lock the account out (brief 0067, R3). A login may
+    # still carry one — that is a mismatch, 401.
+    if new and "\x00" in value:
+        return "password must not contain a NUL character"
     return None
 
 
 # --- Argon2id ----------------------------------------------------------------------------------
 #
 # Measured on 2026-11-24 (brief 0067) against a budget of at most 64 MiB and at most 250 ms per
-# verification on the target host, with logins hashed one at a time on the event loop (so the
+# verification on the target host (and 500 ms per login, see LOGIN_BUDGET_MS), with logins hashed one at a time on the event loop (so the
 # memory budget is also the peak). On the development host (Apple M5) one verification took
 # 75 ms. The production host is not visible from here: `python -m app.auth` prints the same
-# measurement there, and the operator runs it before Switch 1 (docs/operations.md).
+# measurement there, and the operator runs it before Switch 1 (docs/operations.md). Change these
+# only before Switch 1: after it, hashes at the old parameters are distinguishable by timing from
+# an unknown account until they are rehashed (brief 0067).
 # RFC 9106's memory figure with one lane, because the deploy host is a small VM where four lanes
 # would buy nothing; t=3 to stay well above the OWASP floor (m=19 MiB, t=2).
 ARGON2_TIME_COST = 3
@@ -102,6 +109,23 @@ def legacy_bcrypt_hash(password: str) -> str:
     still verify it. Truncated explicitly, exactly as passlib did silently."""
     raw = password.encode("utf-8")[:BCRYPT_INPUT_BYTES]
     return bcrypt.hashpw(raw, bcrypt.gensalt(LEGACY_BCRYPT_COST)).decode("ascii")
+
+
+def new_password_problem(phase: KdfPhase, password: str) -> str | None:
+    """The phase-dependent part of the rule for a password being SET (register, change, the
+    operator reset), on top of `password_problem(new=True)`.
+
+    While new hashes are still bcrypt (the soak), a password of 72 bytes or more would be stored
+    truncated — and any other password with the same 72-byte prefix would log in to it. That is
+    the alias this change exists to remove, so such a password is refused until Switch 1 rather
+    than created new (brief 0067, R2). A shorter one is stored exactly.
+    """
+    if not phase.write_argon2 and len(password.encode("utf-8")) >= BCRYPT_INPUT_BYTES:
+        return (
+            f"until the password hashing upgrade completes (at most {KDF_SOAK.days} days after "
+            f"the update), a new password must be shorter than {BCRYPT_INPUT_BYTES} bytes in UTF-8"
+        )
+    return None
 
 
 def hash_for(phase: KdfPhase, password: str) -> str:
@@ -210,23 +234,50 @@ def check_password(password: str, stored: str | None, *, phase: KdfPhase) -> Pas
     return PasswordCheck(ok=False)
 
 
+# The documented budgets the operator checks on the deploy host before Switch 1 (brief 0067).
+# Argon2id: per verification — what the parameters were chosen against. Per login: what a login
+# actually costs, which until the contract step is the Argon2id verification PLUS a bcrypt check
+# at LEGACY_BCRYPT_COST (stored or dummy, for uniform work). That cost is fixed by the hashes
+# already stored, so if the login is over budget it is Argon2id's time cost that is lowered.
+ARGON2_BUDGET_MS = 250
+LOGIN_BUDGET_MS = 500
+
+
 def measure(rounds: int = 15) -> str:
-    """The median verification time at the production parameters, for the operator's check on the
-    target host (`python -m app.auth`). Prints nothing secret: the input is random."""
+    """Median timings at this module's current parameters (in production the production ones), for
+    the operator's check on the target host (`python -m app.auth`): one Argon2id verification, one
+    bcrypt check, and a whole failed login — `check_password` for an unknown account, which does
+    both against the prepared dummies, exactly as a real login does. Prints nothing secret: every
+    input is random."""
     import time
 
-    secret = secrets.token_hex(16)
-    stored = PRODUCTION_ARGON2.hash(secret)
-    times = []
-    for _ in range(rounds):
-        start = time.perf_counter()
-        PRODUCTION_ARGON2.verify(stored, secret)
-        times.append(time.perf_counter() - start)
-    times.sort()
+    def median(run) -> float:
+        times = []
+        for _ in range(rounds):
+            start = time.perf_counter()
+            run()
+            times.append(time.perf_counter() - start)
+        times.sort()
+        return times[len(times) // 2] * 1000
+
+    prepare_dummies()
+    wrong = secrets.token_hex(16).encode("ascii")
+    phase = KdfPhase(write_argon2=True, accept_long_bcrypt=True)
+    argon2_ms = median(lambda: _argon2_matches(_dummy("argon2"), wrong))
+    bcrypt_ms = median(lambda: _bcrypt_matches(wrong, _dummy("bcrypt")))
+    login_ms = median(lambda: check_password(wrong.decode("ascii"), None, phase=phase))
+    verdict = (
+        "within budget"
+        if argon2_ms <= ARGON2_BUDGET_MS and login_ms <= LOGIN_BUDGET_MS
+        else "OVER BUDGET: lower ARGON2_TIME_COST (docs/operations.md)"
+    )
     return (
-        f"argon2id t={ARGON2_TIME_COST} m={ARGON2_MEMORY_KIB} KiB p={ARGON2_PARALLELISM}: "
-        f"median verify {times[len(times) // 2] * 1000:.1f} ms over {rounds} rounds "
-        f"(budget: 250 ms, 64 MiB)"
+        f"argon2id t={_argon2.time_cost} m={_argon2.memory_cost} KiB p={_argon2.parallelism}: "
+        f"median verify {argon2_ms:.1f} ms (budget {ARGON2_BUDGET_MS} ms, 64 MiB)\n"
+        f"bcrypt cost {LEGACY_BCRYPT_COST} check: median {bcrypt_ms:.1f} ms "
+        f"(every login until the contract step)\n"
+        f"per login (argon2id + bcrypt, unknown account): median {login_ms:.1f} ms "
+        f"(budget {LOGIN_BUDGET_MS} ms) over {rounds} rounds — {verdict}"
     )
 
 

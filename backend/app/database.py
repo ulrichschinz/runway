@@ -326,6 +326,21 @@ async def rehash_password(db, username: str, expected_hash: str, new_hash: str) 
     return cur.rowcount == 1
 
 
+async def reset_password(db, username: str, new_hash: str) -> int | None:
+    """The operator reset (`app.services.password_reset`, docs/operations.md): set the hash and end
+    every session, in one statement, whatever the stored hash is. Returns the new version, or None
+    when there is no such account. Unlike `replace_password` there is no compare-and-swap — the
+    operator's decision, made after out-of-band confirmation, is the authority here."""
+    async with db.execute(
+        "UPDATE users SET hashed_password=?, auth_version=auth_version+1"
+        " WHERE username=? RETURNING auth_version",
+        (new_hash, username),
+    ) as cur:
+        row = await cur.fetchone()
+    await db.commit()
+    return int(row[0]) if row else None
+
+
 async def replace_password(db, username: str, expected_hash: str, new_hash: str) -> int | None:
     """Replace the hash and end every session, in ONE statement. Returns the new version, or
     None when the stored hash is no longer `expected_hash` (another change won).

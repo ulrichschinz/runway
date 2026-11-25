@@ -240,7 +240,7 @@
             "type": "string"
           },
           "new_password": {
-            "description": "The password to set: 8 to 1024 bytes in UTF-8 (counted in bytes, not characters).",
+            "description": "The password to set: 8 to 1024 bytes in UTF-8 (counted in bytes, not characters), no NUL character. For up to 7 days after the server's password-hashing upgrade, shorter than 72 bytes.",
             "maxLength": 1024,
             "title": "New Password",
             "type": "string"
@@ -1140,7 +1140,7 @@
       "UserCreate": {
         "properties": {
           "password": {
-            "description": "The password to set: 8 to 1024 bytes in UTF-8 (counted in bytes, not characters).",
+            "description": "The password to set: 8 to 1024 bytes in UTF-8 (counted in bytes, not characters), no NUL character. For up to 7 days after the server's password-hashing upgrade, shorter than 72 bytes.",
             "maxLength": 1024,
             "title": "Password",
             "type": "string"

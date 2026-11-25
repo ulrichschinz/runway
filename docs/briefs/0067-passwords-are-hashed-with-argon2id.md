@@ -134,8 +134,8 @@ password reaches verification on login, the normal-size body passes).
  **SEC-006** — Argon2id for new and changed
   passwords (after the 7-day soak), byte limits and a body limit before any work, safe legacy handling
   (exact → rehash; ambiguous → never rehashed, flagged, refused after the window), and the 72-byte test.
-  Honest limit: during the 7-day soak new passwords are still bcrypt, so the 72-byte alias exists for
-  passwords set in that week; those land in the ambiguous path and are told to change.
+  During the 7-day soak new passwords are still bcrypt, and since the review fixes a new password of
+  72 bytes or more is refused in that week (R2), so the alias is never created new.
 - Registers: `RISK-DEP-003` narrowed (passlib gone, bcrypt verification-only), `RISK-TEST-003` narrowed
   (one test at production parameters; latency still unmeasured), `RISK-OPS-005` (the Argon2id shape is
   redacted), `RISK-SEC-004` narrowed (password fields and bodies bounded; other fields still M8). None
@@ -145,15 +145,62 @@ password reaches verification on login, the normal-size body passes).
   input, so an over-long password is echoed back to its sender. Both belong to M8's uniform request
   handling. `SHIM-SEC-006` expired on 2026-11-25 by its own date; this change does not touch it.
 
+## Review fixes (2026-11-25)
+
+Two independent reviews of `f2cef64` found five real defects. Each fix below got a test first, observed
+red against `f2cef64`'s code, before the fix was written. **Base revision of the fixes:** `f2cef64`.
+
+| # | Finding | Failure scenario | Control |
+|---|---|---|---|
+| R1 | The "oversized login never reaches `check_password`" test patched `app.auth.check_password`, a name the router does not use (it imports the function directly) | A version that hashes first and refuses late passes the test: the acceptance criterion "überlange Requests werden vor KDF/DB-Arbeit abgewiesen" rested on a pseudo-proof | The test patches the name the router calls (`app.routers.auth.check_password`) **and** the database entry points the handler would reach (`get_db`'s connection is never opened); observed red against a router that checks the length after hashing |
+| R2 | During the 7-day soak a new or changed password of **72 bytes or more** was stored as a truncated bcrypt hash | Bob registers `x*72 + "-real"` on day 2; `x*72 + "-guess"` logs in as Bob — the 72-byte alias, created new by this change; a user told to change a long password who picks another long one is flagged again and locked out after Switch 2 | While the soak writer is active, a new password of 72 bytes or more is refused with **422** before any work (`auth.new_password_problem`). bcrypt stores a shorter password without ambiguity, so the soak keeps its rollback property; from Switch 1 the limit is 1024 again. The plan's acceptance (no two passwords with the same 72-byte prefix are interchangeable) now holds in every phase |
+| R3 | A new password with a **NUL byte** was accepted and, during the soak, stored as bcrypt that `check_password` never accepts | The account cannot log in with the password it just set, and cannot change it | `password_problem(new=True)` refuses NUL (422) in every phase; passlib refused it before this change, so nothing that worked stops working |
+| R4 | The **operator reset** in `docs/operations.md` could not run: the script came through stdin (`python - <<PY`) and then called `input()`/`getpass` on the same, exhausted stdin; its test ran only a copy of the SQL; it always wrote Argon2id, also inside the soak | The recovery path the plan requires for refused ≥72-byte accounts fails with `EOFError` when the operator needs it | A module in the image, `python -m app.services.password_reset <account>`, reads the temporary password twice with `getpass` from the terminal, applies the same policy as a password change (including R2), hashes with `hash_for(phase)`, writes hash and `auth_version + 1` in one statement through `database.reset_password`, and records `auth.password.changed` with actor `operator`. The test calls that entry point |
+| R5 | `python -m app.auth` timed one Argon2id verification, but every login also does a cost-12 bcrypt check (stored or dummy) — about 3× the printed number | The operator's pre-Switch-1 check passes on a host where a login costs far more than the budget | `measure()` times a whole failed `check_password` (both prepared dummies, unknown account) as well as each part, and compares against two documented budgets: **Argon2id ≤ 250 ms per verification** (the parameter choice, unchanged) and **≤ 500 ms per login** until the contract step removes bcrypt (new: there was no per-login figure before) |
+
+**Red before the fix** (all on 2026-11-25, against `f2cef64`'s production code):
+
+- R1: the corrected `test_an_oversized_login_is_refused_before_any_hash_or_query` was run against a
+  mutation that validates late (no byte rule on `UserLogin`, a length check in the router *after*
+  `check_password`): **red** (`AssertionError: password work ran for an oversized password`). The old
+  test, against the same mutation: **passed** — confirming it proved nothing. Against the real code the
+  new test is green: no SQL statement runs for an oversized login.
+- R2: `TestNoAliasDuringTheSoak` (real 7-day soak) — register / change with `x*72 + suffix`: **red**
+  (`assert 201 == 422`, `assert 200 == 422`). The 71-byte case, the post-soak case and the
+  "way out with a shorter password" case were green already and pin that the fix does not overreach.
+- R3: `TestNulInANewPassword`: **red** (`assert 201 == 422`; the policy returned None).
+- R4: `TestTheOperatorResetEntryPoint`: **red** (`ImportError: cannot import name 'password_reset'`; the
+  runbook still had `python - <<'PY'`). It replaces `TestTheOperatorReset`, which ran only a copy of the
+  SQL.
+- R5: `TestTheMeasurement`: **red** (`measure()` never called `check_password`; no per-login figure).
+- After the fixes, `python -m app.auth` on the development host (Apple M5) prints: Argon2id verify
+  78.5 ms (budget 250), bcrypt cost-12 check 172.7 ms, **per login 247.8 ms (budget 500) — within
+  budget**. The deploy host is still unmeasured (deferred).
+- `ops/surfaces/openapi.json`: only the description of the two new-password fields moved (it now names
+  the NUL rule and the soak's 72-byte limit). The SPA's German message for a 422 names the whole rule;
+  the two older views show the server's sentence.
+
+Minor, documented, not coded: lowering `ARGON2_TIME_COST` **after** Switch 1 makes an account whose hash
+is still at the old parameters measurably slower to refuse than an unknown one (a hash-age timing oracle)
+until it logs in once. The runbook now makes it a rule: change the parameters only before Switch 1, when no
+Argon2id hash exists yet; a later change is recorded here and in the threat model as a residual until every
+hash is rehashed or reset.
+
+Units touched by the fixes: `be/leaves` (`auth.py`), `be/routers` (`routers/auth.py`), `be/adapters/db`
+(`database.py`: `reset_password`), `be/services` (`services/password_reset.py`, new — added to the unit's
+paths in `architecture.toml`, which needs owner approval, `RISK-GOV-001`), `fe/shared` (message text),
+`docs`, `tests`. Public surfaces: the REST bodies are unchanged (the soak refusal is a 422 in FastAPI's own
+validation shape, which the OpenAPI document already declares); MCP, DB schema, env vars, SPA unchanged.
+
 ## Deferred, with triggers
 
 | Step | Trigger / date | Owner |
 |---|---|---|
-| Measure Argon2id on the deploy host (`docker compose exec backend python -m app.auth`), lower `ARGON2_TIME_COST` if over 250 ms | after the first deploy, before Switch 1 (first boot + 7 days) | operator |
+| Measure on the deploy host (`docker compose exec backend python -m app.auth`), lower `ARGON2_TIME_COST` if Argon2id is over 250 ms or a login over 500 ms | after the first deploy, before Switch 1 (first boot + 7 days) | operator |
 | Post-deploy check with a synthetic account: 7-byte password 422, 20 KB login 413, after Switch 1 its hash starts `$argon2id$` | first deploy; again after day 7 | maintainer |
 | Tell the accounts listed by the "who must change a long password" query (`docs/operations.md`) | from Switch 1 until Switch 2 (first boot + 67 days) | operator |
-| Operator reset for accounts refused after Switch 2 | on request, after out-of-band confirmation | operator |
+| Operator reset (`python -m app.services.password_reset <account>`) for accounts refused after Switch 2 | on request, after out-of-band confirmation | operator |
 | Contract: remove bcrypt verification, the dummy, the soak writer, `password_kdf_expand_at` and the `bcrypt` dependency | no `$2…` hash left in `users` and day 67 passed; before 2027-04-30 (`SHIM-SEC-009`) | maintainer |
 | nginx limit observed on the real proxy and the TLS terminator (only the text is tested here) | first deploy | operator |
 | Login budget before KDF work (REV-003), uniform limits on other fields (`RISK-SEC-004`), the 422 surrogate/echo issue | M3.2, M8 | maintainer |
-| Owner sign-off on `SHIM-SEC-009` and the ledger edits — written by the implementing agent (`RISK-GOV-001`) | before merge | maintainer |
+| Owner sign-off on `SHIM-SEC-009`, the ledger edits and the `architecture.toml` path for `services/password_reset.py` — written by the implementing agent (`RISK-GOV-001`) | before merge | maintainer |

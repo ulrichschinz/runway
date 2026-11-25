@@ -157,7 +157,7 @@ id = "be/services"
 scope = "backend"
 layer = 2
 owner = "maintainer"
-paths = ["backend/app/services/task_service.py", "backend/app/services/user_service.py", "backend/app/services/storage_migration.py", "backend/app/services/__init__.py"]
+paths = ["backend/app/services/task_service.py", "backend/app/services/user_service.py", "backend/app/services/storage_migration.py", "backend/app/services/password_reset.py", "backend/app/services/__init__.py"]
 
 [[units]]
 id = "be/adapters/db"

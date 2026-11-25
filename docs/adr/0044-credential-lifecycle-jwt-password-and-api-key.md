@@ -119,7 +119,7 @@ response time said whether it existed), and a NUL byte made passlib raise — a 
 Decision gate D2 of the plan: **Argon2id with measured server parameters and rehash-on-login.**
 
 1. **Policy in UTF-8 bytes.** Every password field at most 1024 bytes; a password being set at least
-   8. A login has no minimum, so a password set before the rule still logs in. Pydantic refuses
+   8 and no NUL character. A login has no minimum, so a password set before the rule still logs in. Pydantic refuses
    outside the rule with 422 while parsing, before any hash or query; the OpenAPI document declares
    `maxLength: 1024` (a true bound in characters) and the byte rule in the description.
 2. **Body limit** in the backend, outside every route: 16 KiB on `/auth/*`, 1 MiB elsewhere (nginx's
@@ -127,9 +127,11 @@ Decision gate D2 of the plan: **Argon2id with measured server parameters and reh
    read and as soon as a chunked one passes the limit; nginx gets the 16 KiB on `/api/auth/` too.
 3. **Argon2id** via argon2-cffi used directly; passlib is removed. Parameters: t=3, m=64 MiB, p=1,
    measured on 2026-11-24 at 75 ms per verification on the development host against a budget of
-   250 ms and 64 MiB on the deploy host. Logins verify on the event loop one at a time, so the
-   memory budget is also the peak. The deploy host was not measured; `python -m app.auth` does it
-   there, before Switch 1. Tests run reduced parameters, marked test-only in `conftest.py`; one test
+   250 ms and 64 MiB per verification and **500 ms per login** (the Argon2id verification plus the
+   cost-12 bcrypt check every login does until the contract) on the deploy host. Logins verify on the event loop one at a time, so the
+   memory budget is also the peak. The deploy host was not measured; `python -m app.auth` measures
+   both figures there, before Switch 1. Parameters change only before Switch 1: after it, hashes at
+   old parameters make a not-yet-rehashed account distinguishable by timing. Tests run reduced parameters, marked test-only in `conftest.py`; one test
    runs the production ones.
 4. **Legacy bcrypt** is verified by the bcrypt package directly, with the 72-byte truncation explicit,
    against vectors passlib itself produced. An **exact** match — input of 71 bytes or fewer without a
@@ -138,7 +140,8 @@ Decision gate D2 of the plan: **Argon2id with measured server parameters and reh
    ambiguous**: the hash cannot tell the real password from its prefix plus anything, so the typed
    value never becomes the new hash. During a window the login succeeds and the `Token` says
    `password_change_required: true`; both UIs send the person to set a new password; after the window
-   it is refused and the operator reset in `docs/operations.md` is the recovery path.
+   it is refused and the operator reset (`python -m app.services.password_reset <account>`,
+   `docs/operations.md`) is the recovery path.
 5. **No existence or scheme oracle.** Every login runs one Argon2id verification and one bcrypt check
    at cost 12, against a dummy where the account has no hash of that kind; every failure is the same
    401. Equal work, not a constant-time proof: the success path (rehash) differs, and only for
@@ -148,7 +151,9 @@ Decision gate D2 of the plan: **Argon2id with measured server parameters and reh
 written once; missing fails closed to Argon2id and no ambiguous login):
 
 - *Expand (first boot):* both schemes verified; policy, limits and uniform work at once; **new hashes
-  still bcrypt for 7 days**, so the previous image can verify every hash if this one is rolled back.
+  still bcrypt for 7 days**, so the previous image can verify every hash if this one is rolled back;
+  in that week a new password must be **shorter than 72 bytes** (422 otherwise), so bcrypt stores it
+  whole and the 72-byte alias is never created new (brief 0067, review fix R2).
 - *Switch 1 (+7 days):* new hashes Argon2id; rehash-on-login.
 - *Switch 2 (+67 days):* the ambiguous case refused.
 - *Contract (deferred, its own change):* remove bcrypt, the dummy, the row and the dependency once no
