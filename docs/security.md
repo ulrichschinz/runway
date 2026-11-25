@@ -120,6 +120,22 @@ requires an admin, so there is no route back through the API, and recovery means
 The check is on the admin *count*, not on self-demotion — demoting someone else is just as
 final when they are the only one left.
 
+**It holds under concurrency** (REV-002, [brief 0068](briefs/0068-the-last-admin-survives-concurrent-writes.md)).
+Until November 2026 the count was read in autocommit and the role written by a separate statement, so
+two admins demoting each other at the same moment both read "two admins" and both succeeded — zero
+admins, the state the guard exists to prevent. Every write that can remove an admin now runs inside
+`database.admin_preserving_write`: one transaction on the request's own connection, opened with
+`BEGIN IMMEDIATE` so SQLite's write lock is held **before** anything is read, and the invariant is
+checked **after** the write — if the instance had an admin when the transaction began and has none at
+its end, the whole transaction is rolled back and the route answers 409. A second writer waits for the
+lock (up to SQLite's 5 s busy timeout; past it the request fails with 500, never with a silent wrong
+answer). The paths held to it: `PUT /admin/users/{target}/role`, account deletion (`delete_account`,
+today only the rollback of a registration whose store could not be provisioned), and
+`./run grant-admin --role user`. A future bulk operation gets the same guarantee by running inside the
+same guard; the post-write check does not need to know what the statements were. An instance with no
+admin at all is not blocked — there is nothing to protect until the bootstrap or the escape hatch
+creates one.
+
 The two mechanisms compose: the guard makes zero admins unreachable through the API, and the
 bootstrap recovers an instance that reaches zero some other way.
 
@@ -129,9 +145,11 @@ bootstrap recovers an instance that reaches zero some other way.
 ./run grant-admin --db /path/to/users.db <username>
 ```
 
-Promotes an account directly, bypassing the API and its last-admin guard. `--db` has no
+Promotes an account directly, bypassing the API. `--db` has no
 default on purpose: this writes to a live database, and the path should be a deliberate
-keystroke rather than an inherited one.
+keystroke rather than an inherited one. It does **not** bypass the last-admin invariant:
+`--role user` on the only admin is refused (exit 1) in the same serialised transaction the API
+uses, so it cannot race a request either.
 
 Use it when an instance has no admin and restarting with `BOOTSTRAP_ADMIN` set is not
 practical.

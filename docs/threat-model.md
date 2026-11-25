@@ -68,10 +68,16 @@ a screenful of 403s rather than access. `RISK-SEC-001`.
 **Nobody can lock the instance out of administration.** `bootstrap_admin` at
 [`backend/app/database.py:158-197`](../backend/app/database.py) promotes `BOOTSTRAP_ADMIN` **only
 when the database contains no admin at all**, so it cannot contradict a decision made through the
-API; and the last-admin guard at
-[`backend/app/routers/admin.py:100-119`](../backend/app/routers/admin.py) answers `409` rather than
-removing the final administrator. [ADR 0017](adr/0017-admin-bootstrap-and-route-guards.md) records
-both.
+API; and the last-admin guard answers `409` rather than removing the final administrator.
+[ADR 0017](adr/0017-admin-bootstrap-and-route-guards.md) records both. The guard is
+`database.admin_preserving_write` at [`backend/app/database.py`](../backend/app/database.py): one
+`BEGIN IMMEDIATE` transaction with the admin count checked **after** the write, so two concurrent
+demotions cannot both pass it (REV-002, closed by
+[brief 0068](briefs/0068-the-last-admin-survives-concurrent-writes.md)); the role route, account
+deletion and `./run grant-admin --role user` all run through it, and a parallel two-connection test
+with a barrier (`backend/tests/unit/test_last_admin_concurrency.py`) runs on every gate. It holds for
+every writer of the same `users.db` on one host; it relies on SQLite file locking, so a database on a
+filesystem without working locks would void it (not a supported deployment).
 
 **Enforced**
 - `RULE-SEC-001` — every route in [`backend/app/routers/`](../backend/app/routers) declares its guard
