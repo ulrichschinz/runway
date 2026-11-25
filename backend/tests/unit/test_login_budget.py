@@ -657,6 +657,104 @@ class TestAnUndeclaredProxyIsNotOneSourceForEveryone:
         assert rate_limit.source_of("172.18.0.9", [], trusted) == "172.18.0.9"
 
 
+class TestAProxyThatMovedIsNotOneSourceForEveryone:
+    """R9: TRUSTED_PROXIES lists container addresses, and a recreated container can come back
+    at another one. nginx at an address nobody declared then made every client one source."""
+
+    TRAEFIK, NGINX_DECLARED, NGINX_NOW = "172.18.0.2", "172.18.0.7", "172.18.0.8"
+
+    def _trusted(self):
+        return rate_limit.trusted_networks(f"{self.TRAEFIK},{self.NGINX_DECLARED}")
+
+    def test_a_recreated_nginx_does_not_lock_out_a_bystander(
+        self, client, registered, monkeypatch: pytest.MonkeyPatch
+    ):
+        from app.main import app
+
+        monkeypatch.setattr(settings, "trusted_proxies", f"{self.TRAEFIK},{self.NGINX_DECLARED}")
+        spray = {"X-Forwarded-For": f"198.51.100.1, {self.TRAEFIK}"}
+        for i in range(settings.login_source_rate_limit + 5):
+            _post(
+                app,
+                {"username": f"spray{i}", "password": WRONG},
+                peer=self.NGINX_NOW,
+                headers=spray,
+            )
+        right = {"username": registered["username"], "password": registered["password"]}
+        bystander = {"X-Forwarded-For": f"203.0.113.50, {self.TRAEFIK}"}
+        assert _post(app, right, peer=self.NGINX_NOW, headers=bystander).status_code == 200
+
+    def test_a_moved_proxy_has_no_source_key(self):
+        chain = [f"198.51.100.1, {self.TRAEFIK}"]
+        assert rate_limit.source_of(self.NGINX_NOW, chain, self._trusted()) is None
+
+    def test_the_declared_proxy_still_yields_the_client(self):
+        chain = [f"198.51.100.1, {self.TRAEFIK}"]
+        assert rate_limit.source_of(self.NGINX_DECLARED, chain, self._trusted()) == "198.51.100.1"
+
+    def test_a_public_peer_sending_the_header_is_still_counted(self):
+        """Only a proxy-shaped peer can be a moved proxy; a public one is a client that wrote
+        the header itself and is counted as itself, whatever it claims."""
+        assert rate_limit.source_of("203.0.113.5", ["192.0.2.1"], self._trusted()) == "203.0.113.5"
+
+    def test_the_drift_is_logged_once_per_window_without_the_address(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        seen: list[tuple] = []
+        monkeypatch.setattr(
+            rate_limit.logger, "warning", lambda msg, *a, **k: seen.append((msg, a, k))
+        )
+        chain = [f"198.51.100.1, {self.TRAEFIK}"]
+        for _ in range(5):
+            rate_limit.source_of(self.NGINX_NOW, chain, self._trusted())
+        assert len(seen) == 1
+        assert self.NGINX_NOW not in repr(seen) and "198.51.100.1" not in repr(seen)
+
+
+class TestASuccessClearsOnlyItsOwnSpelling:
+    """R10: `Alice` and `alice` can be two accounts (registration requires NFC, the column is
+    case-sensitive) but share one account budget. A success on one must not wipe the
+    failures collected against the other."""
+
+    def test_another_spelling_cannot_wipe_the_count(self):
+        limit = settings.login_rate_limit
+        for _ in range(limit - 1):
+            rate_limit.reserve("Alice", "192.0.2.1").reservation.fail()
+        rate_limit.reserve("alice", "192.0.2.2").reservation.succeed()
+        tenth = rate_limit.reserve("Alice", "192.0.2.3")
+        assert tenth.reservation is not None
+        tenth.reservation.fail()
+        eleventh = rate_limit.reserve("Alice", "192.0.2.4")
+        assert eleventh.reservation is None and eleventh.tier == "account"
+
+    def test_the_same_spelling_still_clears_its_own_failures(self):
+        for _ in range(settings.login_rate_limit - 1):
+            rate_limit.reserve("Alice", "192.0.2.1").reservation.fail()
+        rate_limit.reserve("Alice", "192.0.2.1").reservation.succeed()
+        for _ in range(settings.login_rate_limit):
+            rate_limit.reserve("Alice", "192.0.2.1").reservation.fail()
+        assert rate_limit.reserve("Alice", "192.0.2.1").reservation is None
+
+    def test_a_second_account_cannot_reset_the_victims_budget(self, client):
+        from app.main import app
+        from tests.conftest import register_user
+
+        victim = register_user(client, "Alice")
+        own = register_user(client, "alice")
+        rate_limit.reset_all()
+        mine = {"username": "alice", "password": own["password"]}
+        guesses = 0
+        for round_ in range(5):
+            for i in range(settings.login_rate_limit - 1):
+                r = _post(
+                    app, {"username": "Alice", "password": WRONG}, peer=f"198.51.{round_}.{i}"
+                )
+                guesses += r.status_code == 401
+            _post(app, mine, peer=f"198.51.{round_}.200")
+        assert guesses <= settings.login_rate_limit
+        assert victim["username"] == "Alice"
+
+
 class TestTheSingleWorkerPinIsWholeFile:
     """R3: uvicorn takes its worker count from WEB_CONCURRENCY too, and an ENTRYPOINT or a
     gunicorn wrapper would replace the CMD. The trigger reads the whole Dockerfile."""

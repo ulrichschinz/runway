@@ -157,6 +157,34 @@ in either order. The *Delivery Pattern* row's "at least as safely" holds for con
 availability the previous deploy had no cross-account lockout at all, and this one has the global brake —
 stated, not hidden.
 
+### Second review round (2026-11-25)
+
+Two findings, both checked against the code of `7a654b8` before anything was changed. Both are real.
+
+| Finding | Verified | Fix | Red before the fix |
+|---|---|---|---|
+| R9 (important): once `TRUSTED_PROXIES` is set, a proxy-shaped peer that is **not** on the list counted as a source in its own right. The documented procedure lists the Traefik and nginx container addresses, which can change on recreate — and every merge recreates the frontend. nginx back at a new address made every client one source of 30: any one client locks every account out of password login, the R2 failure mode, silently (the boot warning fires only when the list is empty) | reproduced: `source_of("172.18.0.8", ["198.51.100.1, 172.18.0.2"], <.2,.7>)` and the same with `203.0.113.9` both give `172.18.0.8`; `ops/deploy/docker-compose.yml` pins no address | **Fail safe on drift.** With `TRUSTED_PROXIES` set, a peer that is proxy-shaped, not trusted, and sends `X-Forwarded-For` gets no source key (`source_of` returns `None`), exactly like the undeclared-proxy case; the account and global tiers still apply. A proxy-shaped peer *without* the header is one local client and is still counted as itself. The backend logs a `WARNING` (`login request from an undeclared proxy`) at most once per window, without the address. `docs/operations.md` step 1 says what drift does and how to see it | `TestAProxyThatMovedIsNotOneSourceForEveryone::test_a_recreated_nginx_does_not_lock_out_a_bystander` (ASGI, 35 wrong logins through nginx at a new address, then a bystander) and `::test_a_moved_proxy_has_no_source_key` (pure rule), `::test_the_drift_is_logged_once_per_window_without_the_address` |
+| R10 (important): the account tier could be reset by a different account. The key is NFKC+casefold of the name and a success cleared the whole bucket, but registration only requires NFC and `users.username` is case-sensitive, so `Alice` and `alice` can both exist. The owner of `alice` logs in after every 9 guesses against `Alice` and wipes the count: 45 guesses per window instead of 10 | reproduced: `username_problem("Alice")` and `username_problem("alice")` both `None`; `Reservation._close` clears `bucket.failures` for whichever name succeeded | **A success clears only the failures recorded under its own exact name.** Each account-tier failure carries a 16-byte digest of the exact name it was attempted under (the lookup is `WHERE username = ?`, BINARY, so a success proves exactly that string); `succeed` removes those and leaves every other spelling's failures to expire. The tier still shares one budget across spellings | `TestASuccessClearsOnlyItsOwnSpelling::test_another_spelling_cannot_wipe_the_count` (limiter) and `::test_a_second_account_cannot_reset_the_victims_budget` (ASGI, `Alice` and `alice` both registered) |
+
+The red column of this round was observed on the working tree with the tests applied before the control
+(the code of `7a654b8`): 5 of the 8 new tests red — `test_a_recreated_nginx_does_not_lock_out_a_bystander`
+**`assert 429 == 200`**, `test_a_moved_proxy_has_no_source_key` **`'172.18.0.8' is None`**,
+`test_the_drift_is_logged_once_per_window_without_the_address` red by absence (`rate_limit.logger`),
+`test_another_spelling_cannot_wipe_the_count` (the 11th `Alice` attempt was granted),
+`test_a_second_account_cannot_reset_the_victims_budget` **`assert 45 <= 10`**; 3 regression pins green
+(the declared proxy still yields the client, a public peer with the header is counted as itself, the same
+spelling still clears its own failures). After the control: all green, with the existing suite
+(`test_login_budget.py`, `test_security_wave.py`, `test_audit.py`, `test_logging.py`,
+`test_password_kdf.py`: 268 passed). `test_once_proxies_are_declared_a_private_peer_is_counted` is kept
+unchanged: it sends no `X-Forwarded-For`, and a local peer without a forwarded chain is one client.
+Rollback: no stored data changed shape — the limiter is in memory; reverting restores the previous rule.
+
+Not done in this round, recorded under *Deferred*: refusing a **new registration** whose canonical key
+(NFKC + casefold) collides with an existing account. It would close the confusable-name class at its
+source, but it changes `POST /auth/register`'s behaviour (a 409/422 for names that register today), which
+is a public-surface change for its own brief; the limiter fix above does not depend on it. Existing
+colliding pairs on the host are an operator item (query in *Deferred*).
+
 ## Results
 
 - REV-003's closing criterion (plan §5: pre-reservation, parallel budget and bounded store tested) is met
@@ -204,5 +232,17 @@ stated, not hidden.
 - **Traefik's forwarded-header configuration** — confirm on the host that Traefik overwrites rather than
   forwards a client's `X-Forwarded-For`. Not visible here (`RISK-OPS-002`).
 - **A shared limiter** — only when `TestTheSingleWorkerAssumption` goes red (`RISK-SEC-003`).
+- **Canonical-collision refusal at registration** (second review round, R10) — refuse a new username
+  whose NFKC + casefold key equals an existing account's. A behaviour change of `POST /auth/register`
+  (the only caller of `username_problem`), so its own brief; the limiter no longer depends on it. Operator item until
+  then: list existing pairs on the host with
+  `sqlite3 users.db "SELECT lower(username), group_concat(username) FROM users GROUP BY lower(username) HAVING count(*) > 1;"`
+  (ASCII case only; a full NFKC check needs Python). Trigger: the next change to `username_problem`, or
+  any pair found.
+- **Pinning the proxy addresses** (second review round, R9, option 2) — a fixed `ipv4_address` for the
+  frontend on a fixed-subnet network, or resolving `TRUSTED_PROXIES` by service name. `traefik-public` is
+  an external network this repository does not define, so the subnet is a host fact (plan M0). Until
+  then, drift fails safe (source tier off, `WARNING`). Trigger: the first `undeclared proxy` warning in
+  the production log.
 - **Audit retention and size budget** — M8 (`RISK-OPS-006`); this change bounds the *rate* of login rows
   (≤ `LOGIN_GLOBAL_RATE_LIMIT` failed rows plus a few throttled rows per window), not the file's total size.

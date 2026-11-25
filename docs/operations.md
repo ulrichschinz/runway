@@ -815,7 +815,13 @@ address instead would have let any one client lock every account out with 30 wro
    and the runway frontend's (nginx). Container addresses on a user-defined network can change on recreate;
    if the network has a fixed subnet you may list the subnet instead, **but then every container on that
    network is trusted to write `X-Forwarded-For`** — only do that if nothing else on it accepts traffic you
-   do not control.
+   do not control. **When a listed address drifts** (every merge recreates the frontend), nginx arrives
+   from a private address that is not listed. The backend then does not count it as a source at all — the
+   source tier is off again, as with `TRUSTED_PROXIES` unset, and a spray is bounded by the account
+   budget and the global brake — and logs a `WARNING` `login request from an undeclared proxy` at most
+   once per window. Counting it would have made every client one budget of 30. After each deploy, check
+   the log for that line (`sudo docker compose logs backend | grep 'undeclared proxy'`); if it is there,
+   repeat this step with the new address.
 2. Add `TRUSTED_PROXIES=<traefik address>,<nginx address>` (or the subnet) to `/opt/services/runway/.env`.
    The deploy compose passes it through (`TRUSTED_PROXIES=${TRUSTED_PROXIES:-}`).
 3. `sudo docker compose up -d backend`, then check the boot line: `startup complete` carries

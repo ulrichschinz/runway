@@ -239,7 +239,10 @@ answers **429** with `Retry-After` when any of them is full:
   lock, so parallel requests cannot all pass a check that only counts finished failures. A refused
   attempt costs no lookup and no KDF work. Every reservation is closed once: a success releases it
   and clears the **account** tier only (so a valid account cannot refill the budget of the place a
-  spray comes from); a failure is counted; an exception or a cancelled request counts as a failure.
+  spray comes from), and there only the failures recorded under its **exact** name — `Alice` and
+  `alice` can be two accounts sharing one budget, and a success on one must not wipe the guesses
+  against the other (brief 0069, R10); a failure is counted; an exception or a cancelled request
+  counts as a failure.
 - **Bounded memory.** Failures expire after the window; a sweep on a clock drops every expired key,
   not only the one being tried. The account and source tiers hold at most `LOGIN_RATE_MAX_KEYS`
   keys; a new key beyond that is **refused**, never made room for by forgetting an old one — that
@@ -254,7 +257,11 @@ answers **429** with `Retry-After` when any of them is full:
   it is a proxy nobody declared, and counting its address would make every client behind it one
   budget that any one of them could exhaust for everyone. In the shipped topology that means the
   source tier is off until the operator sets `TRUSTED_PROXIES` (a boot `WARNING` says so), and a
-  spray is bounded by the global tier alone (`docs/operations.md`).
+  spray is bounded by the global tier alone (`docs/operations.md`). With `TRUSTED_PROXIES` set, a
+  proxy-shaped peer that is not listed but sends `X-Forwarded-For` gets no source key either: it is
+  a declared proxy that came back at another address after a recreate, and counting it would be the
+  same one-budget-for-everybody failure. The backend logs a `WARNING` (`login request from an
+  undeclared proxy`) at most once per window, without the address (brief 0069, R9).
 - **The global brake's size.** One failed verification (Argon2id + bcrypt) measured 0.26 s on the
   development machine, and it runs on the event loop. 300 failures per 300 s window is therefore
   about a quarter of the loop — enough to stop a spray before it degrades the service, high enough

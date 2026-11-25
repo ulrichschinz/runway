@@ -16,13 +16,19 @@ cancelled request — as a failure. A refused attempt costs no lookup and no KDF
 
 - *account* — the attempted name, NFKC-normalised and casefolded, so spelling variants share
   one budget. Someone who knows a username can deny it password login for the window; that
-  trade is unchanged since SEC-8 and stated in docs/security.md. A success clears this tier only.
+  trade is unchanged since SEC-8 and stated in docs/security.md. A success clears this tier only,
+  and only the failures recorded under its own exact name: `Alice` and `alice` can be two accounts
+  (the column is case-sensitive) that share one budget, and one must not wipe the other's count
+  (review R10).
 - *source* — the network address `source_of` decides: the socket peer, or, behind a proxy listed
   in `TRUSTED_PROXIES`, the right-most hop of `X-Forwarded-For` that is not a trusted proxy.
   Stops a password spray across many names from one place. IPv6 is grouped by /64. With
   `TRUSTED_PROXIES` empty, a proxy-shaped peer (loopback, RFC 1918, link-local, IPv6 ULA) gets
   no source key at all: it is almost certainly a proxy nobody declared, and counting it would
-  put every client behind it into one budget any one of them could exhaust (review R2).
+  put every client behind it into one budget any one of them could exhaust (review R2). With
+  `TRUSTED_PROXIES` set, a proxy-shaped peer that is not listed but sends `X-Forwarded-For` is a
+  proxy that moved (a recreated container) and gets no source key either, with a WARNING at most
+  once per window (review R9).
 - *global* — one key: the emergency brake on the KDF work failed verifications cause, sized
   from the measured cost of one (docs/security.md), against a spray from everywhere.
 
@@ -55,6 +61,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import threading
 import time
 import unicodedata
@@ -77,12 +84,16 @@ UNKNOWN_SOURCE = "unknown"
 UNPARSEABLE_SOURCE = "unparseable"
 
 _GLOBAL_KEY = "*"
+# A failure recorded outside the account tier carries no name.
+_NO_NAME = b""
 # A report names the account as it was first attempted; a 16 KiB name is not kept whole.
 _LABEL_MAX = 64
 # How often a full sweep runs at most, on top of the sweep a full tier triggers.
 _SWEEP_EVERY = 60.0
 
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> float:
@@ -94,7 +105,9 @@ def _now() -> float:
 
 @dataclass
 class _Bucket:
-    failures: deque[float] = field(default_factory=deque)
+    # (when, digest of the exact name) per failure, oldest first; the name only in the account
+    # tier, so a success can clear the failures of its own spelling and no other (R10).
+    failures: deque[tuple[float, bytes]] = field(default_factory=deque)
     pending: int = 0
     unreported: int = 0  # refusals not yet carried by a report
     reported_at: float | None = None
@@ -142,13 +155,15 @@ class Reservation:
     """One login attempt's slot in every tier. Close it exactly once; a second close is a
     no-op. Used as a context manager, leaving the block without closing it is a failure."""
 
-    def __init__(self, keys: dict[str, object]) -> None:  # a tier left out is not counted
-        self._keys = keys
+    def __init__(self, keys: dict[str, object], name: bytes = _NO_NAME) -> None:
+        self._keys = keys  # a tier left out is not counted
+        self._name = name  # exact_name_digest of the name attempted
         self._open = True
 
     def succeed(self) -> None:
-        """Proving the password releases the slot and clears the account's failures — but not
-        the source's or the global ones, or a valid account would refill a spray's budget."""
+        """Proving the password releases the slot and clears the account's failures recorded
+        under this exact name — not another spelling's, which may be another account (R10), and
+        not the source's or the global ones, or a valid account would refill a spray's budget."""
         self._close(failed=False)
 
     def fail(self) -> None:
@@ -166,9 +181,9 @@ class Reservation:
                     continue
                 bucket.pending = max(0, bucket.pending - 1)
                 if failed:
-                    bucket.failures.append(now)
+                    bucket.failures.append((now, self._name if tier == ACCOUNT else _NO_NAME))
                 elif tier == ACCOUNT:
-                    bucket.failures.clear()
+                    bucket.failures = deque(f for f in bucket.failures if f[1] != self._name)
 
     def __enter__(self) -> Reservation:
         return self
@@ -193,7 +208,7 @@ def _limit(tier: str) -> int:
 
 
 def _prune(bucket: _Bucket, now: float, window: float) -> None:
-    while bucket.failures and now - bucket.failures[0] >= window:
+    while bucket.failures and now - bucket.failures[0][0] >= window:
         bucket.failures.popleft()
 
 
@@ -225,7 +240,7 @@ def _retry_after(bucket: _Bucket, limit: int, now: float, window: float) -> int:
     excess = len(bucket.failures) + bucket.pending - limit + 1
     if excess <= 0 or excess > len(bucket.failures):
         return 1  # held by attempts in flight, which close within a request's lifetime
-    expires = bucket.failures[excess - 1] + window
+    expires = bucket.failures[excess - 1][0] + window
     return max(1, int(expires - now) + 1)
 
 
@@ -244,6 +259,11 @@ def account_key(username: str) -> bytes:
     """The account tier's key: spelling variants of one name are one key, of fixed size."""
     canonical = unicodedata.normalize("NFKC", username).casefold()
     return hashlib.blake2b(canonical.encode("utf-8", "surrogatepass"), digest_size=16).digest()
+
+
+def exact_name_digest(username: str) -> bytes:
+    """The exact name, as the account lookup compares it (BINARY): what a success proved."""
+    return hashlib.blake2b(username.encode("utf-8", "surrogatepass"), digest_size=16).digest()
 
 
 def reserve(username: str, source: str | None) -> Decision:
@@ -298,7 +318,7 @@ def reserve(username: str, source: str | None) -> Decision:
                 if tier == ACCOUNT:
                     bucket.label = username[:_LABEL_MAX]
             bucket.pending += 1
-        return Decision(Reservation(keys), None, 0, tuple(reports))
+        return Decision(Reservation(keys, exact_name_digest(username)), None, 0, tuple(reports))
 
 
 def key_count(tier: str | None = None) -> int:
@@ -312,8 +332,9 @@ def key_count(tier: str | None = None) -> int:
 def reset_all() -> None:
     """Test seam. Module state outlives a TestClient, so a suite that logs in repeatedly
     would otherwise trip the limiter in whichever test happened to run tenth."""
-    global _last_sweep, _swept
+    global _last_sweep, _swept, _drift_warned_at
     with _lock:
+        _drift_warned_at = None
         for buckets in _store.values():
             buckets.clear()
         _capacity.clear()
@@ -390,6 +411,28 @@ def proxy_shaped(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool
     return _is_trusted(address, _PROXY_SHAPED)
 
 
+_drift_warned_at: float | None = None
+
+
+def _warn_undeclared_proxy() -> None:
+    """R9: a proxy moved off its declared address. Said at most once per window, and without
+    the address: the operator needs to know it happens, not who it was."""
+    global _drift_warned_at
+    with _lock:
+        now = _now()
+        if (
+            _drift_warned_at is not None
+            and now - _drift_warned_at < settings.login_rate_window_seconds
+        ):
+            return
+        _drift_warned_at = now
+    logger.warning(
+        "login request from an undeclared proxy: a private peer not in TRUSTED_PROXIES sent "
+        "X-Forwarded-For, so the login source budget does not apply to it; a proxy container "
+        "has probably moved (see docs/operations.md, The login budget)"
+    )
+
+
 def _is_trusted(
     address: ipaddress.IPv4Address | ipaddress.IPv6Address, trusted: Iterable[Network]
 ) -> bool:
@@ -407,7 +450,9 @@ def source_of(
     chain, in order.
 
     With no trusted proxy configured, a proxy-shaped peer yields None: it is a proxy nobody has
-    declared, and its address would make every client behind it one budget (review R2).
+    declared, and its address would make every client behind it one budget (review R2). With
+    trusted proxies configured, a proxy-shaped peer that is not one of them but forwards a chain
+    is a declared proxy that came back at another address (review R9): None too, and a warning.
     """
     if peer is None:
         return UNKNOWN_SOURCE
@@ -416,9 +461,12 @@ def source_of(
         return UNPARSEABLE_SOURCE
     if not trusted:
         return None if proxy_shaped(current) else _key_of(current)
-    if not _is_trusted(current, trusted):
-        return _key_of(current)
     hops = [hop for line in forwarded_for for hop in line.split(",") if hop.strip()]
+    if not _is_trusted(current, trusted):
+        if hops and proxy_shaped(current):
+            _warn_undeclared_proxy()
+            return None
+        return _key_of(current)
     for hop in reversed(hops):
         address = _address(hop)
         if address is None:
