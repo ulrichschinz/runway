@@ -24,7 +24,6 @@ from fastapi.testclient import TestClient
 
 from app.auth import create_access_token, hash_password, legacy_bcrypt_hash
 from app.config import settings
-from app.database import generate_api_key
 from app.logging_setup import (
     REDACTION_MARKER,
     REQUEST_ID_HEADER,
@@ -35,6 +34,16 @@ from app.logging_setup import (
     resolve_level,
 )
 from app.middleware import REQUEST_ID_LENGTH
+
+
+def generate_api_key() -> str:
+    """A key in the previous image's cleartext shape (`secrets.token_urlsafe(32)`). The
+    application mints none any more (brief 0070); the shape is still redacted and still has to
+    be — a log line is read long after it is written, and old backups hold such keys."""
+    import secrets
+
+    return secrets.token_urlsafe(32)
+
 
 BACKEND = Path(__file__).resolve().parents[2]
 

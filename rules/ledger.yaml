@@ -602,6 +602,11 @@ rules:
       is public, so a committed credential is disclosed the moment it is pushed and rotation
       is the only remedy — the cheapest moment to catch it is before the push.
 
+      Extended 2026-11-25 (brief 0070, ADR 0044 Decision 6) to this application's own API keys,
+      `rwk_<16 hex>_<43-character secret>`: a real key pasted into a test or an example is a
+      working credential in a public repository. Proved by the `DEP-003-apikey` arm, which
+      commits one built at run time; the scan before this change passed it.
+
   - id: RULE-DEP-004
     statement: >
       Every base image MUST be pinned by digest, Arch packages MUST come from a dated archive
@@ -980,8 +985,13 @@ residual_risks:
       two-part control and it is bounded in the mirror image of the first. It removes a value
       by the field name it arrives under, and by the shapes it has been taught — a JWT, a
       bcrypt hash, an Argon2id PHC string (added with brief 0067, when that format was
-      introduced), the 43-character token_urlsafe(32) an API key is, and the resolved
-      JWT_SECRET matched literally. It is therefore blind to a credential that has neither: a
+      introduced), an API key in the hashed-key format `rwk_<16 hex>_<secret>` (added with
+      brief 0070, when that format was introduced), the 43-character token_urlsafe(32) a legacy
+      API key is, and the resolved JWT_SECRET matched literally. The SHA-256 an API key is stored
+      as has no distinctive shape — 64 hex characters are also every digest this application
+      handles — so it is kept out of the stream by never being logged, by its name (`secret_hash`;
+      `secret` is in both vocabularies, proved by the `OPS-002-apikey-hash` arm) and by the
+      acceptance search in test_api_keys.py, not by this filter. It is therefore blind to a credential that has neither: a
       user's password is an arbitrary string under an arbitrary name, so `logger.info("got",
       extra={"detail": password})` survives the filter and is caught only by RULE-OPS-002 at
       the call site — and only while the name says what it is. A credential minted by some
@@ -1053,6 +1063,13 @@ residual_risks:
       sides of the comparison are generated the same way. The practical exposure is small —
       api_key is secrets.token_urlsafe(32), so a collision is not a real event — but the
       snapshot is relied on as a description of production and on this point it is wrong.
+
+      Brief 0070 (2026-11-25) kept the drift from spreading: API keys moved to a new table,
+      `api_keys`, created by the same CREATE TABLE IF NOT EXISTS on both paths, and
+      test_api_keys.py generates a fresh and an upgraded database and compares that table's
+      schema. The legacy lookup does not assume `users.api_key` was unique — a hash that two
+      rows carry is refused. `users.api_key` itself, and so this drift, goes with the M4
+      contract step (a versioned table rebuild), after the legacy cutoff of 2027-01-15.
     owner: maintainer
     re_open_trigger: "a migrations/ directory with a version table exists, or a second column diverges between the created and migrated schemas, or a uniqueness assumption is written against api_key"
     decision_record: docs/adr/0025-narrowing-the-migration-except.md

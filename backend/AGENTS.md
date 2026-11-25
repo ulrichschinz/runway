@@ -62,3 +62,9 @@ Coverage floor is a ratchet, not a target — raise it, never lower it to fit a 
   point (brief 0069). A wrong `current_password` in `PUT /auth/password` spends the same budget.
   An `httpx.ASGITransport` peer of `127.0.0.1` or a private address with `TRUSTED_PROXIES` empty
   has no source tier at all; use a documentation address (`203.0.113.x`) to exercise it.
+- **API keys are hashes and shown once** (brief 0070, ADR 0044 Decision 6). A new account has no key;
+  `tests/conftest.py::register_user` creates one through `POST /auth/apikeys` with the session, the
+  way the settings page does. Creating and revoking a key refuse an API key as the credential (403),
+  so a test that does either needs the JWT. A legacy (pre-2026-11) key exists only in a database
+  written in the old shape — `test_api_keys.py::_write_pre_m4_database` — and is refused once
+  `API_KEY_LEGACY_CUTOFF` is set to a past date; the setting may only move the date earlier.

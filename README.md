@@ -94,6 +94,14 @@ LOGIN_GLOBAL_RATE_LIMIT=300
 # one beyond that is refused with 429 rather than making room by forgetting another.
 LOGIN_RATE_MAX_KEYS=10000
 
+# The day (UTC, YYYY-MM-DD) from which an API key issued before keys were hashed (2026-11) is
+# refused — on every route, without a restart. It may move the cutoff EARLIER (for example once
+# every user has created a new key, or in an incident); a later or malformed value is ignored
+# with a startup WARNING and the default applies. Restart the backend once on or after that day:
+# that boot revokes every such key and removes its cleartext value from users.db. Both compose
+# files pass it through. See docs/operations.md, "API keys".
+API_KEY_LEGACY_CUTOFF=2027-01-15
+
 # Comma-separated addresses or CIDR networks of the proxies in front of the backend whose
 # X-Forwarded-For the login limiter believes (in the shipped setup: nginx and the TLS proxy in
 # front of it). Empty believes none: a public peer is then counted as itself, and a loopback
@@ -144,7 +152,7 @@ Register your first user at the login page (set `ALLOW_REGISTRATION=false` after
 | `./data/<storage_id>/` | Per-user Taskwarrior data (`taskchampion.sqlite3`). The directory is named by a random, immutable id stored in `users.storage_id` — never by the username (finding SEC-001, ADR 0043). |
 | `./data/<username>/` | The same, for an account created before that change and not yet migrated. Kept as the rollback source after migration until the contract step removes it. |
 | `./data/audit.db` | The audit log |
-| `./users.db` | Users, API keys, projects (SQLite) |
+| `./users.db` | Users, API-key hashes, projects (SQLite) |
 
 Both are bind-mounted and excluded from git. Back them up to retain all data. To move existing
 accounts to the storage-id layout, follow
@@ -164,8 +172,8 @@ Authorization: Bearer <token>
 **Changing the password ends every session.** `PUT /api/auth/password` revokes every JWT of the
 account issued before it, on every route and every MCP tool, and answers with a new one for the
 caller (`{"detail": …, "access_token": …, "token_type": "bearer"}`); a client that keeps using its
-old token gets `401`. API keys are not affected by a password change — rotate them with
-`POST /api/auth/apikey/regenerate` if they may be compromised.
+old token gets `401`. API keys are not affected by a password change — revoke them with
+`DELETE /api/auth/apikeys/{key_id}` (or in the settings page) if they may be compromised.
 
 **Passwords** are hashed with Argon2id and limited in **UTF-8 bytes**: a password being set
 (`POST /api/auth/register`, `PUT /api/auth/password`) is 8 to 1024 bytes and may not equal the
@@ -178,12 +186,32 @@ answers `"password_change_required": true` beside the token — set a new passwo
 after a transition window that login is refused. Every failed login is the same
 `401 Invalid credentials`, whether or not the account exists.
 
-**API key** — permanent, per-user, managed in the app settings:
+**API key** — per-user, created in the app settings, for agents and automations:
 ```
-X-Api-Key: <key>
+X-Api-Key: rwk_<key-id>_<secret>
 ```
 
-API keys are ideal for agents and automations. Each user can view and rotate their key via `GET /api/auth/apikey` and `POST /api/auth/apikey/regenerate`.
+Since 2026-11 a key is stored only as a SHA-256 hash and **shown once**, in the answer that creates
+it; nobody — not the server, not an admin — can show it again. A key has a public id (part of the
+key, and its prefix `rwk_<key-id>` is what the settings page shows), an optional label, an expiry
+(1–365 days, default 365) and can be revoked at any time; an account holds at most 10 active keys.
+
+| Route | What |
+|---|---|
+| `POST /api/auth/apikeys` | `{"label": "laptop agent", "expires_in_days": 90}` (both optional) → `201` with `api_key` — **the only time the key is returned**. Needs a signed-in session (`Authorization: Bearer <jwt>`); an API key gets `403`, so a stolen key cannot mint its own successor. `409` at 10 active keys. |
+| `GET /api/auth/apikeys` | The account's keys as metadata: `key_id`, `label`, `kind` (`issued` or `legacy`), `prefix`, `created_at`, `expires_at`, `revoked_at`, `last_used_at` (to the minute), `state` (`active`, `expired`, `revoked`). Never a key, never a hash. |
+| `DELETE /api/auth/apikeys/{key_id}` | Revoke: `204`, the key stops working at once. Needs a signed-in session. `404` for a key this account does not hold. |
+
+An unknown, expired or revoked key gets the same `401` (`Invalid API key` on `X-Api-Key`,
+`Not authenticated` in the Bearer slot).
+
+**Deprecated, until the contract step:** `GET /api/auth/apikey` returns a key issued before
+2026-11 (a 43-character one) until the legacy cutoff (`API_KEY_LEGACY_CUTOFF`, at the latest
+**2027-01-15**), and `""` after it and for every key created since. `POST /api/auth/apikey/regenerate`
+now ends **every** key of the account and returns one new key, once. Both answer with
+`Deprecation`, `Sunset` and `Link: rel="successor-version"` headers. **Keys from before 2026-11 stop
+working on 2027-01-15**: create a new key in the settings page before then and put it where the old
+one was (the Android app, `~/.zshenv`, your agents).
 
 ---
 

@@ -428,4 +428,53 @@ class ProjectOverview(BaseModel):
 
 
 class ApiKeyInfo(BaseModel):
+    """The deprecated shape of `GET /auth/apikey` and `POST /auth/apikey/regenerate`."""
+
     api_key: str
+
+
+# --- hashed API keys (WAIVER-SEC-003, ADR 0044 Decision 6, brief 0070) ------------------------
+
+API_KEY_MAX_DAYS = 365
+
+
+class ApiKeyCreate(BaseModel):
+    label: str = Field(
+        "",
+        max_length=64,
+        description="A name for the key, to tell several apart (for example `laptop agent`).",
+    )
+    expires_in_days: int = Field(
+        API_KEY_MAX_DAYS,
+        ge=1,
+        le=API_KEY_MAX_DAYS,
+        description="Days until the key stops working, 1 to 365.",
+    )
+
+
+class ApiKeyMetadata(BaseModel):
+    """What can be known about a key without holding it: never the secret, never its hash."""
+
+    key_id: str = Field(description="The key's public id; part of the key itself.")
+    label: str
+    kind: Literal["issued", "legacy"] = Field(
+        description="`legacy`: a key issued before keys were hashed, valid until the cutoff."
+    )
+    prefix: str = Field(
+        description="The key's public beginning, `rwk_<key_id>`, to recognise it; empty for a "
+        "legacy key, which has no public part."
+    )
+    created_at: str = Field(description="ISO 8601, UTC.")
+    expires_at: str | None = Field(description="ISO 8601, UTC.")
+    revoked_at: str | None = Field(description="ISO 8601, UTC; null while not revoked.")
+    last_used_at: str | None = Field(
+        description="ISO 8601, UTC, to the minute; null if never used."
+    )
+    state: Literal["active", "expired", "revoked"]
+
+
+class ApiKeyCreated(ApiKeyMetadata):
+    api_key: str = Field(
+        description="The key. Shown in this response only: it is stored as a hash and cannot "
+        "be retrieved again."
+    )

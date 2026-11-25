@@ -24,9 +24,16 @@ tasks and does not get one by being an admin.
 Two credentials reach the same principal, checked in this order by `get_current_user` in
 [`backend/app/dependencies.py`](../backend/app/dependencies.py):
 
-1. **`X-Api-Key`** — matched against the `api_key` column. Checked **first**, before any
-   token work, which is why rotating `JWT_SECRET` does not disturb agents, MCP clients or
-   automations, and why an account locked out of password login can still be used by them.
+1. **`X-Api-Key`** — looked up as a **hash** in the `api_keys` table (ADR 0044 Decision 6, brief
+   0070, `WAIVER-SEC-003`): a key `rwk_<key id>_<secret>` by its public id, its SHA-256 compared in
+   constant time; a key from before 2026-11 (43 characters) by its SHA-256, and only until the legacy
+   cutoff (`API_KEY_LEGACY_CUTOFF`, at the latest 2027-01-15). The `users.api_key` column is never
+   compared. Unknown, malformed, expired, revoked and post-cutoff legacy keys get one answer, `401
+   Invalid API key`. Checked **first**, before any token work, which is why rotating `JWT_SECRET`
+   does not disturb agents, MCP clients or automations, and why an account locked out of password
+   login can still be used by them. A key is shown once, by `POST /auth/apikeys`; creating and
+   revoking keys needs a signed-in session (a key gets 403), so a stolen key cannot mint its own
+   successor. `GET /auth/apikeys` lists metadata only.
 2. **`Authorization: Bearer <jwt>`** — signed with `JWT_SECRET`, `HS256`, 24h. A valid
    signature is not enough: the account the token names must still exist, or the request
    gets the same **401** as no credential at all, on every route. A token outlives the row
@@ -41,14 +48,24 @@ Two credentials reach the same principal, checked in this order by `get_current_
    version, is refused. The operator ends one account's sessions, or everyone's, with one
    `UPDATE` ([`docs/operations.md`](operations.md#ending-sessions)). For one JWT lifetime after
    the deploy, a token from the previous image (no `auth_version`) still counts as version 1:
-   `SHIM-SEC-008`. **API keys are not revoked by a password change** — they rotate separately
-   (`POST /auth/apikey/regenerate`); both settings pages say so before the change and point to it after.
+   `SHIM-SEC-008`. **API keys are not revoked by a password change** — they are revoked separately
+   (`DELETE /auth/apikeys/{key_id}`, or the deprecated `POST /auth/apikey/regenerate`, which ends
+   every key of the account); both settings pages say so before the change and point to it after.
 3. **`Authorization: Bearer <api_key>`** — an API key in the Bearer slot, tried last, only
    after a JWT decode fails. This is `SHIM-SEC-006`, not a design: it is the shape `/inbox`
    used before it was unified onto `get_current_user` (finding SEC-6), kept because every
    agent and MCP client sends it today. Recorded in
    [`rules/shims.yaml`](../rules/shims.yaml) with a removal step and an expiry, enforced by
    `RULE-SEC-002`.
+
+**What is stored, and where a key may appear** (brief 0070). The secret of a key exists in exactly
+one response — the `201` of `POST /auth/apikeys` (or of the deprecated `regenerate`) — and in the
+caller's hands; the server keeps its SHA-256, and no response, audit row or log line carries either.
+`RULE-DEP-003` refuses a committed `rwk_` key anywhere in the tree, `RULE-OPS-002` a key or its hash
+at a logging call, and the redaction filter removes the `rwk_` shape from every emitted line; each has
+a negative fixture arm that commits or logs one. Until the legacy cutoff the deprecated
+`GET /auth/apikey` is the one remaining place a (legacy) cleartext key leaves the server; it is
+`WAIVER-SEC-003`'s open part.
 
 `get_current_admin` builds on `get_current_user` and additionally requires `role = 'admin'`,
 returning **403** when the principal is authenticated but not an admin — distinct from the
@@ -294,8 +311,8 @@ account's password: `PUT /auth/password` verifies the current password through t
 a stolen key gets the account budget's ten guesses per window and nothing while the account is
 locked. The other side remains: a lockout does nothing against what a stolen API key can do with
 the key itself. Recovery after a suspected compromise must deal with **both** credentials — a
-password change ends every JWT session (brief 0066) but not the API key, which is regenerated
-separately (`docs/operations.md`).
+password change ends every JWT session (brief 0066) but not the API keys, which are revoked
+separately (`docs/operations.md`, *Ending API keys*).
 
 ## The Taskwarrior boundary
 

@@ -8,14 +8,17 @@
   `get_auth_version`, `change_password`), `backend/app/routers/auth.py` (login, password change),
   the settings pages of both UIs, `SHIM-SEC-008`; amended for Decision 5 by `backend/app/auth.py`
   (password policy, Argon2id, legacy bcrypt), `backend/app/models.py`, `backend/app/middleware.py`
-  (body limit), `frontend/nginx.conf`, `SHIM-SEC-009`
+  (body limit), `frontend/nginx.conf`, `SHIM-SEC-009`; amended for Decision 6 by the `api_keys`
+  table and its functions in `backend/app/database.py`, the key format beside it,
+  `backend/app/dependencies.py`, the `/auth/apikey*` routes, `API_KEY_LEGACY_CUTOFF`, the new UI's
+  settings page, `tools/checks/secret_scan.py`, `WAIVER-SEC-003`
 - **Brief:** [0066](../briefs/0066-a-password-change-ends-every-session.md); Decision 5:
-  [0067](../briefs/0067-passwords-are-hashed-with-argon2id.md) (amended 2026-11-24)
+  [0067](../briefs/0067-passwords-are-hashed-with-argon2id.md) (amended 2026-11-24); Decision 6:
+  [0070](../briefs/0070-api-keys-are-stored-as-hashes.md) (amended 2026-11-25)
 
 This record was written for milestone M2.1 of the security remediation plan (finding **REV-001**)
-and amended for M2.2 (finding **SEC-006**, Decision 5). The API-key lifecycle (M4,
-`WAIVER-SEC-003`) is a later decision of the same lifecycle and will be added as its own section
-when it is made; nothing below decides it.
+and amended for M2.2 (finding **SEC-006**, Decision 5) and for M4 (the API-key lifecycle,
+`WAIVER-SEC-003`, Decision 6).
 
 ## Context
 
@@ -176,6 +179,66 @@ login for those accounts), so the rollback target from then on is this image or 
 costs one Argon2id verification plus one cost-12 bcrypt check (about 250 ms on the development host)
 until the contract removes bcrypt. A lone surrogate in any JSON string field makes FastAPI's own 422
 renderer fail with 500 — pre-existing and not specific to passwords; recorded in brief 0067.
+
+## Decision 6 — API keys: a hash, a public id, shown once, ended by date (M4)
+
+*Added 2026-11-25, brief 0070.* An API key was `secrets.token_urlsafe(32)`, stored in `users.api_key` as
+the cleartext value that authenticates, permanent, and returned by `GET /auth/apikey` on demand: a copy
+of `users.db` or of any backup of it was a working credential for every account (`WAIVER-SEC-003`,
+Phase 0 SEC-5). Decision gate D4 of the plan: **a 256-bit secret, stored as a SHA-256 hash, behind a
+public random key id, with expiry and revocation.**
+
+1. **Format** `rwk_<key id>_<secret>`: a recognisable prefix (for secret scanning and redaction), a
+   public id of 16 hex characters (64 random bits), a secret of 43 URL-safe characters (256 random
+   bits), defined in `backend/app/database.py` beside the table. Stored: the SHA-256 of the whole string. No salt and no pepper — 256 bits make an offline
+   search pointless, and a pepper would be a new root secret on the same host as the database.
+2. **Table** `api_keys` (a new table, created identically on fresh and migrated databases, so
+   `RISK-SURF-001` cannot recur in it): id, `user_id`, `kind` (`issued` | `legacy`), the hash, a label,
+   created/expires/revoked/last-used times. Triggers keep a revoked key revoked and a key's identity
+   immutable. Expiry 1–365 days (default 365); at most 10 active issued keys per account; the inactive
+   history is bounded.
+3. **Shown once.** `POST /auth/apikeys` returns the key in its `201` and nowhere else; `GET /auth/apikeys`
+   returns metadata only; `DELETE /auth/apikeys/{key_id}` revokes. Creating and revoking need a
+   signed-in session: an API key gets `403`, so a stolen key cannot mint a successor that would survive
+   its own revocation. Listing accepts any credential.
+4. **Authentication by hash only, one answer.** An issued key is looked up by its id and its hash
+   compared in constant time; a legacy key by its hash. `users.api_key` is never compared. Unknown,
+   malformed, expired, revoked and post-cutoff legacy keys get the same 401 per credential shape.
+   `last_used_at` is written at most once a minute. A password change still revokes no key (Decision 2);
+   recovery revokes keys separately, and the settings pages say so.
+5. **The legacy keys and the cutoff.** Every boot hashes each cleartext `users.api_key` into a `legacy` row
+   (idempotent; an old-image rotation during a rollback supersedes the earlier row). Legacy keys are refused
+   from `API_KEY_LEGACY_CUTOFF` — default **2027-01-15**, which is also the latest date the setting may name:
+   it can bring the cutoff forward, never push it back, because every old backup holds these keys. The
+   refusal is by date and needs no deploy; **the first boot at or after the cutoff revokes every legacy row
+   and empties `users.api_key` in every row**, which also empties a pre-migration backup restored later
+   before it serves a request. Revoking the legacy key, or the deprecated `regenerate` (which ends every key
+   of the account and mints one), empties that account's column at once. Registration writes no cleartext;
+   `init_db` no longer back-fills one.
+6. **The old routes** keep path, method and schema, are `deprecated` in OpenAPI and answer with
+   `Deprecation`, `Sunset` (the cutoff) and `Link: rel="successor-version"`. `GET /auth/apikey` returns a
+   live legacy value until the cutoff, `""` otherwise; `auth.apikey.disclosed` is written only when a value
+   leaves.
+
+**Expand → migrate → switch → contract:**
+
+- *Expand and migrate (this change):* everything above. The previous image still reads `users.api_key`, so a
+  rollback inside the window keeps legacy keys working; keys minted by this image do not work under it.
+- *Switch (by date, 2027-01-15):* legacy keys refused, the GET silent; the first boot after it ends and wipes
+  them. Not rolled back: rolling back past this image after the cutoff would let the previous image mint
+  cleartext keys into the emptied column (`docs/operations.md`, *API keys*).
+- *Contract (deferred, its own change, after 2027-01-15 and before 2027-01-31):* drop `users.api_key` by a
+  versioned table rebuild rather than another ad-hoc `ALTER` (SQLite cannot drop a UNIQUE column in place),
+  remove the legacy lookup, answer `410` on the two old routes, add the gate rule that fails on a
+  cleartext-shaped key in a DB dump or an API response, and only then remove `WAIVER-SEC-003`.
+
+Rejected: **bcrypt or Argon2id over the key** (the waiver's first sketch) — a deliberately slow hash on every
+authenticated agent request buys nothing against a 256-bit secret; **a server pepper / HMAC key** — a new
+root secret beside the database; **encrypting the column** — moves the secret, still discloses on GET;
+**deleting `GET /auth/apikey` now** — breaks callers before the show-once replacement exists for them;
+**hashing the legacy values and nulling the column at once** — the rollback target would mint new
+cleartext keys for every account at its boot, breaking every agent; **an environment knob that can extend
+the cutoff** — the knob that gets turned.
 
 ## Consequences
 

@@ -5,8 +5,11 @@
  *
  * - **Konto:** name and e-mail (`PUT /auth/me`), behind "Profil bearbeiten".
  * - **Passwort:** current, new, repeated (`PUT /auth/password`), checked before it is sent.
- * - **API-Key:** hidden but for its last four characters; Anzeigen, Kopieren (Android's "Key
- *   einfügen" says to copy it here), "Neuen Key erzeugen …" asks first.
+ * - **API-Keys** (brief 0070): the account's keys as metadata (`GET /auth/apikeys`), each with
+ *   "Widerrufen …" behind a question; "Neuen Key erzeugen" (optional label) shows the new key ONCE —
+ *   hidden but for its last four characters until "Anzeigen", Kopieren and Herunterladen — and keeps
+ *   it on the screen until "Ich habe ihn gespeichert" is ticked and confirmed. The server keeps only
+ *   a hash; the page never reads a key back and never stores one.
  * - **Claude verbinden**, **MCP-Server** (`ClaudeSettings`): the shared modules' steps and tabs.
  * - **Darstellung:** System / Hell / Dunkel, the frame's theme choice (`useTheme` behind it).
  * - **Sprache**; **Verwaltung** for an admin (`AdminSettings`); **Abmelden**.
@@ -29,6 +32,7 @@ import PageHeading from '../layout/ui/PageHeading.vue'
 import PillButton from '../layout/ui/PillButton.vue'
 import { useFrame } from '../composables/useFrame.js'
 import { t } from '../shared/i18n.js'
+import { canRevoke, day, keyFile, keyName, keyStateKey, legacyDeadline, orderedKeys } from '../shared/apiKeys.js'
 import { maskKey } from '../shared/settingsRules.js'
 import AdminSettings from './AdminSettings.vue'
 import ClaudeSettings from './ClaudeSettings.vue'
@@ -40,14 +44,14 @@ const frame = useFrame()
 const account = useAccount()
 const auth = account.auth
 
-onMounted(account.loadKey)
+onMounted(account.loadKeys)
 
 /** A status key as the region's text and whether it is a refusal; '' while there is nothing to say. */
 function said(status, good) {
   if (!status || status === 'saving') return { text: '', bad: false }
   return { text: t(status === good ? goodText[good] : status), bad: status !== good }
 }
-const goodText = { saved: 'set.saved', done: 'set.pw.done', key: 'set.regenDone' }
+const goodText = { saved: 'set.saved', done: 'set.pw.done' }
 
 const roleLabel = computed(() => t(auth.role === 'admin' ? 'set.role.admin' : 'set.role.user'))
 const eyebrow = computed(() => [t('nav.settings'), auth.username ?? '', roleLabel.value])
@@ -129,35 +133,80 @@ async function changePassword() {
   if (result.ok) closePassword()
 }
 
-// ── API-Key ─────────────────────────────────────────────────────────────────────────
+// ── API-Keys (brief 0070) ───────────────────────────────────────────────────────────
 const revealed = ref(false)
-const asking = ref(false)
-/** '' | 'key' (a new key) | an error key */
+/** '' | 'made' | 'revoked' | an error key */
 const keyStatus = ref('')
-const keySaid = computed(() => said(keyStatus.value, 'key'))
-const regenOpener = ref(null)
-const regenKeep = ref(null)
+const keySaid = computed(() => {
+  const s = keyStatus.value
+  if (!s) return { text: '', bad: false }
+  if (s === 'made') return { text: t('set.key.made'), bad: false }
+  if (s === 'revoked') return { text: t('set.key.revokedDone'), bad: false }
+  return { text: t(s), bad: true }
+})
+const newLabel = ref('')
+const stored = ref(false)
+const createOpener = ref(null)
+const freshBlock = ref(null)
+/** The key id whose revocation is being asked about, or ''. */
+const askingRevoke = ref('')
+const revokeKeep = ref(null)
 const shownKey = computed(() => (revealed.value ? account.apiKey.value : maskKey(account.apiKey.value)))
-
-function askRegenerate() {
-  keyStatus.value = ''
-  asking.value = true
-  focusOn(regenKeep)
+const keyRows = computed(() => orderedKeys(account.keys.value))
+const deadline = computed(() => legacyDeadline(account.keys.value))
+const nameOf = (meta) => {
+  const n = keyName(meta)
+  return n.key ? t(n.key) : n.text
 }
 
-function keepKey() {
-  asking.value = false
-  focusOn(regenOpener)
-}
-
-async function regenerate() {
+async function createKey() {
   if (account.pending('key')) return
-  const result = await account.regenerateKey()
+  keyStatus.value = ''
+  const result = await account.createKey(newLabel.value)
   if (result.busy) return
-  asking.value = false
-  keyStatus.value = result.error ?? 'key'
-  if (result.ok) revealed.value = true
-  focusOn(regenOpener)
+  keyStatus.value = result.error ?? 'made'
+  if (result.ok) {
+    newLabel.value = ''
+    stored.value = false
+    revealed.value = false
+    focusOn(freshBlock)
+  }
+}
+
+function downloadKey() {
+  const file = keyFile(account.apiKey.value, window.location.origin)
+  const url = URL.createObjectURL(new Blob([file.text], { type: 'text/plain' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = file.name
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function doneWithKey() {
+  const result = account.dismissKey(stored.value)
+  keyStatus.value = result.forgotten ? '' : result.reason
+  if (result.forgotten) {
+    revealed.value = false
+    focusOn(createOpener)
+  }
+}
+
+function askRevoke(keyId) {
+  keyStatus.value = ''
+  askingRevoke.value = keyId
+  focusOn(revokeKeep)
+}
+
+function keepRevoke() {
+  askingRevoke.value = ''
+}
+
+async function revoke(keyId) {
+  const result = await account.revokeKey(keyId)
+  if (result.busy) return
+  askingRevoke.value = ''
+  keyStatus.value = result.error ?? 'revoked'
 }
 
 /** `Esc` inside an open form closes it, as everywhere in the new UI; the frame's own `Esc` is not asked. */
@@ -242,28 +291,65 @@ function escape(event, close) {
 
       <SettingsSection id="set-key" :title="t('set.apiKey')">
         <p>{{ t('set.apiKeyP') }}</p>
-        <p v-if="account.keyState.value === 'loading' && !account.apiKey.value">{{ t('set.keyLoading') }}</p>
-        <div v-else-if="account.keyState.value === 'failed' && !account.apiKey.value" class="acts">
-          <span class="status bad">{{ t('set.loadFailed') }}</span>
-          <PillButton quiet @click="account.loadKey">{{ t('set.reload') }}</PillButton>
-        </div>
-        <template v-else-if="account.apiKey.value">
+        <p v-if="deadline" class="status bad">{{ t('set.key.legacyDeadline').replace('{day}', deadline) }}</p>
+
+        <div v-if="account.apiKey.value" ref="freshBlock" class="fresh" tabindex="-1" role="group" :aria-label="t('set.key.freshTitle')">
+          <p class="q">{{ t('set.key.freshP') }}</p>
           <CodeBlock :shown="shownKey" :copy="account.apiKey.value" :what="t('set.keyOf')">
             <PillButton quiet class="reveal" @click="revealed = !revealed">
               {{ revealed ? t('set.hide') : t('set.show') }}
             </PillButton>
           </CodeBlock>
-          <div v-if="asking" class="ask" role="group" :aria-label="t('set.regenGo')">
-            <p class="q">{{ t('set.regenQ') }}</p>
-            <div class="acts">
-              <PillButton :aria-disabled="account.pending('key') || undefined" @click="regenerate">{{ t('set.regenGo') }}</PillButton>
-              <PillButton ref="regenKeep" quiet @click="keepKey">{{ t('set.cancel') }}</PillButton>
-            </div>
+          <div class="acts">
+            <PillButton quiet @click="downloadKey">{{ t('set.key.download') }}</PillButton>
           </div>
-          <div v-else class="acts">
-            <PillButton ref="regenOpener" quiet class="regen" @click="askRegenerate">{{ t('set.regen') }}</PillButton>
+          <label class="confirm">
+            <input v-model="stored" type="checkbox">
+            <span>{{ t('set.key.stored') }}</span>
+          </label>
+          <div class="acts">
+            <PillButton :aria-disabled="!stored || undefined" @click="doneWithKey">{{ t('set.key.done') }}</PillButton>
           </div>
-        </template>
+        </div>
+        <form v-else class="form" @submit.prevent="createKey">
+          <label class="field">
+            <span>{{ t('set.key.label') }}</span>
+            <input v-model="newLabel" type="text" maxlength="64" autocomplete="off" :placeholder="t('set.key.labelPh')">
+          </label>
+          <div class="acts">
+            <PillButton ref="createOpener" type="submit" :aria-disabled="account.pending('key') || undefined">{{ t('set.key.create') }}</PillButton>
+          </div>
+        </form>
+
+        <p v-if="account.keyState.value === 'loading' && !keyRows.length">{{ t('set.keyLoading') }}</p>
+        <div v-else-if="account.keyState.value === 'failed'" class="acts">
+          <span class="status bad">{{ t('set.loadFailed') }}</span>
+          <PillButton quiet @click="account.loadKeys">{{ t('set.reload') }}</PillButton>
+        </div>
+        <p v-else-if="!keyRows.length" class="status">{{ t('set.key.none') }}</p>
+        <ul v-else class="keys">
+          <li v-for="k in keyRows" :key="k.key_id" class="key" :class="{ ended: k.state !== 'active' }">
+            <span class="kname">{{ nameOf(k) }}</span>
+            <span class="kmeta">
+              {{ t(keyStateKey(k)) }}
+              · {{ t('set.key.created') }} {{ day(k.created_at) }}
+              <template v-if="k.expires_at"> · {{ t('set.key.expires') }} {{ day(k.expires_at) }}</template>
+              · {{ k.last_used_at ? t('set.key.used') + ' ' + day(k.last_used_at) : t('set.key.neverUsed') }}
+            </span>
+            <template v-if="canRevoke(k)">
+              <div v-if="askingRevoke === k.key_id" class="ask" role="group" :aria-label="t('set.key.revokeGo')">
+                <p class="q">{{ t('set.key.revokeQ') }}</p>
+                <div class="acts">
+                  <PillButton :aria-disabled="account.pending(`revoke:${k.key_id}`) || undefined" @click="revoke(k.key_id)">{{ t('set.key.revokeGo') }}</PillButton>
+                  <PillButton ref="revokeKeep" quiet @click="keepRevoke">{{ t('set.cancel') }}</PillButton>
+                </div>
+              </div>
+              <div v-else class="acts">
+                <PillButton quiet @click="askRevoke(k.key_id)">{{ t('set.key.revoke') }}</PillButton>
+              </div>
+            </template>
+          </li>
+        </ul>
         <p class="status" :class="{ bad: keySaid.bad }" role="status">{{ keySaid.text }}</p>
       </SettingsSection>
 
@@ -316,7 +402,13 @@ p.status:empty { margin: 0; }
 .reveal { flex: none; }
 .ask { margin-top: 10px; }
 .q { margin: 0 0 8px; color: var(--rw-text); font-size: 13.5px; line-height: 1.5; }
-.acts:has(.regen) { margin-top: 8px; }
+.fresh { display: grid; row-gap: 10px; margin: 4px 0 14px; }
+.confirm { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--rw-text); }
+.keys { list-style: none; margin: 14px 0 0; padding: 0; display: grid; row-gap: 12px; }
+.key { display: grid; row-gap: 4px; }
+.key.ended { opacity: 0.6; }
+.kname { color: var(--rw-text); font-weight: 500; overflow-wrap: anywhere; }
+.kmeta { font-family: var(--rw-font-mono); font-size: 11.5px; color: var(--rw-mute); }
 .themes { display: flex; flex-wrap: wrap; gap: 6px; }
 /* the chips' look (06 `.ctx`), pressed as the chosen one */
 .chip {

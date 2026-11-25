@@ -452,6 +452,21 @@ p.write_text(p.read_text() + '\nAWS_KEY = "AKIA' + "IOSFODNN7EXAMPLB" + '"\n')
 LEAKCRED
 expect_red "DEP-003" "tools/checks/supply-chain.sh" "RULE-DEP-003"
 
+# --- RULE-DEP-003 — one of this application's own API keys is committed ----
+# Brief 0070: the hashed-key format `rwk_<16 hex>_<43-character secret>`. A real key pasted into
+# a test or a README example is a working credential in a public repository. Built at run time,
+# so this file holds no key-shaped literal of its own.
+python3 - "$SANDBOX/README.md" <<'LEAKRUNWAYKEY'
+import pathlib
+import secrets
+import sys
+
+p = pathlib.Path(sys.argv[1])
+key = "rwk_" + secrets.token_hex(8) + "_" + secrets.token_urlsafe(32)
+p.write_text(p.read_text() + "\n    curl -H 'X-Api-Key: " + key + "' https://example.org/api/tasks\n")
+LEAKRUNWAYKEY
+expect_red "DEP-003-apikey" "tools/checks/supply-chain.sh" "RULE-DEP-003"
+
 # --- RULE-DEP-004 — a base image floats -------------------------------------
 # What ships must be a function of the commit, not the calendar. Unpin the runtime image.
 python3 - "$SANDBOX/backend/Dockerfile" <<'UNPINIMAGE'
@@ -781,6 +796,36 @@ t = t.replace(
 p.write_text(t)
 LOGCREDS
 expect_red "OPS-002-fstring" "tools/checks/log-secrets.sh" "RULE-OPS-002"
+
+# --- RULE-OPS-002 — the new API key and its hash are logged ------------------
+# Brief 0070 introduced two new credential parts: the minted key, which the creation route holds
+# exactly once, and the SHA-256 the authentication path compares. Both arms log them the way a
+# debugging line would first be written — and both must turn the gate red at the call site.
+python3 - "$SANDBOX/backend/app/routers/auth.py" <<'LOGNEWKEY'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = '    issued, row = made\n'
+assert old in t, "create_apikey is not where the fixture expects it"
+t = t.replace(old, old + '    logger.info("minted %s", issued.api_key)\n', 1)
+p.write_text(t)
+LOGNEWKEY
+expect_red "OPS-002-apikey" "tools/checks/log-secrets.sh" "RULE-OPS-002"
+
+python3 - "$SANDBOX/backend/app/database.py" <<'LOGKEYHASH'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = '    secret_hash = api_key_hash(api_key)\n'
+assert old in t, "authenticate_api_key is not where the fixture expects it"
+t = t.replace(old, old + '    logger.debug("api key lookup", extra={"looked_up": secret_hash})\n', 1)
+p.write_text(t)
+LOGKEYHASH
+expect_red "OPS-002-apikey-hash" "tools/checks/log-secrets.sh" "RULE-OPS-002"
 
 # --- RULE-SEC-003 — a username is joined onto the data root again ------------
 # SEC-001 exactly as it was written: `_run` building TASKDATA from the account name instead of

@@ -32,10 +32,18 @@ from fastapi.testclient import TestClient
 from app import audit, database
 from app.auth import create_access_token
 from app.config import settings
-from app.database import generate_api_key
 from app.logging_setup import REDACTION_MARKER, REQUEST_ID_HEADER, JsonFormatter
 
 # --- reading the store back -------------------------------------------------------------
+
+
+def generate_api_key() -> str:
+    """A key in the previous image's cleartext shape (`secrets.token_urlsafe(32)`). The
+    application mints none any more (brief 0070); the shape is still redacted and still has to
+    be — a log line is read long after it is written, and old backups hold such keys."""
+    import secrets
+
+    return secrets.token_urlsafe(32)
 
 
 def query(sql: str, parameters: tuple = ()) -> list[dict]:
@@ -268,18 +276,29 @@ class TestEvents:
         assert (row["actor"], row["outcome"]) == ("alice", audit.FAILURE)
 
     def test_the_api_key_disclosure(self, client: TestClient, auth):
-        """GET /auth/apikey hands back a permanent credential in cleartext — finding SEC-5.
+        """GET /auth/apikey handed back a permanent credential in cleartext — finding SEC-5.
 
-        The route is not changed here; what changes is that its use is on the record.
+        Since brief 0070 the deprecated route returns only a legacy key the previous image
+        issued, until the cutoff, and a row is written only when a value actually leaves.
         """
-        assert client.get("/auth/apikey", headers=auth).status_code == 200
-        # One from the `registered` fixture, one from the call above.
-        found = rows(audit.APIKEY_DISCLOSED)
-        assert len(found) == 2
-        assert found[-1]["actor"] == "alice"
-        assert found[-1]["outcome"] == audit.SUCCESS
-        assert found[-1]["route"] == "GET /auth/apikey"
-        assert "SEC-5" in found[-1]["detail"]
+        assert client.get("/auth/apikey", headers=auth).json() == {"api_key": ""}
+        assert rows(audit.APIKEY_DISCLOSED) == []
+
+        legacy = generate_api_key()
+        con = sqlite3.connect(settings.db_path)
+        con.execute("UPDATE users SET api_key=? WHERE username='alice'", (legacy,))
+        con.commit()
+        con.close()
+        from app.main import app
+
+        with TestClient(app) as rebooted:  # the boot hashes it into a legacy row
+            assert rebooted.get("/auth/apikey", headers=auth).json() == {"api_key": legacy}
+        (found,) = rows(audit.APIKEY_DISCLOSED)
+        assert found["actor"] == "alice"
+        assert found["outcome"] == audit.SUCCESS
+        assert found["route"] == "GET /auth/apikey"
+        assert "WAIVER-SEC-003" in found["detail"]
+        assert legacy not in found["detail"]
 
     def test_the_key_regeneration(self, client: TestClient, auth):
         assert client.post("/auth/apikey/regenerate", headers=auth).status_code == 200
@@ -509,7 +528,7 @@ def test_no_credential_appears_anywhere_in_the_audit_database(
         audit.AUTHENTICATED,
         audit.LOGIN_SUCCEEDED,
         audit.LOGIN_FAILED,
-        audit.APIKEY_DISCLOSED,
+        audit.APIKEY_CREATED,
         audit.APIKEY_REGENERATED,
         audit.PASSWORD_CHANGED,
     } <= events

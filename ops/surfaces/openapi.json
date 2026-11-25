@@ -14,7 +14,125 @@
         "title": "AnnotationCreate",
         "type": "object"
       },
+      "ApiKeyCreate": {
+        "properties": {
+          "expires_in_days": {
+            "default": 365,
+            "description": "Days until the key stops working, 1 to 365.",
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Expires In Days",
+            "type": "integer"
+          },
+          "label": {
+            "default": "",
+            "description": "A name for the key, to tell several apart (for example `laptop agent`).",
+            "maxLength": 64,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "title": "ApiKeyCreate",
+        "type": "object"
+      },
+      "ApiKeyCreated": {
+        "properties": {
+          "api_key": {
+            "description": "The key. Shown in this response only: it is stored as a hash and cannot be retrieved again.",
+            "title": "Api Key",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "ISO 8601, UTC.",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC.",
+            "title": "Expires At"
+          },
+          "key_id": {
+            "description": "The key's public id; part of the key itself.",
+            "title": "Key Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`legacy`: a key issued before keys were hashed, valid until the cutoff.",
+            "enum": [
+              "issued",
+              "legacy"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC, to the minute; null if never used.",
+            "title": "Last Used At"
+          },
+          "prefix": {
+            "description": "The key's public beginning, `rwk_<key_id>`, to recognise it; empty for a legacy key, which has no public part.",
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC; null while not revoked.",
+            "title": "Revoked At"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_id",
+          "label",
+          "kind",
+          "prefix",
+          "created_at",
+          "expires_at",
+          "revoked_at",
+          "last_used_at",
+          "state",
+          "api_key"
+        ],
+        "title": "ApiKeyCreated",
+        "type": "object"
+      },
       "ApiKeyInfo": {
+        "description": "The deprecated shape of `GET /auth/apikey` and `POST /auth/apikey/regenerate`.",
         "properties": {
           "api_key": {
             "title": "Api Key",
@@ -25,6 +143,97 @@
           "api_key"
         ],
         "title": "ApiKeyInfo",
+        "type": "object"
+      },
+      "ApiKeyMetadata": {
+        "description": "What can be known about a key without holding it: never the secret, never its hash.",
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601, UTC.",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC.",
+            "title": "Expires At"
+          },
+          "key_id": {
+            "description": "The key's public id; part of the key itself.",
+            "title": "Key Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`legacy`: a key issued before keys were hashed, valid until the cutoff.",
+            "enum": [
+              "issued",
+              "legacy"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC, to the minute; null if never used.",
+            "title": "Last Used At"
+          },
+          "prefix": {
+            "description": "The key's public beginning, `rwk_<key_id>`, to recognise it; empty for a legacy key, which has no public part.",
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC; null while not revoked.",
+            "title": "Revoked At"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_id",
+          "label",
+          "kind",
+          "prefix",
+          "created_at",
+          "expires_at",
+          "revoked_at",
+          "last_used_at",
+          "state"
+        ],
+        "title": "ApiKeyMetadata",
         "type": "object"
       },
       "BrainstormItem": {
@@ -1537,6 +1746,8 @@
     },
     "/auth/apikey": {
       "get": {
+        "deprecated": true,
+        "description": "Deprecated since 2026-11-25 (brief 0070): API keys are stored as hashes. Returns a key issued before then until the legacy cutoff (`API_KEY_LEGACY_CUTOFF`, at the latest 2027-01-15), and an empty string after it and for every key created since. Use `GET /auth/apikeys` (metadata) and `POST /auth/apikeys`.",
         "operationId": "get_apikey_auth_apikey_get",
         "parameters": [
           {
@@ -1591,6 +1802,8 @@
     },
     "/auth/apikey/regenerate": {
       "post": {
+        "deprecated": true,
+        "description": "Deprecated since 2026-11-25 (brief 0070): API keys are stored as hashes. Ends EVERY key of the account and returns one new key, shown in this response only. Use `POST /auth/apikeys` and `DELETE /auth/apikeys/{key_id}`.",
         "operationId": "regenerate_apikey_auth_apikey_regenerate_post",
         "parameters": [
           {
@@ -1638,6 +1851,191 @@
           }
         ],
         "summary": "Regenerate Apikey",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/apikeys": {
+      "get": {
+        "operationId": "list_apikeys_auth_apikeys_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyMetadata"
+                  },
+                  "title": "Response List Apikeys Auth Apikeys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The account's API keys, as metadata (never a key, never its hash)",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "description": "Needs a signed-in session (`Authorization: Bearer <jwt>`); an API key gets 403. The key is stored as a hash and cannot be retrieved again. At most 10 active keys per account (409 beyond).",
+        "operationId": "create_apikey_auth_apikeys_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ApiKeyCreate"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create an API key; the key is shown in this response only",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/apikeys/{key_id}": {
+      "delete": {
+        "description": "Needs a signed-in session; an API key gets 403. 404 when this account holds no key with this id. Revoking an already revoked key is not an error.",
+        "operationId": "revoke_apikey_auth_apikeys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke one API key (it stops working immediately)",
         "tags": [
           "auth"
         ]

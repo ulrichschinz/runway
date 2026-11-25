@@ -1,8 +1,14 @@
+import hashlib
+import hmac
 import logging
+import re
+import secrets
 import sqlite3
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
@@ -177,6 +183,141 @@ CREATE TABLE IF NOT EXISTS storage_migrations (
 )
 """
 
+# --- the API-key format (WAIVER-SEC-003, ADR 0044 Decision 6, brief 0070) ----------------------
+#
+# Here, beside the table, rather than in app/auth.py: what a key is and how it is stored are one
+# decision, and keeping it in this unit adds no dependency on be/leaves' hub (RULE-ARCH-003).
+#
+# `rwk_<key id>_<secret>`: a literal prefix a scanner and the redaction filter recognise, a public
+# id of 16 hex characters (64 random bits) that the lookup is an index read on, and a secret of 43
+# URL-safe characters (256 random bits). What is stored is the SHA-256 of the whole string, never
+# the string: with 256 bits of entropy an offline search is not a threat, so no salt and no pepper
+# (a pepper would be a new root secret beside the database it is meant to protect — decision D4).
+
+API_KEY_PREFIX = "rwk_"
+API_KEY_ID_HEX = 16
+API_KEY_SECRET_BYTES = 32
+_API_KEY_SHAPE = re.compile(r"rwk_([0-9a-f]{16})_[A-Za-z0-9_-]{43}")
+# Anything longer is no key of ours and not worth hashing (a header can be tens of kilobytes).
+API_KEY_MAX_LENGTH = 256
+
+# The legacy cutoff (`API_KEY_LEGACY_CUTOFF`): the default is also the latest date the setting
+# may name, because the setting may bring the cutoff forward and never push it back.
+LEGACY_CUTOFF_DEFAULT = "2027-01-15"
+
+
+@dataclass(frozen=True)
+class IssuedKey:
+    key_id: str
+    api_key: str  # shown to the caller exactly once, then forgotten
+    secret_hash: str
+
+
+def api_key_clock() -> int:
+    """Now, in UTC epoch seconds. One function so the tests can move it."""
+    return int(datetime.now(UTC).timestamp())
+
+
+def api_key_hash(api_key: str) -> str:
+    """SHA-256 of the whole presented string, as 64 hex characters."""
+    return hashlib.sha256(api_key.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+def new_api_key() -> IssuedKey:
+    key_id = secrets.token_hex(API_KEY_ID_HEX // 2)
+    api_key = f"{API_KEY_PREFIX}{key_id}_{secrets.token_urlsafe(API_KEY_SECRET_BYTES)}"
+    return IssuedKey(key_id=key_id, api_key=api_key, secret_hash=api_key_hash(api_key))
+
+
+def parse_api_key(api_key: str) -> str | None:
+    """The key id of a key in the issued shape, or None for anything else (a legacy key too)."""
+    match = _API_KEY_SHAPE.fullmatch(api_key or "")
+    return match.group(1) if match else None
+
+
+def _cutoff_date(value: str) -> datetime | None:
+    try:
+        day = datetime.strptime(value.strip(), "%Y-%m-%d")
+    except (AttributeError, ValueError):
+        return None
+    return day.replace(tzinfo=UTC)
+
+
+_LEGACY_CUTOFF_LATEST = datetime(2027, 1, 15, tzinfo=UTC)  # LEGACY_CUTOFF_DEFAULT, parsed
+
+
+def legacy_cutoff_problem() -> str | None:
+    """Why the configured `API_KEY_LEGACY_CUTOFF` is not applied, or None when it is."""
+    configured = _cutoff_date(settings.api_key_legacy_cutoff)
+    if configured is None:
+        return f"not a YYYY-MM-DD date; {LEGACY_CUTOFF_DEFAULT} applies"
+    if configured > _LEGACY_CUTOFF_LATEST:
+        return f"later than {LEGACY_CUTOFF_DEFAULT}, which it may not be; the default applies"
+    return None
+
+
+def legacy_cutoff() -> int:
+    """The moment (UTC epoch seconds) from which a legacy key is refused: the configured date at
+    00:00 UTC if it is a valid date no later than the default, else the default."""
+    configured = _cutoff_date(settings.api_key_legacy_cutoff)
+    if configured is None or configured > _LEGACY_CUTOFF_LATEST:
+        configured = _LEGACY_CUTOFF_LATEST
+    return int(configured.timestamp())
+
+
+# API keys (WAIVER-SEC-003, ADR 0044 Decision 6, brief 0070). The secret is never stored: a row
+# holds the SHA-256 of the whole key string. `key_id` is public (it is part of the key and of its
+# display prefix) and is what an issued key is looked up by; a `legacy` row is a value the previous
+# image kept in cleartext in `users.api_key`, hashed at boot and valid only until the legacy cutoff.
+# Times are UTC epoch seconds; `expires_at` NULL would mean "never" and is written by nothing.
+#
+# A new table, not columns on `users`, and created by the same statement on a fresh and on a
+# migrated database — so the drift RISK-SURF-001 records for `users.api_key` cannot recur here
+# (test_api_keys.py compares the two).
+CREATE_API_KEYS = """
+CREATE TABLE IF NOT EXISTS api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_id TEXT NOT NULL UNIQUE
+        CHECK (length(key_id) = 16 AND key_id NOT GLOB '*[^0-9a-f]*'),
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('issued', 'legacy')),
+    secret_hash TEXT NOT NULL
+        CHECK (length(secret_hash) = 64 AND secret_hash NOT GLOB '*[^0-9a-f]*'),
+    label TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    revoked_at INTEGER,
+    last_used_at INTEGER
+)
+"""
+
+API_KEY_SCHEMA = (
+    CREATE_API_KEYS,
+    "CREATE INDEX IF NOT EXISTS api_keys_secret_hash ON api_keys (secret_hash)",
+    "CREATE INDEX IF NOT EXISTS api_keys_user ON api_keys (user_id)",
+    # A revoked key stays revoked: un-revoking would make a key valid that its owner ended.
+    """CREATE TRIGGER IF NOT EXISTS api_keys_revocation_is_final
+    BEFORE UPDATE OF revoked_at ON api_keys
+    WHEN OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS NOT OLD.revoked_at
+    BEGIN SELECT RAISE(ABORT, 'a revoked api key stays revoked'); END""",
+    # What a key is and whose it is never changes: re-pointing a row would hand a key to someone.
+    """CREATE TRIGGER IF NOT EXISTS api_keys_identity_is_immutable
+    BEFORE UPDATE OF key_id, user_id, kind, secret_hash ON api_keys
+    WHEN NEW.key_id IS NOT OLD.key_id OR NEW.user_id IS NOT OLD.user_id
+      OR NEW.kind IS NOT OLD.kind OR NEW.secret_hash IS NOT OLD.secret_hash
+    BEGIN SELECT RAISE(ABORT, 'an api key''s identity is immutable'); END""",
+)
+
+# The most active issued keys one account may hold, and the most inactive ones kept for the
+# settings page; older inactive rows are deleted when a key is created, so a create/revoke loop
+# cannot grow the table without bound.
+API_KEY_MAX_ACTIVE = 10
+API_KEY_KEEP_INACTIVE = 40
+# `last_used_at` is written at most this often per key, so an agent's stream of requests does not
+# turn every read into a write.
+API_KEY_LAST_USED_RESOLUTION = 60
+
+
 # SQLite's own words for "this column is already there", observed rather than guessed: on
 # sqlite3 3.53.4 through aiosqlite 0.20.0, re-adding a column raises
 # `sqlite3.OperationalError('duplicate column name: api_key')`. There is no error code to
@@ -237,14 +378,16 @@ async def list_accounts(db) -> list[Account]:
         return [_account(row) for row in await cur.fetchall()]
 
 
-async def create_account(db, username: str, hashed_password: str, api_key: str) -> Account:
+async def create_account(db, username: str, hashed_password: str) -> Account:
     """Insert a new account in the storage-id layout. Raises sqlite3.IntegrityError when the
-    username is taken. Never the legacy layout: that is created by nothing any more."""
+    username is taken. Never the legacy layout: that is created by nothing any more. And no API
+    key: a cleartext one is written by nothing any more either (WAIVER-SEC-003) — the account
+    creates its first key, shown once, through `POST /auth/apikeys`."""
     storage_id = new_storage_id()
     cur = await db.execute(
-        "INSERT INTO users (username, hashed_password, api_key, storage_id, storage_layout)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (username, hashed_password, api_key, storage_id, LAYOUT_STORAGE_ID),
+        "INSERT INTO users (username, hashed_password, storage_id, storage_layout)"
+        " VALUES (?, ?, ?, ?)",
+        (username, hashed_password, storage_id, LAYOUT_STORAGE_ID),
     )
     await db.commit()
     return Account(
@@ -265,6 +408,7 @@ async def delete_account(db, account_id: int) -> None:
     """
     async with admin_preserving_write(db):
         await db.execute("DELETE FROM users WHERE id=?", (account_id,))
+        await db.execute("DELETE FROM api_keys WHERE user_id=?", (account_id,))
 
 
 # --- the last-admin invariant (REV-002, brief 0068) -----------------------------------------
@@ -519,16 +663,266 @@ def audit_connection() -> Iterator[sqlite3.Connection]:
         connection.close()
 
 
-def generate_api_key() -> str:
-    """Public: routers issue keys at registration and on rotation.
+# --- API keys (WAIVER-SEC-003, ADR 0044 Decision 6, brief 0070) -----------------------------
+#
+# Nothing below receives, returns or writes a secret except `create_api_key` and
+# `rotate_api_keys`, which return the freshly minted key to the router that shows it once; and
+# `legacy_api_key`, which reads the cleartext column for the deprecated GET until the cutoff.
 
-    Renamed from _generate_api_key. The leading underscore claimed it was module-private
-    while two routers imported it, which made the name actively misleading rather than
-    merely untidy.
+
+class TooManyApiKeys(Exception):
+    """The account already holds API_KEY_MAX_ACTIVE active issued keys. Nothing was written."""
+
+
+def _as_dict(row) -> dict:
+    return {k: row[k] for k in row.keys()}
+
+
+async def migrate_legacy_api_keys(db, now: int, cutoff: int) -> tuple[int, int]:
+    """Hash the cleartext keys the previous image kept, or, once the cutoff has passed, end them.
+
+    Runs at every boot. Before the cutoff, every non-empty `users.api_key` that has no `legacy`
+    row with its hash gets one (expiring at the cutoff); an account whose earlier legacy row has a
+    different hash was rotated by the previous image (a rollback) and that row is revoked — the
+    previous image's rotation ended it there too. The cleartext column is left as it is: the
+    previous image authenticates by it, and this one never compares it.
+
+    From the cutoff on, every legacy row is revoked and `users.api_key` is emptied in every row, so
+    the database holds no cleartext key — including a pre-migration backup restored later, which
+    this boot empties before it can serve a request.
+
+    Returns (imported, ended). Never prints a value.
     """
-    import secrets
+    if now >= cutoff:
+        cur = await db.execute(
+            "UPDATE api_keys SET revoked_at=? WHERE kind='legacy' AND revoked_at IS NULL", (now,)
+        )
+        ended = cur.rowcount
+        await db.execute("UPDATE users SET api_key=NULL WHERE api_key IS NOT NULL")
+        await db.commit()
+        return 0, ended
+    async with db.execute(
+        "SELECT id, api_key FROM users WHERE api_key IS NOT NULL AND api_key != ''"
+    ) as cur:
+        rows = await cur.fetchall()
+    imported = ended = 0
+    for row in rows:
+        secret_hash = api_key_hash(row["api_key"])
+        async with db.execute(
+            "SELECT 1 FROM api_keys WHERE user_id=? AND kind='legacy' AND secret_hash=?",
+            (row["id"], secret_hash),
+        ) as cur:
+            if await cur.fetchone():
+                continue
+        cur = await db.execute(
+            "UPDATE api_keys SET revoked_at=? WHERE user_id=? AND kind='legacy'"
+            " AND revoked_at IS NULL",
+            (now, row["id"]),
+        )
+        ended += cur.rowcount
+        await db.execute(
+            "INSERT INTO api_keys (key_id, user_id, kind, secret_hash, label, created_at,"
+            " expires_at) VALUES (?, ?, 'legacy', ?, '', ?, ?)",
+            (new_api_key().key_id, row["id"], secret_hash, now, cutoff),
+        )
+        imported += 1
+    await db.commit()
+    return imported, ended
 
-    return secrets.token_urlsafe(32)
+
+async def authenticate_api_key(db, api_key: str, now: int, cutoff: int) -> str | None:
+    """The username a secret_hash key belongs to, or None — one answer for unknown, malformed,
+    expired and revoked keys, and for a legacy key from the cutoff on.
+
+    Only the hash is compared; `users.api_key` is never read here. An issued key is looked up by
+    its public id and its hash compared in constant time. A legacy key has no id, so it is looked
+    up by its hash (a lookup on a SHA-256 of a high-entropy value leaks nothing about it); a hash
+    that more than one row carries is refused rather than guessed between (RISK-SURF-001: a
+    migrated database never enforced uniqueness of the old column).
+    """
+    if not api_key or len(api_key) > API_KEY_MAX_LENGTH:
+        return None
+    secret_hash = api_key_hash(api_key)
+    key_id = parse_api_key(api_key)
+    sql = (
+        "SELECT k.id, k.secret_hash, k.expires_at, k.revoked_at, k.last_used_at, u.username"
+        " FROM api_keys k JOIN users u ON u.id = k.user_id"
+    )
+    if key_id is not None:
+        async with db.execute(sql + " WHERE k.key_id=? AND k.kind='issued'", (key_id,)) as cur:
+            rows = await cur.fetchall()
+    else:
+        if now >= cutoff:
+            return None
+        async with db.execute(
+            sql + " WHERE k.secret_hash=? AND k.kind='legacy' LIMIT 2", (secret_hash,)
+        ) as cur:
+            rows = await cur.fetchall()
+    if len(rows) != 1:
+        return None
+    (row,) = rows
+    if not hmac.compare_digest(row["secret_hash"], secret_hash):
+        return None
+    if row["revoked_at"] is not None:
+        return None
+    if row["expires_at"] is not None and now >= row["expires_at"]:
+        return None
+    last = row["last_used_at"]
+    if last is None or now - last >= API_KEY_LAST_USED_RESOLUTION:
+        await db.execute("UPDATE api_keys SET last_used_at=? WHERE id=?", (now, row["id"]))
+        await db.commit()
+    return str(row["username"])
+
+
+async def _account_id(db, username: str) -> int | None:
+    async with db.execute("SELECT id FROM users WHERE username=?", (username,)) as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else None
+
+
+async def _insert_issued(db, user_id: int, label: str, now: int, expires_at: int) -> IssuedKey:
+    issued = new_api_key()
+    await db.execute(
+        "INSERT INTO api_keys (key_id, user_id, kind, secret_hash, label, created_at, expires_at)"
+        " VALUES (?, ?, 'issued', ?, ?, ?, ?)",
+        (issued.key_id, user_id, issued.secret_hash, label, now, expires_at),
+    )
+    # Keep the inactive history bounded: the newest API_KEY_KEEP_INACTIVE ended issued keys stay
+    # for the settings page, older ones go. Legacy rows stay — they are the cutoff's evidence.
+    await db.execute(
+        "DELETE FROM api_keys WHERE user_id=? AND kind='issued'"
+        " AND (revoked_at IS NOT NULL OR expires_at <= ?)"
+        " AND id NOT IN (SELECT id FROM api_keys WHERE user_id=? AND kind='issued'"
+        " AND (revoked_at IS NOT NULL OR expires_at <= ?) ORDER BY id DESC LIMIT ?)",
+        (user_id, now, user_id, now, API_KEY_KEEP_INACTIVE),
+    )
+    return issued
+
+
+@asynccontextmanager
+async def _write(db) -> AsyncIterator[None]:
+    """One serialised write transaction (BEGIN IMMEDIATE), committed on a normal exit."""
+    if db.in_transaction:
+        # As in `admin_preserving_write`: committing someone else's half-done work here would be
+        # a bug wearing this function's name.
+        raise RuntimeError("an api key write needs a connection with no open transaction")
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        await db.rollback()
+        raise
+    await db.commit()
+
+
+async def create_api_key(
+    db, username: str, *, label: str, now: int, expires_at: int
+) -> tuple[IssuedKey, dict] | None:
+    """Mint a key for an account. Returns the key (to be shown once) and its metadata row, or
+    None when there is no such account. Raises `TooManyApiKeys` at the cap; nothing written. The
+    count and the insert are one transaction, so two parallel creations cannot both pass it."""
+    async with _write(db):
+        user_id = await _account_id(db, username)
+        if user_id is None:
+            return None
+        async with db.execute(
+            "SELECT COUNT(*) FROM api_keys WHERE user_id=? AND kind='issued'"
+            " AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+            (user_id, now),
+        ) as cur:
+            row = await cur.fetchone()
+        if row and int(row[0]) >= API_KEY_MAX_ACTIVE:
+            raise TooManyApiKeys
+        issued = await _insert_issued(db, user_id, label, now, expires_at)
+    meta = await _key_row(db, issued.key_id)
+    if meta is None:  # written in the transaction above; absent only if the file changed under us
+        raise RuntimeError("the api key just written cannot be read back")
+    return issued, meta
+
+
+async def rotate_api_keys(
+    db, username: str, *, label: str, now: int, expires_at: int
+) -> tuple[IssuedKey, dict] | None:
+    """The deprecated `POST /auth/apikey/regenerate`: end EVERY key of the account — issued and
+    legacy — empty its cleartext column, and mint one new key, in one transaction. It replaces,
+    it never multiplies, so it may keep accepting an API key as the credential."""
+    async with _write(db):
+        user_id = await _account_id(db, username)
+        if user_id is None:
+            return None
+        await db.execute(
+            "UPDATE api_keys SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+            (now, user_id),
+        )
+        await db.execute("UPDATE users SET api_key=NULL WHERE id=?", (user_id,))
+        issued = await _insert_issued(db, user_id, label, now, expires_at)
+    meta = await _key_row(db, issued.key_id)
+    if meta is None:  # written in the transaction above; absent only if the file changed under us
+        raise RuntimeError("the api key just written cannot be read back")
+    return issued, meta
+
+
+async def _key_row(db, key_id: str) -> dict | None:
+    async with db.execute(
+        "SELECT key_id, kind, label, created_at, expires_at, revoked_at, last_used_at"
+        " FROM api_keys WHERE key_id=?",
+        (key_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    return _as_dict(row) if row else None
+
+
+async def list_api_keys(db, username: str) -> list[dict]:
+    """Every key row of the account, newest first — metadata only: no column holding a secret or
+    a hash is selected."""
+    async with db.execute(
+        "SELECT key_id, kind, label, created_at, expires_at, revoked_at, last_used_at"
+        " FROM api_keys WHERE user_id=(SELECT id FROM users WHERE username=?) ORDER BY id DESC",
+        (username,),
+    ) as cur:
+        return [_as_dict(r) for r in await cur.fetchall()]
+
+
+async def revoke_api_key(db, username: str, key_id: str, now: int) -> str | None:
+    """End one key of the account. Returns its kind, or None when the account holds no key with
+    this id (another account's key is "no such key"). Idempotent: an ended key stays as it was.
+    Revoking the legacy key also empties the account's cleartext column, in the same transaction:
+    an account that has moved holds no cleartext from that moment on."""
+    async with _write(db):
+        user_id = await _account_id(db, username)
+        if user_id is None:
+            return None
+        async with db.execute(
+            "SELECT kind FROM api_keys WHERE user_id=? AND key_id=?", (user_id, key_id)
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        await db.execute(
+            "UPDATE api_keys SET revoked_at=? WHERE user_id=? AND key_id=? AND revoked_at IS NULL",
+            (now, user_id, key_id),
+        )
+        if row["kind"] == "legacy":
+            await db.execute("UPDATE users SET api_key=NULL WHERE id=?", (user_id,))
+    return str(row["kind"])
+
+
+async def legacy_api_key(db, username: str) -> str:
+    """The cleartext value the previous image issued, for the deprecated `GET /auth/apikey` only,
+    or '' — when there is none, or its legacy row has been revoked. The caller checks the cutoff."""
+    async with db.execute(
+        "SELECT id, api_key FROM users WHERE username=? AND api_key IS NOT NULL", (username,)
+    ) as cur:
+        row = await cur.fetchone()
+    if not row or not row["api_key"]:
+        return ""
+    async with db.execute(
+        "SELECT 1 FROM api_keys WHERE user_id=? AND kind='legacy' AND secret_hash=?"
+        " AND revoked_at IS NULL",
+        (row["id"], api_key_hash(row["api_key"])),
+    ) as cur:
+        live = await cur.fetchone()
+    return str(row["api_key"]) if live else ""
 
 
 async def get_allow_registration(db) -> bool:
@@ -683,14 +1077,9 @@ async def init_db() -> str:
                 )
         # SEC-001: every account gets its storage id before anything can resolve it.
         await backfill_storage_ids(db)
-        # generate api_key for users that don't have one
-        async with db.execute("SELECT username FROM users WHERE api_key IS NULL") as cur:
-            rows = await cur.fetchall()
-        for row in rows:
-            await db.execute(
-                "UPDATE users SET api_key=? WHERE username=?",
-                (generate_api_key(), row["username"]),
-            )
+        # WAIVER-SEC-003: no cleartext API key is minted here any more. This loop used to give
+        # every row without one a key, in cleartext; an account now creates its keys itself and
+        # they are stored as hashes (`api_keys`, below).
         bootstrap_reason = await bootstrap_admin(db)
         await db.execute(CREATE_PROJECT_PLANS)
         await db.execute(CREATE_PROJECTS)
@@ -708,6 +1097,18 @@ async def init_db() -> str:
         await db.execute(CREATE_REVIEWS)
         await db.execute(CREATE_PROJECT_STATUS)
         await db.execute(CREATE_STORAGE_MIGRATIONS)
+        # WAIVER-SEC-003 (ADR 0044 Decision 6): the hashed keys, and the previous image's
+        # cleartext ones hashed into them — or, from the cutoff on, ended and wiped.
+        for statement in API_KEY_SCHEMA:
+            await db.execute(statement)
+        await db.commit()
+        imported, ended = await migrate_legacy_api_keys(db, api_key_clock(), legacy_cutoff())
+        if imported or ended:
+            # Counts only: never a value, a hash or an account name.
+            logger.info(
+                "legacy api keys migrated",
+                extra={"legacy_keys_imported": imported, "legacy_keys_ended": ended},
+            )
         # seed allow_registration from env if not set
         await db.execute(
             "INSERT OR IGNORE INTO site_settings (key, value) VALUES ('allow_registration', ?)",

@@ -66,6 +66,10 @@ PASSWORD_CHANGED = "auth.password.changed"  # noqa: S105
 PASSWORD_REHASHED = "auth.password.rehashed"  # noqa: S105
 APIKEY_DISCLOSED = "auth.apikey.disclosed"
 APIKEY_REGENERATED = "auth.apikey.regenerated"
+# WAIVER-SEC-003 (ADR 0044 Decision 6): a hashed key was minted, or a key ended. The detail
+# names the public key id — never the secret, never its hash.
+APIKEY_CREATED = "auth.apikey.created"
+APIKEY_REVOKED = "auth.apikey.revoked"
 ROLE_CHANGED = "admin.role.changed"
 REGISTRATION_TOGGLED = "admin.registration.toggled"
 ADMIN_BOOTSTRAP = "admin.bootstrap"
@@ -88,6 +92,8 @@ EVENTS = frozenset(
         PASSWORD_REHASHED,
         APIKEY_DISCLOSED,
         APIKEY_REGENERATED,
+        APIKEY_CREATED,
+        APIKEY_REVOKED,
         ROLE_CHANGED,
         REGISTRATION_TOGGLED,
         ADMIN_BOOTSTRAP,
