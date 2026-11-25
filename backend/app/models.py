@@ -58,7 +58,28 @@ PLAN_ITEM_ID_MAX = 200
 PLAN_ITEM_TEXT_MAX = 4_000
 PLAN_LIST_MAX_ITEMS = 500
 
+# What the previous deploy may already have stored (second review of brief 0073). It had none of the
+# bounds above, and the SPA resends a task's description, tags and depends and a plan's texts and
+# lists whole on every save, so a bound applied to the stored value would make such a task or plan
+# uneditable — not even its due date could change. **Only what changes is held to a bound** (the rule
+# `_tag_diff` already follows for legacy tags, D3); a value equal to the stored one is kept. The
+# request models of an update therefore carry only these ceilings, and the router or service compares
+# with what is stored. A task's text reached Taskwarrior as one argument, so nothing stored is longer
+# than the kernel's per-argument limit; a plan arrived in one body of at most the 1 MiB body limit.
+STORED_ARG_MAX = 131_072
+STORED_PLAN_VALUE_MAX = 1024 * 1024
+
+
+class LimitExceeded(ValueError):
+    """A changed value over its bound: 422 in FastAPI's validation shape, naming `field`."""
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field
+
+
 Tag = Annotated[str, Field(max_length=TAG_MAX)]
+StoredTag = Annotated[str, Field(max_length=STORED_ARG_MAX)]
 
 
 def _within_note_bytes(value: str) -> str:
@@ -173,16 +194,23 @@ class TaskCreate(BaseModel):
     )
 
 
+_KEPT = "a value equal to the stored one is kept whatever its size."
+
+
 class TaskModify(BaseModel):
     description: str | None = Field(
         default=None,
-        max_length=DESCRIPTION_MAX,
+        max_length=STORED_ARG_MAX,
         description=f"{_D_DESCRIPTION} Null, omitted or empty leaves it unchanged: a "
-        "description can be replaced, never cleared.",
+        f"description can be replaced, never cleared. A new description is at most "
+        f"{DESCRIPTION_MAX} characters (422); {_KEPT}",
     )
     project: str | None = Field(default=None, description=f"{_D_PROJECT} {_CLEARS}")
-    tags: list[Tag] | None = Field(
-        default=None, max_length=TAGS_MAX_ITEMS, description=_D_TAGS_MODIFY
+    tags: list[StoredTag] | None = Field(
+        default=None,
+        description=f"{_D_TAGS_MODIFY} A tag the task does not carry yet is at most {TAG_MAX} "
+        f"characters, and the set may not grow past {TAGS_MAX_ITEMS} tags (422); tags it already "
+        "carries are kept.",
     )
     priority: str | None = Field(
         default=None, max_length=PRIORITY_MAX, description=f"{_D_PRIORITY} {_CLEARS}"
@@ -208,9 +236,9 @@ class TaskModify(BaseModel):
     )
     depends: list[DependsId] | None = Field(
         default=None,
-        max_length=DEPENDS_MAX_ITEMS,
         description="The complete set of UUIDs of tasks that must be done first: a UUID not "
-        "listed is dropped. An empty list clears it; null or omitted leaves it unchanged.",
+        "listed is dropped. An empty list clears it; null or omitted leaves it unchanged. The "
+        f"set may not grow past {DEPENDS_MAX_ITEMS} (422).",
     )
     tags_add: list[Tag] | None = Field(
         default=None,
@@ -218,9 +246,8 @@ class TaskModify(BaseModel):
         description="Tags to add, leaving every other tag as it is. Cannot be combined "
         "with `tags`, which is the complete set and replaces the current one.",
     )
-    tags_remove: list[Tag] | None = Field(
+    tags_remove: list[StoredTag] | None = Field(
         default=None,
-        max_length=TAGS_MAX_ITEMS,
         description="Tags to remove, leaving every other tag as it is; an absent tag is "
         "ignored. Cannot be combined with `tags`.",
     )
@@ -333,15 +360,18 @@ class StoredBrainstormItem(BaseModel):
 
 
 class BrainstormItem(BaseModel):
-    """One item of a plan being written: bounded (RISK-SEC-004)."""
+    """One item of a plan being written. A new item is bounded; an item the stored plan already
+    holds is kept as it is."""
 
     id: str = Field(
-        max_length=PLAN_ITEM_ID_MAX,
-        description="Identifier of the item, unique within the list. Any string.",
+        max_length=STORED_PLAN_VALUE_MAX,
+        description="Identifier of the item, unique within the list. Any string; a new one is at "
+        f"most {PLAN_ITEM_ID_MAX} characters.",
     )
     text: str = Field(
-        max_length=PLAN_ITEM_TEXT_MAX,
-        description="One idea, or one organized step, as free text.",
+        max_length=STORED_PLAN_VALUE_MAX,
+        description="One idea, or one organized step, as free text; a new one is at most "
+        f"{PLAN_ITEM_TEXT_MAX} characters.",
     )
 
 
@@ -362,33 +392,82 @@ class ProjectPlan(BaseModel):
     updated_at: str | None = None
 
 
+_D_PLAN_TEXT_BOUND = (
+    f"A new text is at most {PLAN_TEXT_MAX} characters (422); one equal to the stored text is kept."
+)
+_D_PLAN_LIST_BOUND = (
+    f"A list may not grow past {PLAN_LIST_MAX_ITEMS} items (422); items the plan already holds, in "
+    "either list, are kept whatever their size."
+)
+
+
 class ProjectPlanUpdate(BaseModel):
     purpose: str | None = Field(
         default=None,
-        max_length=PLAN_TEXT_MAX,
-        description=f"Why the project exists — the outcome it serves. {_D_PLAN_TEXT}",
+        max_length=STORED_PLAN_VALUE_MAX,
+        description=f"Why the project exists — the outcome it serves. {_D_PLAN_TEXT} "
+        f"{_D_PLAN_TEXT_BOUND}",
     )
     principles: str | None = Field(
         default=None,
-        max_length=PLAN_TEXT_MAX,
-        description=f"The standards and constraints the work has to hold to. {_D_PLAN_TEXT}",
+        max_length=STORED_PLAN_VALUE_MAX,
+        description=f"The standards and constraints the work has to hold to. {_D_PLAN_TEXT} "
+        f"{_D_PLAN_TEXT_BOUND}",
     )
     vision: str | None = Field(
         default=None,
-        max_length=PLAN_TEXT_MAX,
+        max_length=STORED_PLAN_VALUE_MAX,
         description="What success looks like, described as if it had already happened. "
-        f"{_D_PLAN_TEXT}",
+        f"{_D_PLAN_TEXT} {_D_PLAN_TEXT_BOUND}",
     )
     brainstorm: list[BrainstormItem] | None = Field(
         default=None,
-        max_length=PLAN_LIST_MAX_ITEMS,
-        description=f"Unsorted ideas, in no particular order. {_D_PLAN_LIST}",
+        description=f"Unsorted ideas, in no particular order. {_D_PLAN_LIST} {_D_PLAN_LIST_BOUND}",
     )
     organized: list[BrainstormItem] | None = Field(
         default=None,
-        max_length=PLAN_LIST_MAX_ITEMS,
-        description=f"The ideas worth keeping, in the order they will be acted on. {_D_PLAN_LIST}",
+        description="The ideas worth keeping, in the order they will be acted on. "
+        f"{_D_PLAN_LIST} {_D_PLAN_LIST_BOUND}",
     )
+
+
+PLAN_TEXT_FIELDS = ("purpose", "principles", "vision")
+PLAN_LIST_FIELDS = ("brainstorm", "organized")
+
+
+def plan_limit_problem(update: ProjectPlanUpdate, stored: ProjectPlan) -> LimitExceeded | None:
+    """The first changed value of `update` over its bound, or None.
+
+    A text equal to the stored one is not checked. An item id or text the stored plan holds, in
+    either list (an item moves from brainstorm to organized), is not checked. A list longer than the
+    bound is refused only when it is longer than the larger of the stored lists too, so a plan that
+    already holds more items stays editable and may shrink, never grow past both."""
+    for name in PLAN_TEXT_FIELDS:
+        value = getattr(update, name)
+        if value is not None and len(value) > PLAN_TEXT_MAX and value != getattr(stored, name):
+            return LimitExceeded(name, f"String should have at most {PLAN_TEXT_MAX} characters")
+    items = [*stored.brainstorm, *stored.organized]
+    known_ids = {i.id for i in items}
+    known_texts = {i.text for i in items}
+    held = max(len(stored.brainstorm), len(stored.organized))
+    for name in PLAN_LIST_FIELDS:
+        values = getattr(update, name)
+        if values is None:
+            continue
+        if len(values) > PLAN_LIST_MAX_ITEMS and len(values) > held:
+            return LimitExceeded(
+                name, f"List should have at most {PLAN_LIST_MAX_ITEMS} items, not {len(values)}"
+            )
+        for item in values:
+            if len(item.id) > PLAN_ITEM_ID_MAX and item.id not in known_ids:
+                return LimitExceeded(
+                    name, f"An item id should have at most {PLAN_ITEM_ID_MAX} characters"
+                )
+            if len(item.text) > PLAN_ITEM_TEXT_MAX and item.text not in known_texts:
+                return LimitExceeded(
+                    name, f"An item text should have at most {PLAN_ITEM_TEXT_MAX} characters"
+                )
+    return None
 
 
 # The GTD summary: what a review or a reminder needs before it decides whether to fetch

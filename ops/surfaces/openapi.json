@@ -239,17 +239,17 @@
         "type": "object"
       },
       "BrainstormItem": {
-        "description": "One item of a plan being written: bounded (RISK-SEC-004).",
+        "description": "One item of a plan being written. A new item is bounded; an item the stored plan already\nholds is kept as it is.",
         "properties": {
           "id": {
-            "description": "Identifier of the item, unique within the list. Any string.",
-            "maxLength": 200,
+            "description": "Identifier of the item, unique within the list. Any string; a new one is at most 200 characters.",
+            "maxLength": 1048576,
             "title": "Id",
             "type": "string"
           },
           "text": {
-            "description": "One idea, or one organized step, as free text.",
-            "maxLength": 4000,
+            "description": "One idea, or one organized step, as free text; a new one is at most 4000 characters.",
+            "maxLength": 1048576,
             "title": "Text",
             "type": "string"
           }
@@ -610,14 +610,13 @@
                 "items": {
                   "$ref": "#/components/schemas/BrainstormItem"
                 },
-                "maxItems": 500,
                 "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Unsorted ideas, in no particular order. The complete list: what you send replaces the stored one. Omitted or null keeps it.",
+            "description": "Unsorted ideas, in no particular order. The complete list: what you send replaces the stored one. Omitted or null keeps it. A list may not grow past 500 items (422); items the plan already holds, in either list, are kept whatever their size.",
             "title": "Brainstorm"
           },
           "organized": {
@@ -626,53 +625,52 @@
                 "items": {
                   "$ref": "#/components/schemas/BrainstormItem"
                 },
-                "maxItems": 500,
                 "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The ideas worth keeping, in the order they will be acted on. The complete list: what you send replaces the stored one. Omitted or null keeps it.",
+            "description": "The ideas worth keeping, in the order they will be acted on. The complete list: what you send replaces the stored one. Omitted or null keeps it. A list may not grow past 500 items (422); items the plan already holds, in either list, are kept whatever their size.",
             "title": "Organized"
           },
           "principles": {
             "anyOf": [
               {
-                "maxLength": 20000,
+                "maxLength": 1048576,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The standards and constraints the work has to hold to. Omitted or null keeps the stored text; an empty string clears it.",
+            "description": "The standards and constraints the work has to hold to. Omitted or null keeps the stored text; an empty string clears it. A new text is at most 20000 characters (422); one equal to the stored text is kept.",
             "title": "Principles"
           },
           "purpose": {
             "anyOf": [
               {
-                "maxLength": 20000,
+                "maxLength": 1048576,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Why the project exists \u2014 the outcome it serves. Omitted or null keeps the stored text; an empty string clears it.",
+            "description": "Why the project exists \u2014 the outcome it serves. Omitted or null keeps the stored text; an empty string clears it. A new text is at most 20000 characters (422); one equal to the stored text is kept.",
             "title": "Purpose"
           },
           "vision": {
             "anyOf": [
               {
-                "maxLength": 20000,
+                "maxLength": 1048576,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "What success looks like, described as if it had already happened. Omitted or null keeps the stored text; an empty string clears it.",
+            "description": "What success looks like, described as if it had already happened. Omitted or null keeps the stored text; an empty string clears it. A new text is at most 20000 characters (422); one equal to the stored text is kept.",
             "title": "Vision"
           }
         },
@@ -1256,27 +1254,26 @@
                   "maxLength": 64,
                   "type": "string"
                 },
-                "maxItems": 100,
                 "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The complete set of UUIDs of tasks that must be done first: a UUID not listed is dropped. An empty list clears it; null or omitted leaves it unchanged.",
+            "description": "The complete set of UUIDs of tasks that must be done first: a UUID not listed is dropped. An empty list clears it; null or omitted leaves it unchanged. The set may not grow past 100 (422).",
             "title": "Depends"
           },
           "description": {
             "anyOf": [
               {
-                "maxLength": 2000,
+                "maxLength": 131072,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "What the task is, as free text. Never parsed for tags or attributes. Null, omitted or empty leaves it unchanged: a description can be replaced, never cleared.",
+            "description": "What the task is, as free text. Never parsed for tags or attributes. Null, omitted or empty leaves it unchanged: a description can be replaced, never cleared. A new description is at most 2000 characters (422); a value equal to the stored one is kept whatever its size.",
             "title": "Description"
           },
           "due": {
@@ -1347,17 +1344,16 @@
             "anyOf": [
               {
                 "items": {
-                  "maxLength": 100,
+                  "maxLength": 131072,
                   "type": "string"
                 },
-                "maxItems": 50,
                 "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The complete tag set, written without `+`: tags not listed are removed, so this overwrites changes made elsewhere. To change single tags use `tags_add` / `tags_remove`.",
+            "description": "The complete tag set, written without `+`: tags not listed are removed, so this overwrites changes made elsewhere. To change single tags use `tags_add` / `tags_remove`. A tag the task does not carry yet is at most 100 characters, and the set may not grow past 50 tags (422); tags it already carries are kept.",
             "title": "Tags"
           },
           "tags_add": {
@@ -1381,10 +1377,9 @@
             "anyOf": [
               {
                 "items": {
-                  "maxLength": 100,
+                  "maxLength": 131072,
                   "type": "string"
                 },
-                "maxItems": 50,
                 "type": "array"
               },
               {

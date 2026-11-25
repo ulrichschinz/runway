@@ -1,6 +1,7 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.exceptions import RequestValidationError
 
 from app.database import get_db
 from app.database import set_project_status as store_project_status
@@ -11,6 +12,7 @@ from app.models import (
     ProjectPlanUpdate,
     ProjectStatus,
     ProjectStatusUpdate,
+    plan_limit_problem,
     validate_project_name,
 )
 
@@ -123,6 +125,14 @@ async def upsert_plan(
     # existing row is an update and is left alone, for the live-user reason in `_created`.
     if existing is None:
         _created(name)
+    # Only what changes is held to a bound (second review of brief 0073): the plan page resends
+    # every text and both lists whole, and a plan stored before the bounds must stay editable.
+    stored = _row_to_plan(name, existing) if existing else ProjectPlan(project_name=name)
+    problem = plan_limit_problem(payload, stored)
+    if problem is not None:
+        raise RequestValidationError(
+            [{"type": "too_long", "loc": ("body", problem.field), "msg": str(problem)}]
+        )
 
     current = dict(existing) if existing else {}
 
