@@ -180,6 +180,13 @@ red against `f2cef64`'s code, before the fix was written. **Base revision of the
   the NUL rule and the soak's 72-byte limit). The SPA's German message for a 422 names the whole rule;
   the two older views show the server's sentence.
 
+- Gate after the fixes: `make check` on `7357a3f` was **RED** once — `RULE-ARCH-003`, the new CLI raised
+  the fan-in of `database.py`, `audit.py` and `auth.py`; recorded with reasons in `474b325`, then **GREEN**
+  (unit 968 passed, frontend 764 passed). `make verify` on `474b325` in a clean, bootstrapped detached
+  worktree: **GREEN** (216 s of 600 s) — 57 fixture arms passed, 0 failed; 47 of 50 executable rules proven
+  able to fail (no rule added); live branch protection matched `ops/github/ruleset.json`.
+  **`py-test-container` was skipped** (arm64, `RISK-TEST-001`) and has to be observed in CI on amd64.
+
 Minor, documented, not coded: lowering `ARGON2_TIME_COST` **after** Switch 1 makes an account whose hash
 is still at the old parameters measurably slower to refuse than an unknown one (a hash-age timing oracle)
 until it logs in once. The runbook now makes it a rule: change the parameters only before Switch 1, when no
