@@ -183,6 +183,12 @@ stated, not hidden.
   1033 passed, frontend 767 passed, 57 fixture arms passed, 0 failed; 47 of 50 executable rules proven able
   to fail. The **container tier was skipped** on this arm64 host (`RISK-TEST-001`: no arm64 archlinux
   image); it runs in CI only and was not observed here. No Taskwarrior path changed in this package.
+- Review round, `make check` on `7113b4d`: **GREEN** (39 s of 180 s).
+- Review round, `make verify` on `7113b4d` in a clean, bootstrapped detached worktree: **GREEN** (274 s of
+  600 s) — unit 1061 passed, frontend 767 passed, 57 fixture arms passed, 0 failed; 47 of 50 executable
+  rules proven able to fail. The **container tier was skipped** on this arm64 host (`RISK-TEST-001`); the
+  Dockerfile's CMD changed (`--workers 1`), so the image was **not** built or started here — CI's container
+  tier is the first run of it.
 
 ### Deferred, with trigger
 
