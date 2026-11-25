@@ -216,3 +216,22 @@ Ten reviewer issues on `0a895ea`, each re-checked here before acting. Planned be
    PR — and this branch after it; or record here and in ADR 0046 that the owner accepts the bundle, knowing
    that rolling M7.1 back also reinstates python-multipart 0.0.12. The implementing agent may not create
    branches or PRs, so this is not done here.
+
+### Gate (review round 1)
+
+- `make check` on `9ef3ccb` and on `c8f77d5`, each after `make fix` (the untracked index only):
+  **GREEN** (74 s of 180 s; 1515 unit tests, 779 frontend).
+- `make verify` on `9ef3ccb` in a clean, bootstrapped detached worktree: **RED** — the new positive control
+  `test_positive_control_this_venv_matches_its_lock` failed, because a bootstrapped venv installs the
+  intent and its transitives were newer than `requirements-dev.lock` (the main checkout's venv happened to
+  match). Fixed in `c8f77d5` (the control builds its lock from what is installed).
+- `make verify` on `c8f77d5` in the same worktree after `make fix`: **GREEN** (314 s of 600 s) — unit 1515
+  passed, 60 fixture arms passed, 0 failed, 47 of 50 executable rules proven able to fail. The first run
+  on `c8f77d5` was RED on `RULE-IDX-001` only (the worktree's untracked index was built at `9ef3ccb`). The
+  **container tier was skipped** on this arm64 host (`RISK-TEST-001`) and was **not** observed.
+- **The deploy step's script on the runtime pip layer** (one-off, `python:3.12-slim@sha256:7a8b47…`,
+  `linux/amd64`, under emulation): `pip install --require-hashes -r requirements.lock`, then
+  `python - /app/requirements.lock < tools/installed_matches_lock.py` → `ok`, exit 0. The same with the
+  base `3e3faab`'s `requirements.lock` → exit 1: `python-multipart 0.0.12 is below 0.0.31`, `jose is
+  importable`, `ecdsa is importable` — the step would have stopped the previous closure. The step itself in
+  `deploy.yml` has not run (it runs on the first push to `main`).
