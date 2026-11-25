@@ -743,9 +743,11 @@ record, and [`AGENTS.md`](../AGENTS.md) §10 carries the short form.
   Several controls above depend on that and say so — the login limiter's counters are per-process
   (`RISK-SEC-003`), and the three stores sharing one partition is only survivable at this size
   (`RISK-OPS-006`).
-- **Nothing here reaches production.** Every claim about the deploy host is a transcription of a read
-  taken on a date, and nothing continuously compares the checked-in copy against the host
-  (`RISK-OPS-002`). CI has no host access; closing it needs a scheduled job somewhere that does.
+- **Nothing here reaches the host itself.** After every deploy `verify-deploy` checks what the running
+  server reports — commit, build id, the SHA-256 of the baked and of the host-applied compose file, the
+  schema version — and that the registry's `:latest` and `:<sha>` are the digest this run pushed
+  (brief 0073). Between deploys nothing compares, and which digest the host's container runs is inferred
+  through the build id, not read (`RISK-OPS-002`). Every other claim about the host is a dated read.
 - **Physical, host and network security are outside the boundary.** No claim is made about the
   operating system, the SSH configuration, Traefik, TLS renewal, or backups.
 - **Frontend rendering, routing and gestures are untested** (`RISK-TEST-004`), and the container test

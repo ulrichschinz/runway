@@ -1124,9 +1124,20 @@ residual_risks:
       nothing reads /opt/services/runway/docker-compose.yml, so a compose that drifted, or a
       deploy that never rewrote it, still looks exactly like one that did as long as the
       containers it already runs answer correctly.
+
+      Narrowed 2026-11-25 (brief 0073, ADR 0047 Decision 4). The deploy compose now mounts its
+      own file read-only into the backend, and GET /skill reports the SHA-256 of that host-applied
+      file beside the SHA-256 of the compose baked into the image, the build id (the workflow run
+      that pushed the image) and the schema version. verify-deploy requires all four to match this
+      run and this commit, and requires the registry's :latest and :<sha> to resolve to the digest
+      build-and-push pushed; a stubbed run of both steps fails for each mismatch
+      (test_deploy_evidence.py). What remains: CI still cannot ask the host which digest its
+      container runs — the chain is the build id plus the registry digest — and nothing compares
+      anything between deploys. That a deploy of this change actually passed the new checks is a
+      production observation not yet made.
     owner: maintainer
-    re_open_trigger: "a check confirms after a deploy that the host's compose matches the deployed commit, or a documented topology claim is found to be false again"
-    decision_record: docs/adr/0032-the-deploy-mechanism-correction.md
+    re_open_trigger: "verify-deploy fails on the applied compose, the build id or the digest, the host gains a way to report its container's image digest, or a documented topology claim is found to be false again"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   - id: RISK-DOC-002
     statement: >

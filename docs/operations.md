@@ -73,11 +73,25 @@ Steps 2 and 4 are there for a failure the gate structurally cannot see: it build
 **503** in production. The same comparison catches an image built from a different commit than the one
 being verified, and a deploy that never reached the host at all.
 
-What it does **not** do is read the host. `/opt/services/runway/docker-compose.yml` is still unobserved, so
-a compose that drifted — or a deploy that never rewrote it — looks exactly like one that did for as long as
-the containers already running answer correctly. `RISK-OPS-002` stays open, narrowed: "the deploy reported
-success" and "this commit is serving production" are now two separate claims, and the second one is
-checked.
+Since brief 0073 the same step also checks **which image, under which compose, at which schema version**
+(`RISK-OPS-002`, ADR 0047 Decision 4). `GET /api/skill`'s `server` object reports:
+
+| field | what it is | must equal |
+|---|---|---|
+| `build` | `/app/BUILD_ID`, the workflow run id baked by `ARG RUNWAY_BUILD` | this run's `GITHUB_RUN_ID` |
+| `compose_sha256` | SHA-256 of `/opt/stack/docker-compose.yml`, the compose baked into the image | SHA-256 of `ops/deploy/docker-compose.yml` at this commit |
+| `applied_compose_sha256` | SHA-256 of the host's own `./docker-compose.yml`, which the deploy compose mounts read-only at `/etc/runway/applied-compose.yml` | the same |
+| `schema_version` | the version `init_db()` left `users.db` at ([Schema migrations](#schema-migrations)) | the `-- schema_version` line of `ops/surfaces/db-schema.sql` |
+
+Only hashes and a number leave the container; the file is never served. An `applied_compose_sha256` that is
+`null` or differs is the failure this repository could not see before: the host script did not write the
+compose the image carries, and the new image is running under the old configuration. A second step then asks
+the registry (`docker buildx imagetools inspect`) whether `:latest` and `:<sha>` resolve to the digest
+`build-and-push` pushed.
+
+What it still does **not** do is read the host: CI has no access, so which digest the host's container runs is
+inferred — the build id is baked only into the image this run pushed — not observed, and between deploys
+nothing compares anything. `RISK-OPS-002` stays open, narrowed to that.
 
 ### The correction of 2026-08-31
 

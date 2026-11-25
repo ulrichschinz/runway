@@ -15,7 +15,7 @@ from app.database import init_db, legacy_cutoff, legacy_cutoff_problem
 from app.logging_setup import configure_logging, resolve_level
 from app.middleware import BodyLimitMiddleware, RequestIdMiddleware
 from app.routers import admin, auth, gtd, inbox, projects, skill, tasks
-from app.services import task_service
+from app.services import skill_service, task_service
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,8 @@ async def lifespan(app: FastAPI):
     # first thing there would otherwise be nowhere to write.
     audit.init_store()
     bootstrap_reason = await init_db()
+    # Reported by GET /skill for the post-deploy check (brief 0073, RISK-OPS-002).
+    skill_service.record_schema_version(database.applied_schema_version)
     # bootstrap_admin has always returned a string naming the branch it took, and the caller
     # has always thrown it away. It is recorded here because a role change that happens at
     # boot, with no request and no acting principal, is the one role change that leaves no

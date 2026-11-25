@@ -782,12 +782,54 @@
         "type": "object"
       },
       "ServerBuild": {
-        "description": "Which build of the server is answering.",
+        "description": "Which build of the server is answering, under which configuration (RISK-OPS-002, brief 0073).\n\nHashes and numbers only: never a file, a path on the host or a value from its `.env`.",
         "properties": {
+          "applied_compose_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SHA-256 of the compose file the host applied, as mounted read-only into the container, or null when it is not mounted.",
+            "title": "Applied Compose Sha256"
+          },
+          "build": {
+            "default": "dev",
+            "description": "The id of the deploy-workflow run that built this image, or 'dev'. Only the image that run pushed carries it.",
+            "title": "Build",
+            "type": "string"
+          },
           "commit": {
             "description": "The commit this image was built from, or 'dev' when it was not built by the deploy workflow.",
             "title": "Commit",
             "type": "string"
+          },
+          "compose_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SHA-256 of the deploy compose file baked into this image, or null.",
+            "title": "Compose Sha256"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The schema version this process left its database at, or null before it has initialised one.",
+            "title": "Schema Version"
           }
         },
         "required": [
