@@ -217,6 +217,13 @@ colliding pairs on the host are an operator item (query in *Deferred*).
   rules proven able to fail. The **container tier was skipped** on this arm64 host (`RISK-TEST-001`); the
   Dockerfile's CMD changed (`--workers 1`), so the image was **not** built or started here — CI's container
   tier is the first run of it.
+- Second review round, `make check` on `e65e861`: **RED** once — `RULE-IDX-001` (index stale after the
+  commit, `make fix` not yet run) and `RULE-GATE-001` (512 s of 180 s, run while two other worktrees'
+  gates loaded the machine); after `make fix`, **GREEN** (37 s of 180 s). No budget was changed.
+- Second review round, `make verify` on `e65e861` in a clean, bootstrapped detached worktree: **GREEN**
+  (273 s of 600 s) — unit 1069 passed, frontend 767 passed, 57 fixture arms passed, 0 failed; 47 of 50
+  executable rules proven able to fail. The **container tier was skipped** on this arm64 host
+  (`RISK-TEST-001`) and was not observed here; this round changed no Taskwarrior path and no image file.
 
 ### Deferred, with trigger
 
