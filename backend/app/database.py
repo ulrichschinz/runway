@@ -256,9 +256,78 @@ async def create_account(db, username: str, hashed_password: str, api_key: str) 
 
 
 async def delete_account(db, account_id: int) -> None:
-    """Undo `create_account` when its store could not be provisioned."""
-    await db.execute("DELETE FROM users WHERE id=?", (account_id,))
+    """Undo `create_account` when its store could not be provisioned.
+
+    Today that is the only caller, and a new account is a `user` — but nothing about the
+    function said so, so it is held to the last-admin invariant like every other write that
+    can remove an admin. Raises `LastAdminError` (and deletes nothing) if the row is the
+    instance's only admin.
+    """
+    async with admin_preserving_write(db):
+        await db.execute("DELETE FROM users WHERE id=?", (account_id,))
+
+
+# --- the last-admin invariant (REV-002, brief 0068) -----------------------------------------
+#
+# An instance that has an administrator must keep one: every /admin route requires an admin,
+# so with none there is no route back through the API (ADR 0017). The guard used to be a count
+# read in autocommit followed by a separate UPDATE, so two overlapping demotions could both
+# read "two admins" and both write. It is now ONE write transaction per change, taken with
+# BEGIN IMMEDIATE before anything is read, and checked AFTER the write.
+
+
+class LastAdminError(Exception):
+    """A write would have left an instance that had an admin with none. Nothing was written."""
+
+
+async def count_admins(db) -> int:
+    async with db.execute("SELECT COUNT(*) FROM users WHERE role='admin'") as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+@asynccontextmanager
+async def admin_preserving_write(db) -> AsyncIterator[None]:
+    """Run the enclosed statements as one serialised transaction that cannot remove the last admin.
+
+    `BEGIN IMMEDIATE` takes SQLite's write lock before the first read, so any other writer of
+    the same file — another request, the operator CLI, a second worker — waits (up to the
+    connection's busy timeout, 5 s by default; past it the write fails, it is never silently
+    lost) until this one commits or rolls back. The invariant is checked after the enclosed
+    writes, so it holds for whatever they were, including a bulk statement nobody foresaw:
+    if the instance had at least one admin when the transaction began and has none at its
+    end, everything is rolled back and `LastAdminError` raised. An instance with no admin at
+    all (before `BOOTSTRAP_ADMIN`, or during recovery) is not blocked.
+
+    Commits on a normal exit, including a `return` from inside the block.
+    """
+    if db.in_transaction:
+        # BEGIN would fail, and committing at the end would commit someone else's half-done
+        # work under this guard's name. A caller that gets here has a bug; say so loudly.
+        raise RuntimeError("admin_preserving_write needs a connection with no open transaction")
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        had_admin = await count_admins(db) > 0
+        yield
+        if had_admin and await count_admins(db) == 0:
+            raise LastAdminError("this write would remove the last admin")
+    except BaseException:
+        await db.rollback()
+        raise
     await db.commit()
+
+
+async def set_role(db, username: str, role: str) -> str | None:
+    """Set an account's role under the last-admin invariant. Returns the PREVIOUS role (`user`
+    when the column is empty), or None when there is no such account — nothing written.
+    Raises `LastAdminError` when the change would remove the last admin; nothing written."""
+    async with admin_preserving_write(db):
+        async with db.execute("SELECT role FROM users WHERE username=?", (username,)) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        await db.execute("UPDATE users SET role=? WHERE username=?", (role, username))
+    return row[0] or "user"
 
 
 async def backfill_storage_ids(db) -> int:

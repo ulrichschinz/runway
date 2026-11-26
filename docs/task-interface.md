@@ -169,8 +169,10 @@ and formatting for the backend, `eslint --fix` for the frontend. Tool-owned and 
 by running this, never by hand-editing — a hand-edit produces a diff the tool undoes on its next run.
 
 ### `make grant-admin`
-Promotes an account to admin directly in a database, bypassing the API and its last-admin guard. The escape
-hatch for an instance that has ended up with no administrator.
+Promotes an account to admin directly in a database, bypassing the API. The escape
+hatch for an instance that has ended up with no administrator. `--role user` demotes, but never the last
+admin: that is refused with exit `1`, in one `BEGIN IMMEDIATE` transaction with the check after the write
+(REV-002, brief 0068).
 
 ```sh
 ./run grant-admin --db /opt/services/runway/users.db uli
@@ -178,7 +180,8 @@ hatch for an instance that has ended up with no administrator.
 
 `--db` has no default on purpose: this writes to a live database, so the path should be a deliberate
 keystroke. It does not create accounts — register first. Exits `2` when the account does not exist and `3`
-when the database cannot be opened. See [`docs/security.md`](security.md).
+when the database cannot be opened or the change fails in it (a write lock held past the 5 s busy timeout,
+a file without a `users` table), with nothing changed; `1` only when the change would remove the last admin. See [`docs/security.md`](security.md).
 
 ### `make surfaces`
 Reports drift in the protected public surfaces, and with `--update` rewrites the snapshots in `ops/surfaces/`.
