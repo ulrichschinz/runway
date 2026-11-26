@@ -44,9 +44,13 @@ if ! build=$(docker build -q -t runway-backend-test -f Dockerfile.test . 2>&1); 
 fi
 
 # The deploy compose's backend flags once the switch is made (ADR 0048): uid 10001, read-only
-# root, one tmpfs, no capability, no new privileges.
+# root, one tmpfs, no capability, no new privileges. The second tmpfs is the test harness's
+# only: the rc-file controls of brief 0074 need a hook Taskwarrior can execute, and /tmp is
+# noexec. Without it those controls fail, and the negative tests beside them would pass vacuously.
 if ! out=$(docker run --rm --user 10001:10001 --read-only \
 	--tmpfs /tmp:rw,noexec,nosuid,nodev,size=256m --cap-drop ALL \
+	--tmpfs /run/testhooks:rw,exec,nosuid,nodev,size=1m,uid=10001,gid=10001 \
+	-e RUNWAY_TEST_HOOK_DIR=/run/testhooks \
 	--security-opt no-new-privileges:true runway-backend-test 2>&1); then
 	printf '%s\n' "$out" | tail -40 | sed 's/^/        /' >&2
 	fail_rule RULE-TEST-002 "the backend container suite failed against the real Taskwarrior binary"
