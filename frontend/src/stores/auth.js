@@ -30,11 +30,23 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('token', data.access_token)
     localStorage.setItem('username', user)
     await fetchMe()
+    // The answer, for the page to decide where to go (`landingAfterLogin`, SEC-006).
+    return data
+  }
+
+  /**
+   * Keep the token a password change returned (REV-001, ADR 0044). The change ends every session
+   * issued before it, this one included; the server hands this session a token at the new version
+   * so it carries on while every other browser and device is logged out.
+   */
+  function adoptToken(fresh) {
+    token.value = fresh
+    localStorage.setItem('token', fresh)
   }
 
   async function register(user, pass) {
     await client.post('/auth/register', { username: user, password: pass })
-    await login(user, pass)
+    return login(user, pass)
   }
 
   function logout() {
@@ -53,5 +65,5 @@ export const useAuthStore = defineStore('auth', () => {
   // refresh profile on every page load if already authenticated
   if (token.value) fetchMe()
 
-  return { username, token, role, fullName, email, login, register, logout, fetchMe }
+  return { username, token, role, fullName, email, login, register, logout, fetchMe, adoptToken }
 })

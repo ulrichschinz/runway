@@ -2,7 +2,7 @@ from aiosqlite import Connection
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app import audit
-from app.database import get_allow_registration, get_db
+from app.database import LastAdminError, get_allow_registration, get_db, set_role
 from app.dependencies import get_current_admin
 from app.models import VALID_ROLES, RoleUpdate, SiteSettings, UserInfo
 
@@ -78,9 +78,35 @@ async def set_user_role(
             detail="the requested role is not one this instance has",
         )
         raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
-    async with db.execute("SELECT username, role FROM users WHERE username=?", (target,)) as cur:
-        row = await cur.fetchone()
-    if not row:
+    # Refuse to remove the last administrator. Without this an admin can demote themselves
+    # — or the only other admin — leaving an instance nobody can administer: /admin/users
+    # and /admin/settings both require an admin, so there is no route back through the API.
+    # Recovery would mean editing the database on the host. The check is on the count, not
+    # on self-demotion, because demoting someone else is just as final when they are the
+    # only one left.
+    #
+    # `set_role` reads, writes and checks in ONE serialised transaction (REV-002, brief 0068):
+    # a count read here first and an UPDATE after it let two overlapping demotions both pass.
+    try:
+        previous = await set_role(db, target, body.role)
+    except LastAdminError:
+        # A refusal is an event. This one in particular: it is the control standing
+        # between the instance and a state nobody can administer, so an operator asking
+        # "did someone try to demote the last admin" should not have to hope the log
+        # file from that week still exists.
+        audit.record(
+            audit.ROLE_CHANGED,
+            outcome=audit.REFUSED,
+            actor=username,
+            subject=target,
+            route=route,
+            detail="refused: this is the last admin",
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="Refusing to demote the last admin — promote another user first",
+        ) from None
+    if previous is None:
         audit.record(
             audit.ROLE_CHANGED,
             outcome=audit.FAILURE,
@@ -91,50 +117,21 @@ async def set_user_role(
         )
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Refuse to remove the last administrator. Without this an admin can demote themselves
-    # — or the only other admin — leaving an instance nobody can administer: /admin/users
-    # and /admin/settings both require an admin, so there is no route back through the API.
-    # Recovery would mean editing the database on the host. The check is on the count, not
-    # on self-demotion, because demoting someone else is just as final when they are the
-    # only one left.
-    if row["role"] == "admin" and body.role != "admin":
-        async with db.execute("SELECT COUNT(*) AS n FROM users WHERE role='admin'") as cur:
-            admins = await cur.fetchone()
-        if admins and admins["n"] <= 1:
-            # A refusal is an event. This one in particular: it is the control standing
-            # between the instance and a state nobody can administer, so an operator asking
-            # "did someone try to demote the last admin" should not have to hope the log
-            # file from that week still exists.
-            audit.record(
-                audit.ROLE_CHANGED,
-                outcome=audit.REFUSED,
-                actor=username,
-                subject=target,
-                route=route,
-                detail="refused: this is the last admin",
-            )
-            raise HTTPException(
-                status_code=409,
-                detail="Refusing to demote the last admin — promote another user first",
-            )
-
-    await db.execute("UPDATE users SET role=? WHERE username=?", (body.role, target))
-    await db.commit()
     audit.record(
         audit.ROLE_CHANGED,
         outcome=audit.SUCCESS,
         actor=username,
         subject=target,
         route=route,
-        detail=f"role {row['role'] or 'user'} -> {body.role}",
+        detail=f"role {previous} -> {body.role}",
     )
     async with db.execute(
         "SELECT username, role, full_name, email FROM users WHERE username=?", (target,)
     ) as cur:
         r = await cur.fetchone()
-    # The row was checked above and just updated on the same connection, so None is not
-    # reachable in practice; the check is what lets the types prove it (brief 0056). Should
-    # it ever happen, the answer is the one this handler already gives for a missing target.
+    # The row was just updated on the same connection, so None is reachable only if another
+    # request deleted it in between; the check is also what lets the types prove it (brief
+    # 0056). The answer is the one this handler already gives for a missing target.
     if r is None:
         raise HTTPException(status_code=404, detail="User not found")
     return UserInfo(

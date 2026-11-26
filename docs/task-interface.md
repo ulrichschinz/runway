@@ -137,7 +137,7 @@ the slice as a unit:
 | `backend/tests/unit/test_<name>.py` | the slice is covered — a new module with no tests moves total coverage toward the `RULE-TEST-003` floor |
 | `backend/tests/container/test_<name>.py` | the module is proven present in the shipped image |
 | a `be/feature/<name>` unit in `architecture.toml` | `RULE-ARCH-001` has an edge list to check it against — one that withholds `be/adapters/task` |
-| a line in `rules/route-guards.toml` | `RULE-SEC-001` passes; a route with no declared guard fails the gate |
+| a line in `rules/route-guards.toml` | `RULE-SEC-001` passes; a route the booted app serves with no declared guard fails the gate, wherever it is declared |
 | the REST route count in `AGENTS.md` | `RULE-DOC-001` checks the REST count against the index and the MCP count against `ops/surfaces/mcp-tools.json`; a new route moves the REST count, and the MCP count only if its tag is on the allowlist (ADR 0037) |
 
 **`KIND=frontend-feature`** emits a view, its pure logic module and a vitest file, registers an `fe/<name>`
@@ -169,8 +169,10 @@ and formatting for the backend, `eslint --fix` for the frontend. Tool-owned and 
 by running this, never by hand-editing — a hand-edit produces a diff the tool undoes on its next run.
 
 ### `make grant-admin`
-Promotes an account to admin directly in a database, bypassing the API and its last-admin guard. The escape
-hatch for an instance that has ended up with no administrator.
+Promotes an account to admin directly in a database, bypassing the API. The escape
+hatch for an instance that has ended up with no administrator. `--role user` demotes, but never the last
+admin: that is refused with exit `1`, in one `BEGIN IMMEDIATE` transaction with the check after the write
+(REV-002, brief 0068).
 
 ```sh
 ./run grant-admin --db /opt/services/runway/users.db uli
@@ -178,7 +180,8 @@ hatch for an instance that has ended up with no administrator.
 
 `--db` has no default on purpose: this writes to a live database, so the path should be a deliberate
 keystroke. It does not create accounts — register first. Exits `2` when the account does not exist and `3`
-when the database cannot be opened. See [`docs/security.md`](security.md).
+when the database cannot be opened or the change fails in it (a write lock held past the 5 s busy timeout,
+a file without a `users` table), with nothing changed; `1` only when the change would remove the last admin. See [`docs/security.md`](security.md).
 
 ### `make surfaces`
 Reports drift in the protected public surfaces, and with `--update` rewrites the snapshots in `ops/surfaces/`.
@@ -189,9 +192,15 @@ Reports drift in the protected public surfaces, and with `--update` rewrites the
 ```
 
 Five surfaces are snapshotted: the served OpenAPI schema, the **runtime-observed** MCP tool list, the
-migrated database schema, the Taskwarrior template, and the SPA routes and localStorage keys. Environment
-variables are cross-checked against `README.md` instead of snapshotted — `RULE-SURF-002` fails when a
-documented variable is unread or a read variable is undocumented.
+migrated database schema (with the schema version it reached), the Taskwarrior template, and the SPA routes
+and localStorage keys. Environment variables are cross-checked against `README.md` instead of snapshotted —
+`RULE-SURF-002` fails when a documented variable is unread or a read variable is undocumented.
+
+The database schema is also built the way production got it. `RULE-SURF-005` creates a database from every
+historical baseline in `backend/tests/fixtures/schema_history/`, runs `init_db()` on it, and fails when the
+result means something different from a fresh database — a column, default, `CHECK`, index, trigger or the
+schema version (brief 0073, ADR 0047). A schema change is a step in `VERSIONED_MIGRATIONS` in
+`backend/app/database.py`; editing a `CREATE` statement alone is exactly what this rule catches.
 
 Updating a snapshot is not a way around the rule; it is the rule working. The diff is what makes a
 public-surface change something a human commits rather than something that happens.
@@ -560,8 +569,8 @@ changes in flight.
 It reports two numbers, and they are not the same number:
 
 ```
-  56 fixture arm(s) passed, 0 failed
-  46 of 49 executable rules proven able to fail; 3 declare no automated fixture (…)
+  57 fixture arm(s) passed, 0 failed
+  47 of 50 executable rules proven able to fail; 3 declare no automated fixture (…)
 ```
 
 Several rules have more than one arm — `RULE-OPS-001` is proven twice, once for the subprocess and once for

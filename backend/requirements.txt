@@ -1,22 +1,35 @@
 fastapi==0.141.1
 uvicorn[standard]==0.53.0
-# 3.3.0 carried the algorithm-confusion and JWT-bomb advisories (finding SEC-7). 3.5.0 was
-# verified drop-in against this application's exact usage — HS256 encode/decode, and an
-# `alg: none` token still refused — on 2026-08-26.
-python-jose[cryptography]==3.5.0
+# Signs and verifies the session token (HS256 only; finding SEC-002, brief 0072, ADR 0046). Replaced
+# python-jose, whose last release, 3.5.0 (2025-05-28), carries CVE-2024-33663/CVE-2026-85394 (a public
+# key accepted as an HMAC secret) and CVE-2026-120459 (an empty HMAC key) with no fixed release — there
+# is no 3.5.1. PyJWT was already in the image as a dependency of mcp (at 2.13.0, which OSV lists with
+# advisories fixed in 2.14.0 and 2.15.0); 2.15.1 (2026-09-28) has none. No extra: HS256 needs no
+# `cryptography`, and mcp asks for `pyjwt[crypto]` itself.
+PyJWT==2.15.1
 
-# passlib 1.7.4 is the LATEST release, and it is from 2020-10-08. Unmaintained, not merely
-# pinned. See ADR 0021 and RISK-DEP-003.
-passlib[bcrypt]==1.7.4
+# Argon2id for every new and changed password (finding SEC-006, ADR 0044 Decision 5, brief 0067).
+# argon2-cffi is maintained by the Argon2 reference binding's author and is used directly —
+# passlib, unmaintained since 2020-10-08 (RISK-DEP-003), was removed in the same change.
+argon2-cffi==25.1.0
+# The native binding, pinned in the intent rather than left to the resolver: the newest release
+# (26.2.0) was 11 days old on 2026-11-24, and a password-hashing C extension is the last place to
+# take a release nobody has had time to look at. 25.1.0 (2025-07-30) ships abi3 manylinux_2_28
+# wheels for amd64 and arm64, which python:3.12-slim (glibc 2.36) installs without a compiler.
+argon2-cffi-bindings==25.1.0
 
-# LOAD-BEARING PIN, and not for the reason it looks like. passlib reads
-# bcrypt.__about__.__version__, which bcrypt removed. Tested against bcrypt 5.0.0 on
-# 2026-08-26: it does not warn, it FAILS — `ValueError: password cannot be longer than 72
-# bytes` on every hash, because bcrypt 5 dropped the silent truncation passlib relies on.
-# Bumping this breaks every login. Dependabot will offer 5.0.0; do not take it without
-# replacing passlib first.
+# Only to VERIFY the bcrypt hashes passlib wrote before brief 0067 (SHIM-SEC-009), and to write
+# bcrypt during the 7-day soak after the first boot. app/auth.py truncates to 72 bytes itself,
+# so the passlib-era reason for this pin (passlib reads an attribute bcrypt 5 removed) is gone;
+# bcrypt 5 also refuses >72-byte input, which app/auth.py never passes. Kept at 4.0.1 so this
+# change moves one thing at a time; removed entirely by the contract step of brief 0067.
 bcrypt==4.0.1
-python-multipart==0.0.12
+# Not imported by the application: FastAPI needs it only for a route that declares Form/File, and none
+# does (tests/unit/test_dependency_fixes.py holds that). It is in the image anyway — mcp depends on it —
+# so it is pinned here, past CVE-2024-53981 (first fix 0.0.18) and every later advisory OSV listed for
+# 0.0.12 on 2026-11-25 (the last fixed in 0.0.31). 0.0.33 (2026-10-31) rather than 0.0.34, which was
+# nine days old. Finding SEC-005, brief 0072.
+python-multipart==0.0.33
 pydantic-settings==2.15.0
 aiosqlite==0.22.1
 # 0.3.3 held here until 2026-09-18, and for most of that time the MCP server did not work.

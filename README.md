@@ -32,7 +32,7 @@ that chose the old interface earlier keeps it until it asks for `?ui=neu`.
 | Backend | Python 3.12 · FastAPI · aiosqlite |
 | Frontend | Vue 3 · Vite · Tailwind CSS · Pinia |
 | Task engine | Taskwarrior 3.x (TaskChampion / SQLite) |
-| Auth | JWT · bcrypt · per-user API keys |
+| Auth | JWT · Argon2id · per-user API keys |
 | Deploy | Docker Compose |
 
 ---
@@ -46,7 +46,7 @@ git clone https://github.com/ulrichschinz/runway.git
 cd runway
 
 cp .env.example .env
-# Set JWT_SECRET to a long random string:
+# Replace JWT_SECRET with a generated value — the placeholder is refused at startup:
 #   openssl rand -base64 48
 ```
 
@@ -62,8 +62,13 @@ direction, so a variable documented here always does something and a variable th
 something is always here.
 
 ```env
-# Required. The app refuses to start on a default, an empty value, or fewer than 32
-# characters. Generate one with: openssl rand -base64 48
+# Required. Generate one with: openssl rand -base64 48
+# The app refuses to start on an empty value, fewer than 32 characters, any value published in
+# this repository (the defaults, the examples on this page and in .env.example, or one that still
+# reads like a placeholder), a public key (PEM, OpenSSH, a JWK or JWK set, DER or an uncompressed
+# EC point in hex or base64), one that is mostly repetition or a run, or an estimated entropy
+# under 80 bits. `python -m app.startup_checks` runs the same
+# checks against an environment and prints a verdict, never the value (brief 0072).
 JWT_SECRET=
 
 # Seeded into the database on FIRST RUN ONLY. Afterwards the stored value wins and an
@@ -78,18 +83,73 @@ BOOTSTRAP_ADMIN=
 # which is correct behind the bundled nginx proxy — the SPA is same-origin there.
 CORS_ORIGINS=
 
-# Failed logins allowed per username before the API answers 429, and the window in seconds.
+# The login budget. Failed (or still running) password verifications allowed per window
+# before the API answers 429 — logins and the current-password check of a password change:
+# per username (spelling variants count as one), per network source, and in total — the total
+# is the emergency brake on password-hashing work, sized from its measured cost. A correct
+# password clears its username's count only. The window is in seconds. Requests with an API
+# key are not throttled, but a password change made with one is. Both compose files pass all
+# five through, with these defaults.
 LOGIN_RATE_LIMIT=10
 LOGIN_RATE_WINDOW_SECONDS=300
+LOGIN_SOURCE_RATE_LIMIT=30
+LOGIN_GLOBAL_RATE_LIMIT=300
 
-# JWT signing algorithm and token lifetime.
+# The most usernames, and separately the most sources, the limiter remembers at once. A new
+# one beyond that is refused with 429 rather than making room by forgetting another.
+LOGIN_RATE_MAX_KEYS=10000
+
+# The day (UTC, YYYY-MM-DD) from which an API key issued before keys were hashed (2026-11) is
+# refused — on every route, without a restart. It may move the cutoff EARLIER (for example once
+# every user has created a new key, or in an incident); a later or malformed value is ignored
+# with a startup WARNING and the default applies. Restart the backend once on or after that day:
+# that boot revokes every such key and removes its cleartext value from users.db. Both compose
+# files pass it through. See docs/operations.md, "API keys".
+API_KEY_LEGACY_CUTOFF=2027-01-15
+
+# The MCP endpoint's budget: MCP requests in flight at once, in total and per network source
+# (the source as for the login budget, TRUSTED_PROXIES included). The request above either is
+# refused at once — 503 for the total, 429 for one source, with Retry-After — before any other
+# work; a quarter of the total is the most that requests without a credential header may hold
+# (presence, not validity: a made-up header escapes that share, not the two ceilings).
+# Every MCP request is also bounded by 30 seconds (504). Both compose files pass both through.
+MCP_MAX_INFLIGHT=32
+MCP_SOURCE_MAX_INFLIGHT=8
+
+# The size in bytes of DATA_ROOT/audit.db (with its -wal and -shm files) above which the backend's
+# hourly measurement of it logs a WARNING ("audit store size") instead of INFO. 100 MiB by default.
+# Nothing deletes audit rows: how long they are kept is the operator's decision (ADR 0047). The
+# deploy compose passes it through. See docs/operations.md, "The size of the audit log".
+AUDIT_DB_WARN_BYTES=104857600
+
+# Comma-separated addresses or CIDR networks of the proxies in front of the backend whose
+# X-Forwarded-For the login limiter believes (in the shipped setup: nginx and the TLS proxy in
+# front of it). Empty believes none: a public peer is then counted as itself, and a loopback
+# or private peer — a proxy nobody declared — is not counted as a source at all, so only the
+# per-username and total budgets apply (a startup WARNING says so). Set it before deploying.
+# A malformed entry, or 0.0.0.0/0, is ignored and reported at startup. See docs/operations.md.
+TRUSTED_PROXIES=
+
+# Deprecated, and no longer a choice: tokens are always signed and verified with HS256 (ADR 0046).
+# Still read only so an existing .env keeps starting; any other value refuses to start. Remove it
+# from your .env — the variable itself goes in a later release (SHIM-SEC-010).
 JWT_ALGORITHM=HS256
+
+# Token lifetime.
 JWT_EXPIRE_HOURS=24
 
 # How much of the log stream is emitted: DEBUG, INFO, WARNING, ERROR or CRITICAL. An
 # unrecognised value falls back to INFO rather than refusing to start. The *format* is not
 # configurable — logs are always JSON and always pass through the redaction filter.
 LOG_LEVEL=INFO
+
+# Which Taskwarrior directory layout is served (ADR 0043). `compat` (the default) still
+# serves an account created before the storage-id switch from data/<username>/, if that name
+# is, in exactly that spelling, a directory directly under data/; `strict` serves only
+# data/<storage_id>/. Both compose files pass it through to the backend. Set `strict` after
+# the storage migration reports every account `done` — see docs/operations.md. An
+# unrecognised value is treated as `strict`.
+TASK_STORAGE_MODE=compat
 
 # Container paths. Change these only alongside the compose bind mounts. The application's
 # default for DB_PATH is shown; both compose files set /app/db/users.db, a directory mount the
@@ -123,12 +183,16 @@ Register your first user at the login page (set `ALLOW_REGISTRATION=false` after
 
 | Path | Contents |
 |---|---|
-| `./data/<username>/` | Per-user Taskwarrior data (`taskchampion.sqlite3`) |
-| `./users.db` | Users, API keys, projects (SQLite) — mounted at `/app/db/users.db` |
+| `./data/<storage_id>/` | Per-user Taskwarrior data (`taskchampion.sqlite3`). The directory is named by a random, immutable id stored in `users.storage_id` — never by the username (finding SEC-001, ADR 0043). |
+| `./data/<username>/` | The same, for an account created before that change and not yet migrated. Kept as the rollback source after migration until the contract step removes it. |
+| `./data/audit.db` | The audit log |
+| `./users.db` | Users, API-key hashes, projects (SQLite) — mounted at `/app/db/users.db` |
 | `./db/` | The directory `users.db` is mounted into; holds its journal during a write |
 
 All are bind-mounted and excluded from git. Back up `./data` and `./users.db` to retain all data. The
 containers run on a read-only root filesystem; see [docs/operations.md](docs/operations.md#container-hardening).
+To move existing accounts to the storage-id layout, follow
+[Moving task storage off the username](docs/operations.md#moving-task-storage-off-the-username).
 
 ---
 
@@ -141,12 +205,67 @@ Runway supports two authentication methods, accepted by all API endpoints:
 Authorization: Bearer <token>
 ```
 
-**API key** — permanent, per-user, managed in the app settings:
+**Changing the password ends every session.** `PUT /api/auth/password` revokes every JWT of the
+account issued before it, on every route and every MCP tool, and answers with a new one for the
+caller (`{"detail": …, "access_token": …, "token_type": "bearer"}`); a client that keeps using its
+old token gets `401`. API keys are not affected by a password change — revoke them with
+`DELETE /api/auth/apikeys/{key_id}` (or in the settings page) if they may be compromised.
+
+**Passwords** are hashed with Argon2id and limited in **UTF-8 bytes**: a password being set
+(`POST /api/auth/register`, `PUT /api/auth/password`) is 8 to 1024 bytes and may not equal the
+current one in its first 72 bytes when that one is a bcrypt-era long password; one being typed to
+log in or as the current password at most 4096 (the bound the previous version had). A password outside the rule is refused with `422` before any work is
+done; a request body over 16 KiB on `/api/auth/*` (1 MiB elsewhere) with `413`. A login keeps no
+minimum, so an older short password still works. Passwords set before 2026-11 were hashed with
+bcrypt, which read only their first 72 bytes; a login with such a password of 72 bytes or more
+answers `"password_change_required": true` beside the token — set a new password then, because
+after a transition window that login is refused. Every failed login is the same
+`401 Invalid credentials`, whether or not the account exists.
+
+**Field limits.** Every text field a request carries has a maximum length, stated as `maxLength` /
+`maxItems` in the OpenAPI schema (`/api/openapi.json`): a username 256 characters at login and
+registration (registration still refuses more than 64 with `400`), a task description 2 000 characters,
+an annotation and an inbox note 32 768 characters and at most 32 KiB of UTF-8 — the cut the SPA and the
+Android app already make to a capture — `due`/`scheduled`/`wait`/`until`/`recur` 64, a tag 100 and at most
+50 tags, at most 100 `depends`, a profile name 200 and an email 320, each project-plan text 20 000 and
+each plan list at most 500 items of 4 000 characters. A value over its limit is refused with `422`
+before anything is written; MCP tool calls carry the same limits in their input schemas. A value the
+task store still cannot take is `413`, never `500`.
+
+**API key** — per-user, created in the app settings, for agents and automations:
 ```
-X-Api-Key: <key>
+X-Api-Key: rwk_<key-id>_<secret>
 ```
 
-API keys are ideal for agents and automations. Each user can view and rotate their key via `GET /api/auth/apikey` and `POST /api/auth/apikey/regenerate`.
+Since 2026-11 a key is stored only as a SHA-256 hash and **shown once**, in the answer that creates
+it; nobody — not the server, not an admin — can show it again. A key has a public id (part of the
+key, and its prefix `rwk_<key-id>` is what the settings page shows), an optional label, an expiry
+(1–365 days, default 365) and can be revoked at any time; an account holds at most 10 active keys.
+
+| Route | What |
+|---|---|
+| `POST /api/auth/apikeys` | `{"label": "laptop agent", "expires_in_days": 90}` (both optional) → `201` with `api_key` — **the only time the key is returned**. Needs a signed-in session (`Authorization: Bearer <jwt>`); an API key gets `403`, so a stolen key cannot mint its own successor. `409` at 10 active keys. |
+| `GET /api/auth/apikeys` | The account's keys as metadata: `key_id`, `label`, `kind` (`issued` or `legacy`), `prefix`, `created_at`, `expires_at`, `revoked_at`, `last_used_at` (to the minute), `state` (`active`, `expired`, `revoked`). Never a key, never a hash. |
+| `DELETE /api/auth/apikeys/{key_id}` | Revoke: `204`, the key stops working at once. Needs a signed-in session. `404` for a key this account does not hold. |
+
+An unknown, expired or revoked key gets the same `401` (`Invalid API key` on `X-Api-Key`,
+`Not authenticated` in the Bearer slot).
+
+**Deprecated, until the contract step:** `GET /api/auth/apikey` returns a key issued before
+2026-11 (a 43-character one) until the legacy cutoff (`API_KEY_LEGACY_CUTOFF`, at the latest
+**2027-01-15**), and `""` after it and for every key created since — and only to a signed-in session
+or to that legacy key itself; called with any other API key it answers `""`. `POST /api/auth/apikey/regenerate`
+now ends **every** key of the account and returns one new key, once; like creating and revoking it
+needs a signed-in session (an API key gets `403`). Both answer with
+`Deprecation`, `Sunset` and `Link: rel="successor-version"` headers. **Keys from before 2026-11 stop
+working on 2027-01-15**: create a new key in the settings page before then and put it where the old
+one was (the Android app, `~/.zshenv`, your agents).
+
+**The Android app's password login** ("Anmelden" in its setup screen) reads its key from the deprecated
+`GET /api/auth/apikey`. It therefore gets **no key** for an account registered since 2026-11-25, nor for
+any account whose legacy key was revoked or rotated, nor for anyone once the cutoff has passed. Until the
+app creates its key with `POST /api/auth/apikeys`, use its "Key einfügen" way: create a key in the settings
+page and paste it there.
 
 ---
 
@@ -218,7 +337,15 @@ Both credential shapes work — `X-Api-Key: <key>` and `Authorization: Bearer <k
 `backend/app/main.py` forwards both into the tool call. Prefer `X-Api-Key`: the Bearer form is
 `SHIM-SEC-006`, a dated compatibility shim, and it will stop working when the shim is removed.
 The MCP endpoint itself is open — anyone who can reach it may list the tools — but every tool
-call is authenticated by the REST endpoint behind it (`RISK-MCP-002`).
+call is authenticated by the REST endpoint behind it (`RISK-MCP-002`). Send the key on every
+request, as the snippets above do: a later release is planned to require it on the handshake too.
+
+The transport is **stateless** Streamable HTTP (brief 0071, ADR 0045): the server issues no
+`Mcp-Session-Id`, keeps nothing between requests, and answers `GET` and `DELETE` on `/mcp` with
+`405`. Clients that follow the specification handle that without configuration. A tool call
+reaches only its own route: a path argument is percent-encoded, so `..` is a name rather than a
+step up, and a call whose value would still select another route (a `/` is decoded before routing,
+and `set_project_status` on a project called `plans` would hit the plan route) is refused with `400`.
 
 The MCP tools are an **allowlist** of the REST API: every operation of the `tasks`, `gtd`,
 `projects` and `inbox` routers, plus `GET /health` and `GET /auth/me`. Login, registration,

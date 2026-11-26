@@ -32,10 +32,18 @@ from fastapi.testclient import TestClient
 from app import audit, database
 from app.auth import create_access_token
 from app.config import settings
-from app.database import generate_api_key
 from app.logging_setup import REDACTION_MARKER, REQUEST_ID_HEADER, JsonFormatter
 
 # --- reading the store back -------------------------------------------------------------
+
+
+def generate_api_key() -> str:
+    """A key in the previous image's cleartext shape (`secrets.token_urlsafe(32)`). The
+    application mints none any more (brief 0070); the shape is still redacted and still has to
+    be — a log line is read long after it is written, and old backups hold such keys."""
+    import secrets
+
+    return secrets.token_urlsafe(32)
 
 
 def query(sql: str, parameters: tuple = ()) -> list[dict]:
@@ -193,7 +201,9 @@ class TestEvents:
     ):
         client.put("/admin/settings", json={"allow_registration": False}, headers=admin)
         assert (
-            client.post("/auth/register", json={"username": "bob", "password": "pw"}).status_code
+            client.post(
+                "/auth/register", json={"username": "bob", "password": "pw-long-enough"}
+            ).status_code
             == 403
         )
 
@@ -205,7 +215,9 @@ class TestEvents:
         self, client: TestClient, registered: dict[str, str]
     ):
         assert (
-            client.post("/auth/register", json={"username": "alice", "password": "x"}).status_code
+            client.post(
+                "/auth/register", json={"username": "alice", "password": "x-long-enough"}
+            ).status_code
             == 400
         )
         row = last(audit.REGISTERED)
@@ -264,18 +276,33 @@ class TestEvents:
         assert (row["actor"], row["outcome"]) == ("alice", audit.FAILURE)
 
     def test_the_api_key_disclosure(self, client: TestClient, auth):
-        """GET /auth/apikey hands back a permanent credential in cleartext — finding SEC-5.
+        """GET /auth/apikey handed back a permanent credential in cleartext — finding SEC-5.
 
-        The route is not changed here; what changes is that its use is on the record.
+        Since brief 0070 the deprecated route returns only a legacy key the previous image
+        issued, until the cutoff, and a row is written only when a value actually leaves.
         """
-        assert client.get("/auth/apikey", headers=auth).status_code == 200
-        # One from the `registered` fixture, one from the call above.
-        found = rows(audit.APIKEY_DISCLOSED)
-        assert len(found) == 2
-        assert found[-1]["actor"] == "alice"
-        assert found[-1]["outcome"] == audit.SUCCESS
-        assert found[-1]["route"] == "GET /auth/apikey"
-        assert "SEC-5" in found[-1]["detail"]
+        assert client.get("/auth/apikey", headers=auth).json() == {"api_key": ""}
+        assert rows(audit.APIKEY_DISCLOSED) == []
+
+        legacy = generate_api_key()
+        con = sqlite3.connect(settings.db_path)
+        # As the previous image left an account: the cleartext column set, and never closed by
+        # this image (a value written into a closed account is not imported — brief 0070).
+        con.execute(
+            "UPDATE users SET api_key=?, api_key_closed_at=NULL WHERE username='alice'", (legacy,)
+        )
+        con.commit()
+        con.close()
+        from app.main import app
+
+        with TestClient(app) as rebooted:  # the boot hashes it into a legacy row
+            assert rebooted.get("/auth/apikey", headers=auth).json() == {"api_key": legacy}
+        (found,) = rows(audit.APIKEY_DISCLOSED)
+        assert found["actor"] == "alice"
+        assert found["outcome"] == audit.SUCCESS
+        assert found["route"] == "GET /auth/apikey"
+        assert "WAIVER-SEC-003" in found["detail"]
+        assert legacy not in found["detail"]
 
     def test_the_key_regeneration(self, client: TestClient, auth):
         assert client.post("/auth/apikey/regenerate", headers=auth).status_code == 200
@@ -505,7 +532,7 @@ def test_no_credential_appears_anywhere_in_the_audit_database(
         audit.AUTHENTICATED,
         audit.LOGIN_SUCCEEDED,
         audit.LOGIN_FAILED,
-        audit.APIKEY_DISCLOSED,
+        audit.APIKEY_CREATED,
         audit.APIKEY_REGENERATED,
         audit.PASSWORD_CHANGED,
     } <= events
@@ -529,7 +556,7 @@ class TestTheRedactionBackstop:
     """
 
     def test_a_jwt_handed_to_record_is_stored_redacted(self, client: TestClient):
-        token = create_access_token("alice")
+        token = create_access_token("alice", auth_version=1)
         audit.record(audit.AUTHENTICATED, outcome=audit.SUCCESS, detail=token)
         assert token not in every_value_written()
         assert REDACTION_MARKER in last(audit.AUTHENTICATED)["detail"]
@@ -602,3 +629,85 @@ def test_a_store_that_cannot_be_initialised_does_not_stop_the_boot(
 
 def test_route_of_tolerates_a_request_that_was_never_routed(client: TestClient):
     assert audit.route_of(None) is None
+
+
+def test_an_identity_column_is_bounded_whatever_a_caller_passes(client: TestClient):
+    """Defence in depth behind the request models (review of brief 0073): an actor or subject is a
+    name, and a name a caller chose must not be able to grow a row to the size of its body."""
+    audit.record(
+        audit.LOGIN_FAILED, outcome=audit.FAILURE, actor="a" * 15_000, subject="s" * 15_000
+    )
+    row = last(audit.LOGIN_FAILED)
+    assert len(row["actor"]) <= audit.IDENTITY_MAX
+    assert len(row["subject"]) <= audit.IDENTITY_MAX
+    assert row["actor"].startswith("a" * 100)
+
+
+# --- refusals an unauthenticated caller can repeat (second review of brief 0073) -----------------
+
+
+class TestRefusedRegistrationsAreCoalesced:
+    """`POST /auth/register` is unauthenticated and has no limiter. Each refusal wrote one row, so a
+    client could grow `audit.db` linearly with its request rate (2 000 refused requests, 2 000 rows,
+    ~1 MB). Like the login limiter's reports (brief 0069), the first refusal of a kind in a window is
+    a row; the rest are counted and carried by the next row of that kind."""
+
+    def _closed(self, client: TestClient, admin: dict[str, str]) -> None:
+        client.put("/admin/settings", json={"allow_registration": False}, headers=admin)
+
+    def _refused(self, client: TestClient, n: int) -> None:
+        for i in range(n):
+            r = client.post(
+                "/auth/register", json={"username": f"x{i}", "password": "pw-long-enough"}
+            )
+            assert r.status_code == 403
+
+    def test_many_refused_registrations_write_a_bounded_number_of_rows(
+        self, client: TestClient, admin: dict[str, str]
+    ):
+        self._closed(client, admin)
+        self._refused(client, 300)
+        refused = [r for r in rows(audit.REGISTERED) if r["outcome"] == audit.REFUSED]
+        assert len(refused) == 1, len(refused)
+        assert refused[0]["actor"] == "x0"
+        assert refused[0]["detail"] == "registration is disabled on this instance"
+
+    def test_the_next_window_carries_the_count(
+        self, client: TestClient, admin: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    ):
+        clock = [1_000.0]
+        monkeypatch.setattr(audit, "_clock", lambda: clock[0])
+        self._closed(client, admin)
+        self._refused(client, 5)
+        clock[0] += settings.login_rate_window_seconds + 1
+        self._refused(client, 1)
+        refused = [r for r in rows(audit.REGISTERED) if r["outcome"] == audit.REFUSED]
+        assert len(refused) == 2
+        assert refused[1]["detail"] == "registration is disabled on this instance (refusals: 5)"
+
+    def test_a_count_no_later_refusal_carries_is_written_as_a_summary(
+        self, client: TestClient, admin: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    ):
+        clock = [1_000.0]
+        monkeypatch.setattr(audit, "_clock", lambda: clock[0])
+        self._closed(client, admin)
+        self._refused(client, 4)
+        audit.flush_refusals()  # within the window: nothing is due yet
+        clock[0] += settings.login_rate_window_seconds + 1
+        audit.flush_refusals()
+        audit.flush_refusals()  # nothing left to carry
+        refused = [r for r in rows(audit.REGISTERED) if r["outcome"] == audit.REFUSED]
+        assert [r["detail"] for r in refused] == [
+            "registration is disabled on this instance",
+            "registration is disabled on this instance: 3 further refusals in the last window",
+        ]
+        assert refused[1]["actor"] is None
+
+    def test_each_kind_of_refusal_has_its_own_row(
+        self, client: TestClient, registered: dict[str, str]
+    ):
+        for _ in range(20):
+            client.post("/auth/register", json={"username": "alice", "password": "x-long-enough"})
+            client.post("/auth/register", json={"username": "a/b", "password": "x-long-enough"})
+        details = [r["detail"] for r in rows(audit.REGISTERED) if r["outcome"] != audit.SUCCESS]
+        assert sorted(details) == ["username already taken", "username is not a plain name"]

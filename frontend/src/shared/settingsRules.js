@@ -11,12 +11,17 @@
  * Message keys only (`messages.settings.de.js`), no `t()`: the page turns them into text.
  */
 
+import { passwordProblem, sharesTheBcryptPrefix } from './passwordPolicy.js'
+
 /** The dots that stand for the hidden part of a key. */
 const DOTS = '•'.repeat(16)
 
 /**
  * Why a password change cannot be sent, or null when it can. The server checks the current
- * password; it sets no rule for the new one, so neither does this beyond "not empty".
+ * password; the new one follows the server's byte rule (`passwordPolicy.js`, SEC-006). The current
+ * one only has the (higher) given maximum: it may have been set before the rule. A new password
+ * that is the current one or shares its first 72 bytes is refused: for a bcrypt-era account the
+ * server refuses it too (brief 0067, R6), and for any other it changes nothing worth a change.
  *
  * @param {{current: string, next: string, confirm: string}} form
  * @returns {string|null} a message key
@@ -25,7 +30,9 @@ export function passwordError({ current, next, confirm }) {
   if (!current) return 'set.pw.needCurrent'
   if (!next) return 'set.pw.needNew'
   if (next !== confirm) return 'set.pw.mismatch'
-  return null
+  if (sharesTheBcryptPrefix(current, next)) return 'set.pw.same'
+  const problem = passwordProblem(next, { isNew: true }) ?? passwordProblem(current, { isNew: false })
+  return problem ? `set.${problem}` : null
 }
 
 /**

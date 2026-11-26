@@ -188,11 +188,17 @@ class TestValidatedButPermissive:
         task_service.create_task("alice", TaskCreate(description="t", project="a b; c"))
         assert "project:a b; c" in _args_of(fake_task)
 
-    def test_date_fields_are_validated_by_taskwarrior_not_by_us(self, fake_task):
-        """The value reaches argv unvalidated; Taskwarrior is the validator (rc 2 → 400)."""
-        with pytest.raises(ValueError):
+    def test_a_date_is_shaped_by_us_and_parsed_by_taskwarrior(self, fake_task):
+        """Changed by brief 0074 (plan M9). This used to pin that the value reached argv
+        unvalidated. Now its *shape* is ours — one word, `DATE_VALUE_RE` — and a value with
+        spaces never reaches argv; whether a one-word value is a date is still the binary's
+        call (rc 2 → 400). Full cases: `tests/unit/test_date_values.py`."""
+        with pytest.raises(ValueError, match="not a valid date"):
             task_service.create_task("alice", TaskCreate(description="t", due="not a date at all"))
-        assert "due:not a date at all" in _args_of(fake_task)
+        assert fake_task.calls == []
+        with pytest.raises(ValueError):
+            task_service.create_task("alice", TaskCreate(description="t", due="notadate"))
+        assert "due:notadate" in _args_of(fake_task)
 
 
 class TestPerUserRouting:

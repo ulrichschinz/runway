@@ -73,8 +73,18 @@ def migration_lines() -> Iterator[io.StringIO]:
         logger.setLevel(previous_level)
 
 
+# The one line a database's FIRST boot through a versioned step writes (ADR 0047, brief 0073): once
+# per database, never per boot, and pinned by test_schema_versions.py. Every other line this module
+# logs is what the tests below are about, so this one is set aside rather than asserted around.
+VERSIONED_STEP_APPLIED = "schema migration applied"
+
+
 def lines(buffer: io.StringIO) -> list[dict]:
-    return [json.loads(line) for line in buffer.getvalue().splitlines()]
+    return [
+        entry
+        for entry in (json.loads(line) for line in buffer.getvalue().splitlines())
+        if entry.get("message") != VERSIONED_STEP_APPLIED
+    ]
 
 
 def columns(db_path: str, table: str = "users") -> set[str]:
@@ -114,7 +124,7 @@ async def test_a_second_init_db_is_green_and_says_nothing(isolated_storage: Path
     with migration_lines() as buffer:
         await init_db()
 
-    assert buffer.getvalue() == ""
+    assert lines(buffer) == []
     assert {"api_key", "role", "full_name", "email"} <= columns(str(isolated_storage / "users.db"))
 
 
@@ -135,7 +145,7 @@ async def test_a_pre_existing_database_missing_every_column_is_migrated_quietly(
     with migration_lines() as buffer:
         await init_db()
 
-    assert buffer.getvalue() == ""
+    assert lines(buffer) == []
     assert {"api_key", "role", "full_name", "email"} <= columns(path)
 
 
@@ -280,7 +290,7 @@ async def test_a_database_from_before_the_reviews_table_gains_it_quietly(isolate
     with migration_lines() as buffer:
         await init_db()
 
-    assert buffer.getvalue() == ""
+    assert lines(buffer) == []
     assert "reviews" in tables(path)
 
 
@@ -335,7 +345,7 @@ async def test_a_database_from_before_the_project_status_table_gains_it_quietly(
     with migration_lines() as buffer:
         await init_db()
 
-    assert buffer.getvalue() == ""
+    assert lines(buffer) == []
     assert "project_status" in tables(path)
 
 
@@ -366,3 +376,236 @@ async def test_the_project_status_table_holds_one_row_per_project_and_checks_the
             )
     finally:
         connection.close()
+
+
+# --- SEC-001: the storage id (ADR 0043) ------------------------------------------------------
+
+
+def _schema(path: str) -> list[tuple[str, str]]:
+    connection = sqlite3.connect(path)
+    try:
+        return sorted(
+            (row[0], row[1])
+            for row in connection.execute(
+                "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+            )
+        )
+    finally:
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_an_upgraded_database_gets_storage_ids_and_keeps_the_legacy_layout(
+    isolated_storage: Path,
+):
+    """Existing accounts are described truthfully: they still live under their names until
+    the migration has copied them, so the boot gives them an id and nothing else."""
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,"
+        " hashed_password TEXT NOT NULL, api_key TEXT UNIQUE,"
+        " created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    connection.executemany(
+        "INSERT INTO users (username, hashed_password) VALUES (?, 'x')", [("alice",), ("bob",)]
+    )
+    connection.commit()
+    connection.close()
+
+    with migration_lines() as buffer:
+        await init_db()
+        await init_db()
+    assert lines(buffer) == []
+
+    connection = sqlite3.connect(path)
+    rows = list(connection.execute("SELECT storage_id, storage_layout FROM users ORDER BY id"))
+    connection.close()
+    assert [layout for _, layout in rows] == ["legacy", "legacy"]
+    ids = [sid for sid, _ in rows]
+    assert len(set(ids)) == 2
+    assert all(len(sid) == 32 and set(sid) <= set("0123456789abcdef") for sid in ids)
+
+
+@pytest.mark.anyio
+async def test_fresh_and_upgraded_databases_end_with_the_same_storage_objects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from app.config import settings
+
+    fresh = str(tmp_path / "fresh.db")
+    monkeypatch.setattr(settings, "db_path", fresh)
+    monkeypatch.setattr(settings, "data_root", tmp_path / "data")
+    await init_db()
+
+    upgraded = str(tmp_path / "upgraded.db")
+    connection = sqlite3.connect(upgraded)
+    connection.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,"
+        " hashed_password TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr(settings, "db_path", upgraded)
+    await init_db()
+
+    assert _schema(fresh) == _schema(upgraded)
+    assert ("table", "storage_migrations") in _schema(fresh)
+    assert ("index", "users_storage_id") in _schema(fresh)
+    assert ("trigger", "users_storage_id_immutable") in _schema(fresh)
+    assert {"storage_id", "storage_layout"} <= columns(fresh)
+
+
+@pytest.mark.anyio
+async def test_a_storage_id_cannot_be_rewritten_malformed_or_shared(isolated_storage: Path):
+    """The id is the path. One that could be changed, shaped like a path, or shared by two
+    accounts would bring the finding back through the database."""
+    await init_db()
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    sid = "0123456789abcdef0123456789abcdef"
+    connection.execute(
+        "INSERT INTO users (username, hashed_password, storage_id) VALUES ('alice', 'x', ?)", (sid,)
+    )
+    connection.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        connection.execute(
+            "UPDATE users SET storage_id='ffffffffffffffffffffffffffffffff' WHERE username='alice'"
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "INSERT INTO users (username, hashed_password, storage_id) VALUES ('bob', 'x', ?)",
+            (sid,),
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "INSERT INTO users (username, hashed_password, storage_id) VALUES ('eve', 'x', ?)",
+            ("../alice" + "0" * 24,),
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "INSERT INTO users (username, hashed_password, storage_layout) VALUES ('x', 'x', 'y')"
+        )
+    connection.close()
+
+
+@pytest.mark.anyio
+async def test_a_row_written_by_the_previous_image_is_backfilled_on_the_next_boot(
+    isolated_storage: Path,
+):
+    """Rollback compatibility: the old image inserts accounts without the new columns and
+    creates DATA_ROOT/<username>/. Default 'legacy' plus the boot backfill describe that row
+    truthfully when the new image starts again."""
+    await init_db()
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO users (username, hashed_password, api_key) VALUES ('old', 'x', 'k')"
+    )
+    connection.commit()
+    connection.close()
+    await init_db()
+    connection = sqlite3.connect(path)
+    sid, layout = connection.execute(
+        "SELECT storage_id, storage_layout FROM users WHERE username='old'"
+    ).fetchone()
+    connection.close()
+    assert layout == "legacy"
+    assert len(sid) == 32
+
+
+# --- REV-001, ADR 0044: the session version --------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_an_upgraded_database_starts_every_account_at_version_one(isolated_storage: Path):
+    """Existing accounts start where the previous image's versionless tokens are counted (1),
+    so nobody is logged out by the deploy, and the expand moment is recorded once."""
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,"
+        " hashed_password TEXT NOT NULL, api_key TEXT UNIQUE,"
+        " created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    connection.executemany(
+        "INSERT INTO users (username, hashed_password) VALUES (?, 'x')", [("alice",), ("bob",)]
+    )
+    connection.commit()
+    connection.close()
+
+    with migration_lines() as buffer:
+        await init_db()
+        await init_db()
+    assert lines(buffer) == []
+
+    from app.database import AUTH_VERSION_EXPAND_KEY
+
+    connection = sqlite3.connect(path)
+    versions = [v for (v,) in connection.execute("SELECT auth_version FROM users ORDER BY id")]
+    expand = connection.execute(
+        "SELECT COUNT(*) FROM site_settings WHERE key=?", (AUTH_VERSION_EXPAND_KEY,)
+    ).fetchone()[0]
+    connection.close()
+    assert versions == [1, 1]
+    assert expand == 1
+
+
+@pytest.mark.anyio
+async def test_fresh_and_upgraded_databases_end_with_the_same_session_objects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from app.config import settings
+
+    fresh = str(tmp_path / "fresh.db")
+    monkeypatch.setattr(settings, "db_path", fresh)
+    monkeypatch.setattr(settings, "data_root", tmp_path / "data")
+    await init_db()
+    upgraded = str(tmp_path / "upgraded.db")
+    connection = sqlite3.connect(upgraded)
+    connection.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,"
+        " hashed_password TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr(settings, "db_path", upgraded)
+    await init_db()
+
+    assert _schema(fresh) == _schema(upgraded)
+    assert ("trigger", "users_auth_version_monotone") in _schema(fresh)
+    assert "auth_version" in columns(fresh)
+
+
+@pytest.mark.anyio
+async def test_a_version_cannot_be_null_zero_or_lowered(isolated_storage: Path):
+    await init_db()
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    connection.execute("INSERT INTO users (username, hashed_password) VALUES ('alice', 'x')")
+    connection.commit()
+    for bad in (None, 0):
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("UPDATE users SET auth_version=? WHERE username='alice'", (bad,))
+    connection.execute("UPDATE users SET auth_version=3 WHERE username='alice'")
+    with pytest.raises(sqlite3.IntegrityError, match="only increase"):
+        connection.execute("UPDATE users SET auth_version=2 WHERE username='alice'")
+    connection.close()
+
+
+@pytest.mark.anyio
+async def test_a_row_written_by_the_previous_image_gets_version_one(isolated_storage: Path):
+    """Rollback compatibility: the old image's INSERT names no auth_version; the default holds."""
+    await init_db()
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO users (username, hashed_password, api_key) VALUES ('old', 'x', 'k')"
+    )
+    connection.execute("UPDATE users SET hashed_password='y' WHERE username='old'")
+    connection.commit()
+    (version,) = connection.execute(
+        "SELECT auth_version FROM users WHERE username='old'"
+    ).fetchone()
+    connection.close()
+    assert version == 1

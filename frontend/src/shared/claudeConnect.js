@@ -37,7 +37,7 @@ export const KEY_ENV = 'RUNWAY_API_KEY'
  */
 export const URL_ENV = 'RUNWAY_URL'
 
-/** Shown until `/auth/apikey` has answered — the same placeholder `mcpSnippets` uses. */
+/** Shown while no new key is on the screen (brief 0070: a key is shown once) — the same placeholder `mcpSnippets` uses. */
 const KEY_PLACEHOLDER = '<your-api-key>'
 
 const origin_ = (origin) => origin.replace(/\/+$/, '')

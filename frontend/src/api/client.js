@@ -14,7 +14,7 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (endsSession(err)) {
+    if (endsSession(err, localStorage.getItem('token'))) {
       localStorage.removeItem('token')
       // Keep where the visit was going (a Custom Tab's /next?task=…), as the router guard does.
       const { pathname, search, hash } = window.location

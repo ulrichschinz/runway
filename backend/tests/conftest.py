@@ -7,6 +7,7 @@ real ``users.db``.
 
 from __future__ import annotations
 
+import secrets
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -23,24 +24,39 @@ from tests.fake_task import FakeTaskCLI  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def cheap_password_hashing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run bcrypt at its minimum cost factor for the duration of the tests.
+    """REDUCED, TEST-ONLY PASSWORD-HASH PARAMETERS — never production values.
 
-    Production hashing is deliberately slow, and the suite hashes or verifies a password
-    in almost every test. At the default cost that alone took ~36 seconds — long enough
-    that the gate would start getting skipped, which is the failure mode the runtime
-    budget exists to prevent.
+    The suite hashes or verifies a password in almost every test, and every login does one
+    Argon2id verification and one bcrypt check (SEC-006: uniform work). At the production
+    parameters (Argon2id t=3, 64 MiB; bcrypt cost 12) that is a quarter of a second per login,
+    which would push the gate over its budget — the failure mode the budget exists to prevent.
 
-    The algorithm is unchanged; only the work factor is. Nothing here asserts anything
-    about the cost factor, so no test is weakened by this — but note that the production
-    cost factor is consequently NOT covered by any test.
+    So for the duration of a test:
+    - Argon2id runs at t=1, m=8 KiB, p=1 (the library minimum region);
+    - the bcrypt dummy and the soak-time bcrypt writer run at cost 4;
+    - the 7-day soak is zero, so a fresh test database is already past Switch 1 and writes
+      Argon2id, which is production's steady state. `TestTheSoak` restores the real soak.
+
+    The algorithms are unchanged; only the work factors are. Exactly one test,
+    `test_password_kdf.py::TestKdfUnit::test_one_hash_at_production_parameters`, hashes at
+    the production parameters (RISK-TEST-003): it proves they are valid and verify, not how
+    long they take on the deploy host.
     """
-    from passlib.context import CryptContext
+    from datetime import timedelta
+
+    from argon2 import PasswordHasher, Type
 
     from app import auth
 
     monkeypatch.setattr(
-        auth, "pwd_context", CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=4)
+        auth,
+        "_argon2",
+        PasswordHasher(
+            time_cost=1, memory_cost=8, parallelism=1, hash_len=32, salt_len=16, type=Type.ID
+        ),
     )
+    monkeypatch.setattr(auth, "LEGACY_BCRYPT_COST", 4)
+    monkeypatch.setattr(auth, "KDF_SOAK", timedelta(0))
 
 
 @pytest.fixture
@@ -52,6 +68,11 @@ def isolated_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+# Generated per run, never written down: a signing key published in this repository is refused at boot
+# (finding SEC-002, brief 0072), and the test suite's key is no exception.
+TEST_JWT_SECRET = secrets.token_urlsafe(48)
+
+
 @pytest.fixture(autouse=True)
 def _bootable_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every TestClient runs the app's lifespan, which now refuses to start on a default or
@@ -61,7 +82,7 @@ def _bootable_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     Autouse on purpose: a test that boots the app without this would fail with a startup
     error whose cause is three layers away from the assertion that noticed.
     """
-    monkeypatch.setattr(settings, "jwt_secret", "test-secret-long-enough-to-pass-the-startup-check")
+    monkeypatch.setattr(settings, "jwt_secret", TEST_JWT_SECRET)
 
 
 @pytest.fixture(autouse=True)
@@ -69,11 +90,13 @@ def _reset_login_rate_limit() -> None:
     """The limiter is module state and outlives a TestClient. Without this, a suite that
     logs in repeatedly trips it in whichever test happens to run tenth — a failure that
     moves when tests are reordered."""
-    from app import rate_limit
+    from app import audit, rate_limit
 
     rate_limit.reset_all()
+    audit.reset_refusals()  # the same for the coalesced registration refusals (brief 0073)
     yield
     rate_limit.reset_all()
+    audit.reset_refusals()
 
 
 @pytest.fixture
@@ -122,9 +145,13 @@ def register_user(client: TestClient, username: str = "alice") -> dict[str, str]
     r = client.post("/auth/register", json=body)
     assert r.status_code == 201, r.text
     token = client.post("/auth/login", json=body).json()["access_token"]
-    api_key = client.get("/auth/apikey", headers={"Authorization": f"Bearer {token}"}).json()[
-        "api_key"
-    ]
+    # A new account has no key until it creates one, shown once (brief 0070): create it the way
+    # the settings page does, with the session.
+    created = client.post(
+        "/auth/apikeys", headers={"Authorization": f"Bearer {token}"}, json={"label": "test"}
+    )
+    assert created.status_code == 201, created.text
+    api_key = created.json()["api_key"]
     return {
         "username": body["username"],
         "password": body["password"],

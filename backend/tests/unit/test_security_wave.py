@@ -5,6 +5,8 @@ thing the control exists to stop and asserts the refusal, rather than asserting 
 happy path still works.
 """
 
+import secrets
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -47,7 +49,9 @@ class TestRefusesToBootOnAnUnsafeSecret:
             startup_checks.assert_jwt_secret_is_safe()
 
     def test_a_real_secret_passes(self, monkeypatch):
-        monkeypatch.setattr(settings, "jwt_secret", "x" * 32)
+        """Was `"x" * 32` until brief 0072: one character repeated is now refused (SEC-002), so the
+        positive control is what the runbook generates."""
+        monkeypatch.setattr(settings, "jwt_secret", secrets.token_urlsafe(48))
         startup_checks.assert_jwt_secret_is_safe()
 
     def test_the_app_actually_refuses_to_start(self, isolated_storage, monkeypatch):

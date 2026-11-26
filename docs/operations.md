@@ -73,11 +73,25 @@ Steps 2 and 4 are there for a failure the gate structurally cannot see: it build
 **503** in production. The same comparison catches an image built from a different commit than the one
 being verified, and a deploy that never reached the host at all.
 
-What it does **not** do is read the host. `/opt/services/runway/docker-compose.yml` is still unobserved, so
-a compose that drifted — or a deploy that never rewrote it — looks exactly like one that did for as long as
-the containers already running answer correctly. `RISK-OPS-002` stays open, narrowed: "the deploy reported
-success" and "this commit is serving production" are now two separate claims, and the second one is
-checked.
+Since brief 0073 the same step also checks **which image, under which compose, at which schema version**
+(`RISK-OPS-002`, ADR 0047 Decision 4). `GET /api/skill`'s `server` object reports:
+
+| field | what it is | must equal |
+|---|---|---|
+| `build` | `/app/BUILD_ID`, the workflow run id baked by `ARG RUNWAY_BUILD` | this run's `GITHUB_RUN_ID` |
+| `compose_sha256` | SHA-256 of `/opt/stack/docker-compose.yml`, the compose baked into the image | SHA-256 of `ops/deploy/docker-compose.yml` at this commit |
+| `applied_compose_sha256` | SHA-256 of the host's own `./docker-compose.yml`, which the deploy compose mounts read-only at `/etc/runway/applied-compose.yml` | the same |
+| `schema_version` | the version `init_db()` left `users.db` at ([Schema migrations](#schema-migrations)) | the `-- schema_version` line of `ops/surfaces/db-schema.sql` |
+
+Only hashes and a number leave the container; the file is never served. An `applied_compose_sha256` that is
+`null` or differs is the failure this repository could not see before: the host script did not write the
+compose the image carries, and the new image is running under the old configuration. A second step then asks
+the registry (`docker buildx imagetools inspect`) whether `:latest` and `:<sha>` resolve to the digest
+`build-and-push` pushed.
+
+What it still does **not** do is read the host: CI has no access, so which digest the host's container runs is
+inferred — the build id is baked only into the image this run pushed — not observed, and between deploys
+nothing compares anything. `RISK-OPS-002` stays open, narrowed to that.
 
 ### The correction of 2026-08-31
 
@@ -250,6 +264,10 @@ Find candidate SHAs in the Actions run summary of any successful deploy, or:
 gh api /users/ulrichschinz/packages/container/runway-backend/versions \
   --jq '.[] | .metadata.container.tags' | head
 ```
+
+**Rolling back across brief 0066** (the session version): while the older image runs, a password change
+ends no session. After rolling forward again, end every session once — see
+[Ending sessions](#ending-sessions).
 
 ## Health
 
@@ -525,7 +543,7 @@ concurrently, and a correlation id that correlates the wrong lines is worse than
 | | catches | misses |
 |---|---|---|
 | `RULE-OPS-002` (static) | anything named `password`, `token`, `api_key`, `jwt_secret`, … at a logging call in `backend/app/` | the same value under a neutral name; uvicorn, libraries, tracebacks |
-| the redaction filter (runtime) | a JWT, a bcrypt hash, a 43-character API key and the resolved `JWT_SECRET` **anywhere in the line**, whatever it is called, plus any field whose name says credential | a value with no recognised shape under a name that does not say credential — a plain password, for one |
+| the redaction filter (runtime) | a JWT, a bcrypt hash, an Argon2id hash, an API key (`rwk_…` and the legacy 43-character one) and the resolved `JWT_SECRET` **anywhere in the line**, whatever it is called, plus any field whose name says credential | a value with no recognised shape under a name that does not say credential — a plain password, for one |
 
 What remains after both is recorded as `RISK-OPS-005`.
 
@@ -658,6 +676,38 @@ one `ALTER TABLE`.
 **Nothing prunes this file.** It grows for the life of the deployment, on the same partition as `users.db`
 and `data/`. Recorded as `RISK-OPS-006`, with the trigger to come back to it.
 
+### The size of the audit log
+
+Since brief 0073 the backend measures the file at boot and every hour and logs one line:
+
+```
+INFO    audit store size  audit_db_bytes=…  audit_db_high_water_bytes=…  audit_db_warn_bytes=104857600
+WARNING audit store size  …  hint="over AUDIT_DB_WARN_BYTES; nothing prunes it …"
+```
+
+`audit_db_bytes` is `audit.db` plus its `-wal` and `-shm` files; `audit_db_high_water_bytes` is the largest
+size ever measured, kept in the file's own `audit_meta` table, so it still says how large the store was after
+an archive or a `VACUUM`. The threshold is `AUDIT_DB_WARN_BYTES` (README). Watch for the WARNING:
+
+```sh
+# on the deploy host
+docker compose logs backend | grep '"audit store size"' | tail -1
+```
+
+**What to do at the warning is not automated, on purpose.** How long audit rows must be kept — and which
+must outlive that, because a revocation, a role change or a storage migration is evidence — is the
+operator's decision (gate D7 of the remediation plan, [ADR 0047](adr/0047-audit-retention-and-versioned-migrations.md)
+Decision 1, which also lists what the eventual retention job must respect). Until it is taken nothing in
+this repository deletes, archives or vacuums a row. Free space on the partition is the operator's to watch
+(`df -h /opt/services/runway`).
+
+**Refusals an anonymous caller can repeat are one row per window, with a count.** A refused login is
+reported by the limiter (`auth.login.throttled … (refusals: N)`, brief 0069); a refused registration
+(`auth.registered`, outcome `refused`/`failure`) writes its first row of a kind in a login window as before,
+and the rest are carried as `… (refusals: N)` by the next row of that kind or by a summary
+`…: N further refusals in the last window` (hourly, and at shutdown). So such rows cannot grow the file at
+a client's request rate; to count refused registrations, sum the `N`s rather than the rows.
+
 ### Is anyone still using the Bearer-as-API-key shape?
 
 The question `SHIM-SEC-006` has been blocked on since Step 13, and the reason this table exists. Three
@@ -709,7 +759,8 @@ Until that window has passed, `SHIM-SEC-006` stays, and its expiry has not moved
 ### Other questions this table answers
 
 ```sh
-# every disclosure of an API key in cleartext (finding SEC-5), most recent first
+# every disclosure of a legacy API key in cleartext (finding SEC-5; only the deprecated GET, until the
+# legacy cutoff), most recent first
 sqlite3 -header -column data/audit.db "
   SELECT recorded_at, actor FROM audit_events
   WHERE event = 'auth.apikey.disclosed' ORDER BY id DESC LIMIT 20;"
@@ -735,6 +786,571 @@ docker compose logs --no-log-prefix backend | jq -r 'select(.request_id == "1e4c
 wrapped, and a failure is logged at `ERROR` as `the audit event could not be written` and the request is
 served anyway. So if a row seems absent, grep the log stream for that message before concluding the event
 did not happen.
+
+## Schema migrations
+
+`init_db()` runs at every start (ADR 0025, ADR 0047). First the **additive baseline** — the frozen list of
+`ALTER TABLE` statements every historical database needs — then the **versioned steps**, each applied once,
+in one transaction, and recorded in `schema_migrations`:
+
+```sh
+# on the deploy host: which version is this database at?
+cd /opt/services/runway
+sqlite3 users.db 'SELECT version, name, datetime(applied_at, "unixepoch") FROM schema_migrations;'
+```
+
+The boot also says it: one INFO line `schema migration applied` (with `schema_version`) the first time a
+step runs, and `GET /api/skill` reports `server.schema_version`, which `verify-deploy` compares with the
+`-- schema_version` line of `ops/surfaces/db-schema.sql`.
+
+**Version 1 — `users` in one declared shape** (brief 0073). The table is rebuilt with the same columns and
+data, a `CHECK (role IN ('user', 'admin'))`, and without the `UNIQUE` on `api_key` that only fresh databases
+had. Ids and the id sequence are kept; every index and trigger is re-created. `role` NULL or empty becomes
+`user`. **A role that is neither refuses the step**: the boot continues at version 0 and logs
+
+```
+ERROR schema migration refused  migration_version=1  migration_error="N account(s) carry a role ..."
+```
+
+and `verify-deploy` fails on `schema_version`. Find and fix the rows, then restart the backend — the step
+runs again at the next boot:
+
+```sh
+sqlite3 users.db "SELECT id, role FROM users WHERE role NOT IN ('user', 'admin');"
+sqlite3 users.db "UPDATE users SET role='user' WHERE id=<id>;"   # or 'admin', deliberately
+docker compose restart backend
+```
+
+**Rollback.** The previous image boots on a rebuilt database and serves it unchanged: it ignores
+`schema_migrations`, and its additive loop finds every column present. Rolling forward again does not re-run
+a step. Taking a copy of `users.db` before the first deploy of a new step stays the rule (plan §7).
+
+**Version 2 — the API-key contract — is not shipped.** It drops `users.api_key` after the legacy cutoff
+(2027-01-15) and its soak, in its own change (ADR 0044).
+
+## Moving task storage off the username
+
+Finding SEC-001, [ADR 0043](adr/0043-account-identity-and-taskwarrior-storage.md), brief
+[0065](briefs/0065-account-identity-is-not-a-storage-path.md). Since that change a new account's tasks
+live in `data/<storage_id>/`. Accounts created before it keep `users.storage_layout='legacy'` and their tasks
+in `data/<username>/` until this procedure has run; the default `TASK_STORAGE_MODE=compat` serves them from
+there only when the name is one path component that is, in exactly that spelling, a directory directly under
+`data/` (`SHIM-SEC-007`, expires 2027-02-28). Compat refuses, until `apply` has moved them, legacy names of 32 hex
+characters, names of the form `.<32 hex>.…` (the migration's own staging and set-aside directories) and
+`audit.db*`; the dry run in step 2 lists them as `blocked` or `ready` before anything is deployed.
+
+Nothing below has been run against production by this repository. Each step is the operator's, on the deploy
+host, and none of them copies a task, a token or a password into a ticket, a chat or a log.
+
+**1. Before anything — baseline (plan milestone M0).**
+
+- Is registration open? `sqlite3 users.db "SELECT value FROM site_settings WHERE key='allow_registration'"`.
+  If `true`, close it (`PUT /admin/settings`, or Settings in the web UI) until step 5 — containment, not the fix.
+- Record the running commit (`GET /health`), the image digests (`docker compose images`), the process UID
+  (`docker compose exec backend id -u`) and the mount permissions of `data/`.
+- **The filesystem under `data/` is case- and normalisation-sensitive** (ext4 is; APFS and a Docker Desktop
+  bind mount on macOS are not): `mkdir data/.probe-a && test ! -e data/.probe-A; rmdir data/.probe-a` must
+  succeed. On a folding filesystem `ALICE` opens `alice`'s directory. Compat and the migration both refuse
+  that, but only a sensitive filesystem makes it impossible.
+- Take an **encrypted backup** of `users.db`, `data/audit.db` and every directory under `data/`, and restore it
+  once into a scratch directory to prove it restores. This is the rollback point after a write (step 4).
+
+**2. The dry run.** The backend can keep running for this; it changes nothing.
+
+```sh
+docker compose run --rm --no-deps backend python -m app.services.storage_migration plan
+```
+
+One line per account: `user <id>  <status>  <files> files <bytes> bytes  <legacy path> -> <storage id>`, paths
+relative to `DATA_ROOT`, no task text. Statuses: `done` (already in the new layout), `ready` (will be copied),
+`blocked` with a reason. Exit 1 when anything is blocked. **Exit 3 when `DATA_ROOT` does not exist or is not a
+directory** — the tool never creates it, so an unmounted volume cannot be "migrated" onto an empty root. **A legacy
+account without `data/<username>/` is `blocked`** (`no legacy directory; pass --provision-missing …`): every earlier
+image created that directory at registration, so its absence means a wrong root or a lost volume — check the mount
+and the backup first. Only once you know the store is really gone, `plan --provision-missing` reports it as
+`provision` and `apply --provision-missing` gives it an empty store. An error reading one account's tree (an
+unreadable file: `tree contains an unreadable entry`) or copying it (`copy failed: ENOSPC`) blocks that account
+only, with no path in the output; the others go on. **`blocked: alias of another account's directory` is a possible incident** — two account names open
+the same directory (compared by inode, so `ALICE`/`alice` on a case-insensitive filesystem counts, and so does a
+legacy name equal to another account's storage id), so one account may have read or written the other's tasks. Lock the accounts concerned,
+keep the originals untouched, and follow the incident process; do not "fix" the directory. Every other blocked
+reason (a symlink, a hard link, a special file, a foreign owner, a name that is not one component, a target with
+other content, `store is spelled differently on disk`) stops that account only, and needs a human decision before
+it is retried.
+
+**3. Apply, with the backend stopped** — a live SQLite store copied while it is written is not a copy.
+
+```sh
+docker compose stop backend
+docker compose run --rm --no-deps backend python -m app.services.storage_migration apply
+docker compose start backend
+```
+
+`apply` copies each `ready` account into a staging directory, verifies every file's size and SHA-256 against
+the source, renames it into place, re-verifies, and only then switches the account. **The legacy directory is
+never modified or removed.** It writes a row per account to `users.db`'s `storage_migrations` table and a
+`storage.migrated` row to the audit log. It is safe to run again: `done` accounts are skipped and an interrupted
+run is completed. `--user-id N` limits it to one account; `--json` prints one JSON document.
+
+**4. Rolling back one account.** Only while the new store has not been written to since the copy, and only with
+`TASK_STORAGE_MODE=compat` (the tool refuses in `strict`, where a legacy account is a 500):
+
+```sh
+docker compose run --rm --no-deps backend python -m app.services.storage_migration rollback --user-id N
+```
+
+The copy the account no longer uses is renamed to `data/.<storage_id>.rolled-back.<timestamp>/` — kept, not
+deleted; it goes with the contract step. The account is served from `data/<username>/` again, and **may be
+migrated again later**: the next `apply` copies the legacy store afresh, including whatever was written to it
+after the rollback. (A copy a rollback could not set aside is recognised by its recorded manifest and replaced
+the same way; any other existing `data/<storage_id>/` still blocks.)
+
+An account `apply --provision-missing` provisioned rolls back the same way while its store is still the bare
+`.taskrc` template (nothing written); it is then a legacy account without a directory again, as `plan` found it.
+
+**After a write to a migrated store, rollback refuses**, and the way back is the backup from step 1 or a
+forward fix. **Redeploying the previous image after a migration serves the frozen legacy copy**: every task
+written since the migration would seem lost (it is still in `data/<storage_id>/`). **It also leaves every account
+without a legacy directory without task access** — accounts registered after this deploy and accounts `apply`
+provisioned: the previous image looks in `data/<username>/`, finds nothing, and answers 500 until the new image
+is rolled forward (their data is untouched). List them before rolling back:
+
+```sql
+SELECT id FROM users WHERE storage_layout='storage_id'
+  AND id NOT IN (SELECT user_id FROM storage_migrations WHERE action='migrated');
+```
+
+Keeping registration closed (step 1) keeps the first group empty. Prefer fixing forward.
+
+**5. The switch.** When `plan` reports every account `done`: set `TASK_STORAGE_MODE=strict` in the host `.env`
+and restart. The deploy compose passes the variable into the container (`TASK_STORAGE_MODE=${TASK_STORAGE_MODE:-compat}`);
+**check that it took** — the running backend's startup line must say `strict`:
+
+```sh
+docker compose logs backend | grep '"startup complete"' | tail -1   # ... "task_storage_mode": "strict"
+```
+
+A legacy account is then refused with 500 and a `storage.refused` audit row:
+
+```sql
+SELECT recorded_at, actor, detail FROM audit_events WHERE event = 'storage.refused' ORDER BY id DESC;
+```
+
+Registration may be reopened once the commit running in production has its container tier green in CI.
+
+**6. Contract — not yet, and not by hand.** Removing `data/<username>/` directories is its own change, after
+`strict` has run for 14 days and one migrated account has been restored from the backup. Until then the legacy
+directories are the rollback source; the backup still has to include them.
+
+## API keys
+
+Since brief 0070 (`WAIVER-SEC-003`, ADR 0044 Decision 6) a key is `rwk_<key id>_<secret>`, stored only as a
+SHA-256 in the `api_keys` table of `users.db`, and shown once — nobody, operator included, can read one
+back. Keys issued before 2026-11-25 (43 characters, kept in cleartext in `users.api_key`) were hashed into
+`legacy` rows at the first boot of this image and authenticate by that hash only, **until the legacy
+cutoff**: `API_KEY_LEGACY_CUTOFF`, default and latest `2027-01-15` (00:00 UTC). The startup line carries
+the effective date as `legacy_key_cutoff`; a later or malformed value is ignored with a `WARNING`.
+
+**Before the cutoff — who has not moved yet** (counts and names only; the query selects no key):
+
+```sh
+sqlite3 -header -column users.db "
+  SELECT u.username, datetime(k.last_used_at, 'unixepoch') AS legacy_last_used
+  FROM api_keys k JOIN users u ON u.id = k.user_id
+  WHERE k.kind = 'legacy' AND k.revoked_at IS NULL ORDER BY k.last_used_at DESC;"
+```
+
+Tell those users to create a new key in Einstellungen → API-Key and put it where the old one was. Moving
+the cutoff earlier (once that list is empty, or in an incident) is `API_KEY_LEGACY_CUTOFF=<YYYY-MM-DD>` in
+the host `.env` and a redeploy; it cannot be moved later. The boot after the change also moves the
+`expires_at` of every live legacy row to the new date, so the settings page announces the day the key
+really stops working. That is one-way: moving the setting back later again does not extend those rows.
+
+**On the cutoff day — restart the backend once** (`docker compose up -d --force-recreate backend`, or any
+deploy). Authentication refuses legacy keys from 00:00 UTC without it; the boot is what **revokes every
+legacy row and empties `users.api_key` in every row**, so that the file holds no cleartext key. Check:
+
+```sh
+sqlite3 users.db "SELECT COUNT(*) FROM users WHERE api_key IS NOT NULL;"   # 0 after that boot
+```
+
+**Backups.** Every backup of `users.db` taken before the cutoff holds the legacy keys in cleartext; until
+the cutoff they are working credentials, after it they are refused. Protect those backups as credentials
+until then, and replace them by the retention policy afterwards. **A restored backup** is opened by a boot,
+and a boot after the cutoff empties the column before the first request; before the cutoff, a restore
+brings the restored keys back as valid legacy keys — and restores revocations made since then as undone.
+After a restore, end every key that was revoked since the backup again (below).
+
+**Rollback.** Until the contract step the previous image still reads `users.api_key`, so a rollback
+inside the window keeps legacy keys working; keys created with this image (`rwk_…`) do not work under the
+previous image. **Every rollback, before the cutoff as after it, re-mints cleartext keys:** the previous
+image's boot gives every row whose `users.api_key` is NULL a fresh cleartext key — every account registered
+under this image, and every account whose legacy key was revoked or rotated here — and its
+`GET /auth/apikey` returns that key to the account. While the previous image runs, those keys work and lie in
+`users.db` and in every backup taken then. **After rolling forward**, this image's boot imports nothing for
+those accounts: `users.api_key_closed_at` marks the account as closed, and the boot empties its column
+instead (brief 0070, review round 1). A key one of them obtained from the previous image therefore stops at
+the roll-forward; the user creates a new one. An account that never met this image — one with
+`api_key_closed_at` NULL, including one the previous image registered during the rollback — keeps its key as
+a legacy key until the cutoff, and a regenerate by the previous image replaces that account's legacy key.
+Check after the roll-forward boot that the closed accounts hold no cleartext:
+
+```sh
+sqlite3 users.db "SELECT COUNT(*) FROM users WHERE api_key IS NOT NULL AND api_key_closed_at IS NOT NULL;"  # 0
+```
+
+Backups taken while the previous image ran hold those re-minted keys; after the roll-forward they are not
+credentials to this image, but they are to the previous one — replace them by the retention policy.
+**Do not roll back past this image after the cutoff** unless you accept that re-minting for every row. The
+cutoff is never rolled back.
+
+### Ending API keys
+
+One key: Einstellungen → API-Key → Widerrufen, or `DELETE /api/auth/apikeys/{key_id}` with a session. Every
+key of one account (an incident; the account's owner does it with the deprecated
+`POST /api/auth/apikey/regenerate`, or the operator on the host):
+
+```sh
+sqlite3 users.db "
+  UPDATE api_keys SET revoked_at = strftime('%s','now')
+    WHERE revoked_at IS NULL AND user_id = (SELECT id FROM users WHERE username = 'alice');
+  UPDATE users SET api_key = NULL, api_key_closed_at = COALESCE(api_key_closed_at, strftime('%s','now'))
+    WHERE username = 'alice';"
+```
+
+Without the `WHERE … username` / `user_id` conditions the same two statements end every key of every
+account. A revoked key stays revoked (trigger `api_keys_revocation_is_final`). Who used which key last is
+`last_used_at` (to the minute); `auth.apikey.created` and `auth.apikey.revoked` in the audit log name the
+public key id, never the key.
+
+## The signing key: `JWT_SECRET`
+
+Tokens are HS256, always (ADR 0046); the key is `JWT_SECRET` from the host `.env`, and nothing in this
+repository ever holds a real one. **Generate it, never type it:**
+
+```sh
+openssl rand -base64 48
+```
+
+The backend refuses to start (finding SEC-002, brief 0072) on an empty value, fewer than 32 characters,
+any value published in this repository or one that reads like a placeholder, a public key (PEM, OpenSSH, a
+JWK or JWK set, DER or an uncompressed EC point in hex or base64, or anything PyJWT refuses as an HMAC key),
+a value that is mostly repetition or a run, or an estimated entropy under 80 bits — and on `JWT_ALGORITHM`
+set to anything but `HS256`. A raw Ed25519 key or a compressed EC point is *not* recognised (it looks like
+random bytes): generating the key is what rules those out. The refusal names the reason and never the value.
+
+**Before merging a change with new startup checks** (brief 0072 is one), run them against the host's
+environment — merging to `main` deploys with no manual step, so after the merge is too late. Run it through
+compose from the service directory, so the check sees exactly the environment the backend gets: compose
+interpolates `JWT_SECRET=${JWT_SECRET}` from the `.env` beside it (stripping quotes and a trailing comment)
+and passes nothing else from that file — `docker run --env-file` reads the `.env` by different rules and
+can answer for a value production never sees. It prints `ok` or the reason, never the secret, and touches
+no data.
+
+*Before the merge* the new image does not exist yet, so mount the branch's two checking modules over the
+deployed image's copies (both are self-contained: the standard library, `pydantic-settings` and PyJWT's
+`HMACAlgorithm`, all in the deployed image):
+
+```sh
+# from a checkout of the branch, on your machine
+scp backend/app/startup_checks.py backend/app/config.py <host>:/tmp/runway-check/
+# on the host
+cd /opt/services/runway
+docker compose run --rm --no-deps \
+  -v /tmp/runway-check/startup_checks.py:/app/app/startup_checks.py:ro \
+  -v /tmp/runway-check/config.py:/app/app/config.py:ro \
+  backend python -m app.startup_checks
+rm -r /tmp/runway-check
+```
+
+*After a deploy* (or for a rollback target), the image carries the checks itself:
+`RUNWAY_SHA=<sha> docker compose run --rm --no-deps backend python -m app.startup_checks`.
+
+If it refuses, rotate (below) before the merge. While there, remove a `JWT_ALGORITHM` line if the `.env`
+has one: it chooses nothing any more and goes with `SHIM-SEC-010`.
+
+**Rotating it** ends every session of every account at once — every JWT was signed with the old key — and
+leaves API keys, and so agents and MCP clients, untouched. Replace the value in the host `.env` with a newly
+generated one and recreate the backend container. Ending sessions without rotating is cheaper and usually
+what you want (next section); rotate when the key itself may be known — a leaked `.env`, a backup of it, a
+log line that should not exist.
+
+## Ending sessions
+
+Since brief 0066 (finding REV-001, ADR 0044) every JWT carries the account's `users.auth_version`, and
+`get_current_user` refuses a token whose version is not the stored one. `PUT /auth/password` raises it,
+which is how a password change ends every other session. API keys are **not** touched by any of this.
+
+**End one account's sessions** — a suspected stolen token, a lost device — on the host, with the backend
+running (the next request with an old token is 401; nothing needs restarting):
+
+```sh
+sqlite3 users.db "UPDATE users SET auth_version = auth_version + 1 WHERE username = 'alice';"
+```
+
+**End every session of every account** — the global event, e.g. after a rollback (below) or when tokens may
+have leaked from a log. Cheaper than rotating `JWT_SECRET` and leaves agents on API keys running:
+
+```sh
+sqlite3 users.db "UPDATE users SET auth_version = auth_version + 1;"
+```
+
+The version can only go up (trigger `users_auth_version_monotone`); a statement that lowers it fails. If
+a key may be compromised too, end it as well (Einstellungen → API-Key → Widerrufen, or *Ending API keys*
+below) — a password change deliberately does not.
+
+**The deploy that introduces it.** Tokens issued by the previous image have no `auth_version`. For one
+`JWT_EXPIRE_HOURS` after this image first boots they are accepted as version 1 (`SHIM-SEC-008`); after that
+none qualifies, with no action. When that is (UTC epoch seconds, plus `JWT_EXPIRE_HOURS`):
+
+```sh
+sqlite3 users.db "SELECT value FROM site_settings WHERE key = 'auth_version_expand_at';"
+```
+
+After the deploy, check with a **synthetic** account (never a real user's credentials): log in twice, change
+the password with the first token, and confirm the second token gets `401` on `GET /api/auth/me` while the
+token in the change's response gets `200`.
+
+**Rollback.** The previous image ignores `auth_version`: while it runs, a password change ends no session
+(REV-001 is open again) and nothing else breaks. **After rolling forward, run the global statement above
+once**, so a token that should have been revoked during the rollback is not valid again. Users log in once
+more; that is the price.
+
+**Restoring `users.db` from a backup** brings back the `auth_version` values *and the password hashes*
+from the moment of the backup. Every revocation made since then is undone: a token that a later password
+change or the per-account `UPDATE` above had ended carries the restored version again and is accepted
+until it expires, and the old password logs in again. The monotone trigger cannot prevent that, because
+a restore replaces the file and runs no `UPDATE`. **After every restore, run the global statement above
+once, before the app serves traffic**, and tell the users whose password changed after the backup that
+their old password is back.
+
+## The login budget
+
+Since brief 0069 (findings SEC-8, REV-003; `docs/security.md`, *Login throttling*) `POST /auth/login`
+reserves a slot in three budgets — per username, per network source, in total — before any password work,
+and answers 429 when one is full. The counters are in the backend's memory: **a restart clears every
+lockout**, which is also the fastest way to lift one for a real user. API keys are never throttled.
+
+**What a lockout looks like in the audit log.** One `auth.login.throttled` row per locked key and window,
+not one per request; each says how many refused attempts it stands for. Account rows name the attempted
+username; source and global rows name nothing (no address is ever recorded).
+
+```sh
+# refused attempts by tier and account over the last day
+sqlite3 -header -column data/audit.db "
+  SELECT actor,
+         substr(detail, instr(detail, 'by the ') + 7,
+                instr(detail, ' budget') - instr(detail, 'by the ') - 7) AS tier,
+         SUM(CAST(substr(detail, instr(detail, 'refusals: ') + 10,
+                         length(detail) - instr(detail, 'refusals: ') - 10) AS INTEGER)) AS refused,
+         MAX(recorded_at) AS last_seen
+  FROM audit_events
+  WHERE event = 'auth.login.throttled' AND recorded_at >= strftime('%Y-%m-%dT%H:%M', 'now', '-1 day')
+  GROUP BY actor, tier ORDER BY refused DESC;"
+```
+
+Rows written before brief 0069 have the old detail `locked out, retry in Ns` and no count: one row per refusal.
+
+**`TRUSTED_PROXIES` in production** — not set by this repository, because which addresses Traefik and nginx
+have on `traefik-public` is a fact of the host. **Set it on the host before the deploy that ships brief
+0069**, not after. Until it is set, nginx's address is a private one nobody declared, so it is not counted as
+a source at all: the source tier is off, the boot logs a `WARNING` (`TRUSTED_PROXIES is not set`), and a
+spray is bounded only by the account budget per name and the global brake (300 failures per five minutes,
+after which every account's password login is refused for as long as the spray continues). Counting nginx's
+address instead would have let any one client lock every account out with 30 wrong logins. To set it:
+
+1. On the host, list the network's members: `sudo docker network inspect traefik-public --format
+   '{{range .Containers}}{{.Name}} {{.IPv4Address}}{{"\n"}}{{end}}'`. Note the Traefik container's address
+   and the runway frontend's (nginx). Container addresses on a user-defined network can change on recreate;
+   if the network has a fixed subnet you may list the subnet instead, **but then every container on that
+   network is trusted to write `X-Forwarded-For`** — only do that if nothing else on it accepts traffic you
+   do not control. **When a listed address drifts** (every merge recreates the frontend), nginx arrives
+   from a private address that is not listed. The backend then does not count it as a source at all — the
+   source tier is off again, as with `TRUSTED_PROXIES` unset, and a spray is bounded by the account
+   budget and the global brake — and logs a `WARNING` `login request from an undeclared proxy` at most
+   once per window. Counting it would have made every client one budget of 30. After each deploy, check
+   the log for that line (`sudo docker compose logs backend | grep 'undeclared proxy'`); if it is there,
+   repeat this step with the new address.
+2. Add `TRUSTED_PROXIES=<traefik address>,<nginx address>` (or the subnet) to `/opt/services/runway/.env`.
+   The deploy compose passes it through (`TRUSTED_PROXIES=${TRUSTED_PROXIES:-}`).
+3. `sudo docker compose up -d backend`, then check the boot line: `startup complete` carries
+   `login_trusted_proxies` (how many entries were accepted), and an ignored entry logs an `ERROR`
+   `TRUSTED_PROXIES entries ignored`.
+4. Confirm Traefik sets `X-Forwarded-For` to the client address and does not forward a client's own
+   (`forwardedHeaders.insecure` off, no `trustedIPs` for the internet) — that is Traefik's configuration,
+   outside this repository.
+
+A wrong value fails safe in one direction only: an address that is not a proxy is never trusted unless
+listed, but a listed address is believed. Rolling back to an image before brief 0069 ignores the variable.
+
+**Recovery after a suspected credential compromise** needs both credentials: a password change (or the
+`auth_version` bump in *Ending sessions*) ends JWT sessions, and *Ending API keys* ends the
+API keys. The login budget protects neither once the attacker holds one.
+
+**The budgets' other variables.** `LOGIN_RATE_LIMIT`, `LOGIN_RATE_WINDOW_SECONDS`, `LOGIN_SOURCE_RATE_LIMIT`,
+`LOGIN_GLOBAL_RATE_LIMIT` and `LOGIN_RATE_MAX_KEYS` are passed through by both compose files with the
+README defaults, so a value in `/opt/services/runway/.env` takes effect on `docker compose up -d backend`.
+During a sustained global lockout, raising `LOGIN_GLOBAL_RATE_LIMIT` buys real users room at the price of
+more guesses; an API key and `make grant-admin` on the host keep working throughout.
+
+**The re-open trigger (`RISK-SEC-003`).** The budgets hold only while one backend process serves every login.
+`backend/tests/unit/test_login_budget.py` (`TestTheSingleWorkerAssumption`, `TestTheSingleWorkerPinIsWholeFile`)
+fails if the Dockerfile's CMD stops pinning `--workers 1`, the Dockerfile sets `WEB_CONCURRENCY`, an
+`ENTRYPOINT` or gunicorn, or either compose file sets `WEB_CONCURRENCY`, `replicas`, `scale` or `--workers`.
+It reads the files; a host that starts the image some other way is outside what it can see. If that test goes red, do
+not adjust it: a limiter shared by every worker — Traefik's rate-limit middleware at the edge, or a counter in
+a store all workers use — has to exist first.
+
+## MCP
+
+Since brief 0071 (findings REV-004, REV-005; ADR 0045) the MCP endpoint (`/api/mcp`) is **stateless**: it
+issues no `Mcp-Session-Id` and keeps nothing between requests, so a restart or deploy loses no MCP state
+(there is none) and clients need no reconnect logic beyond retrying a request. `GET` and `DELETE` on it
+answer `405` by design.
+
+**Capacity.** Every MCP request takes a slot before any work: at most `MCP_MAX_INFLIGHT` (32) at once in
+total and `MCP_SOURCE_MAX_INFLIGHT` (8) per network source — the source as for the login budget, so with
+`TRUSTED_PROXIES` unset every client behind nginx counts against the total only — and requests without a
+credential header at most a quarter of the total (presence, not validity: a made-up header escapes the
+share, not the two ceilings; `RISK-MCP-002`). Above that: `503` (total) or `429` (source), `Retry-After:
+1`. A request longer than 30 seconds is cancelled and answered `504`. Both compose files pass the two
+variables through; raise them in `/opt/services/runway/.env` and `docker compose up -d backend`. Like the
+login budget they are per process (`RISK-SEC-003`).
+
+**What it is doing.** The backend logs one INFO line `mcp budget` at most once an hour, and a WARNING
+`mcp budget: a request was refused for capacity` at most once in five minutes, each with `mcp_counters`:
+`served_with_header`, `served_anonymous`, `refused_source`, `refused_global`, `refused_anonymous_share`,
+`refused_unbound_target`, `timed_out`, `inflight`, `inflight_anonymous`,
+`live_transports`. Integers only — no caller, address, header or argument. `live_transports` above zero
+with no traffic would mean a torn-down request left a server task behind: report it. A
+`MCP tool call refused: it does not reach its own route` WARNING names a tool whose argument tried to
+address another route (REV-005); it is refused before the credential is looked up.
+
+```sh
+sudo docker compose logs backend | grep '"mcp budget' | tail -5
+```
+
+**Anonymous discovery is still open** (`RISK-MCP-002`): the handshake and the tool list are served
+without a key; every tool call needs one. `served_anonymous` in the summary line says how much of the
+traffic lists tools without a key — evidence for the planned switch that requires a credential on the
+handshake (ADR 0045, deferred).
+
+**Rollback.** The previous image is stateful again and ignores the two variables; nothing on disk
+changed, so rolling back and forward is free. It also reopens REV-005 (a `..` path argument reaching
+REST-only routes) for as long as it runs.
+
+## Password hashing: Argon2id and the bcrypt migration
+
+Since brief 0067 (finding SEC-006, ADR 0044 Decision 5) new passwords are hashed with Argon2id; the
+bcrypt hashes passlib wrote before are still verified (`SHIM-SEC-009`) and replaced on login. Nothing in
+this section needs a setting or a deploy: every step is dated from the image's first boot.
+
+**When the timeline started** (UTC epoch seconds):
+
+```sh
+sqlite3 users.db "SELECT value FROM site_settings WHERE key = 'password_kdf_expand_at';"
+```
+
+| From | What happens |
+|---|---|
+| first boot | Policy (a new password 8–1024 bytes, no NUL; a typed one at most 4096, the previous image's bound), body limits (16 KiB on `/auth/*`, 1 MiB elsewhere) and uniform login work apply. **New and changed passwords are still bcrypt** — the soak — and so must be **shorter than 72 bytes** until Switch 1 (422 otherwise): bcrypt would store a longer one truncated, and any password with the same first 72 bytes would log in to it. |
+| + 7 days | **Switch 1.** New and changed passwords are Argon2id; an exact bcrypt login is rehashed (`auth.password.rehashed` in the audit log). |
+| + 67 days | **Switch 2.** A bcrypt login with a password of 72 bytes or more is refused; those accounts need the reset below. |
+
+**Before Switch 1, measure on this host** — the parameters were measured on a development machine, not here.
+Two budgets: **250 ms and 64 MiB per Argon2id verification**, and **500 ms per login** — until the contract
+step every login also runs a bcrypt check at cost 12 (against the stored hash or a dummy, so that an
+unknown account costs the same), and that part is about twice the Argon2id one:
+
+```sh
+docker compose exec backend python -m app.auth
+```
+
+It prints the median of each part and of a whole failed login, and `within budget` or `OVER BUDGET`. If
+either is over, lower `ARGON2_TIME_COST` in `backend/app/auth.py` (never the memory below 19 MiB or the time
+below 2 — the OWASP floor, held by a test) and deploy. The bcrypt cost cannot be lowered: it is fixed by the
+hashes already stored.
+
+**Change the Argon2id parameters only before Switch 1**, while no Argon2id hash exists yet. After it, an
+account whose hash is still at the old parameters is measurably slower (or faster) to refuse than an
+unknown account, until it logs in once and is rehashed — a timing oracle for "this account exists and has
+not logged in since". If a later change is unavoidable, record it as a residual in the brief of that change
+and the threat model until no hash at the old parameters is left (`SELECT COUNT(*) FROM users WHERE
+hashed_password LIKE '$argon2id$v=19$m=65536,t=3,p=1$%'` counts the current ones), or reset those accounts.
+
+**How far the migration is** (counts only, no hashes in the output):
+
+```sh
+sqlite3 users.db "SELECT substr(hashed_password, 1, 4) AS scheme, COUNT(*) FROM users GROUP BY scheme;"
+sqlite3 data/audit.db "SELECT COUNT(*) FROM audit_events WHERE event = 'auth.password.rehashed';"
+```
+
+`$arg` is Argon2id, `$2b$` is bcrypt. **Who must change a long password** — every login accepted through a
+bcrypt hash for 72 bytes or more, before Switch 2 (passwords of up to 4096 bytes reach this path; a
+longer one was refused by the previous image too); tell them, the app already does. Their new password
+must differ from the old one in its first 72 bytes — the server refuses it otherwise:
+
+```sh
+sqlite3 data/audit.db "SELECT DISTINCT actor FROM audit_events WHERE event = 'auth.login.succeeded' AND detail LIKE 'bcrypt-era password%';"
+```
+
+**Operator reset** — the recovery path for an account refused after Switch 2 (an `auth.login.failed` row
+whose detail starts `bcrypt-era password`), and for any account still on bcrypt at the contract step.
+Confirm the person out of band first. It reads a temporary password twice at a terminal prompt — never on
+the command line, so it reaches no shell history — applies the same rule as a password change, and ends
+every session of the account (`auth.password.changed`, actor `operator`, in the audit log):
+
+```sh
+docker compose exec -it backend python -m app.services.password_reset alice
+```
+
+Exit code 0 is done; 1 means no such account; 2 means the two entries differed or the password broke the
+rule (nothing changed). During the soak the temporary password is stored as bcrypt, so it must be shorter
+than 72 bytes then, and the previous image can still verify it.
+
+Hand the temporary password over out of band and ask the person to change it in Einstellungen at once. The
+API key is untouched; rotate it as well if the account may be compromised.
+
+**Rollback.** Within the 7-day soak the previous image verifies every hash this one wrote. **After Switch 1
+it cannot verify an Argon2id hash**: passlib raises on an unknown hash, so those accounts get `500` at login
+on the previous image while bcrypt accounts keep working. Roll forward to this image or later — the
+rollback target after Switch 1 is this image's `:<commit-sha>`, not the one before it — or reset the
+affected accounts as above if a roll forward is impossible.
+
+**After a deploy**, with a **synthetic** account: register it with a password of 8 bytes or more; a
+7-byte one must get `422`; a 20 KB login body must get `413`; after Switch 1 its stored hash starts
+`$argon2id$`.
+
+## Upgrading Taskwarrior
+
+The binary is whatever the dated Arch archive snapshot in [`backend/Dockerfile`](../backend/Dockerfile)
+and [`backend/Dockerfile.test`](../backend/Dockerfile.test) holds (`RULE-DEP-004`); moving that date is
+the only way Taskwarrior changes. Its argument grammar is part of the tenancy boundary, so a bump is a
+security change, not a dependency chore:
+
+1. Move the date in **both** Dockerfiles in one change, with a brief.
+2. CI's container tier runs the whole argv boundary against the new binary (`RULE-TEST-002`). On another
+   major or minor version, `TestDateValuesAreOneArgument::test_the_binary_is_the_version_the_date_evidence_covers`
+   in `backend/tests/container/test_real_task.py` fails on purpose: the evidence that a date value cannot
+   redirect the store (finding SEC-007, rejected for 3.5.0, brief 0074) was taken on one version only.
+3. Re-run the date regression in that class and the audit probe the brief describes against the new
+   binary. If nothing redirects, set `DATE_EVIDENCE_VERSION` to the new major.minor **in the same change**
+   and record the run in its brief.
+4. If anything redirects — an embedded `rc.` term honoured (`=` or `:` spelling), an embedded
+   `rc:<file>` loaded (the regression's rc file runs a launch hook and sets a default project, which
+   `TASKDATA` does not override), a newline or space re-lexed into a standalone override — **do not
+   merge the bump**. Open a new finding with its own
+   attack path; SEC-007 is not reinterpreted. The service's date grammar (`DATE_VALUE_RE` and
+   `DATE_DOM_RE` in [`task_service.py`](../backend/app/services/task_service.py)) refuses those
+   shapes already — whitespace, `=`, `/`, any dot next to a letter (every `rc.<key>`, in either
+   spelling) and `rc:` at a word start — so the running version stays protected while the finding is
+   worked. Also check that a DOM reference in a date (`due:rc.data.location`) is still the only kind
+   of value whose refusal names the data path, and that `_run` still answers it generically
+   (`test_past_the_grammar_the_store_path_still_never_reaches_the_caller`).
+
+Nothing announces that the snapshot has aged (`RISK-DEP-001`); arm64 developers cannot run step 2
+locally (`RISK-TEST-001`) — the host's own Taskwarrior can run `backend/tests/container` if it is the
+same major.minor, which is evidence about that build, not the image's.
 
 ## The deploy host's topology
 

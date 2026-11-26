@@ -66,7 +66,9 @@ The finding said `python-jose` carried advisories and that `bcrypt==4.0.1` was p
 undocumented reason a future agent will helpfully bump". Both were checked against the actual
 packages.
 
-**`python-jose` 3.3.0 → 3.5.0, taken.** Verified drop-in against this application's exact
+**`python-jose` 3.3.0 → 3.5.0, taken.** *(Superseded on 2026-11-25 by [ADR 0046](0046-the-jwt-library-and-the-signing-key.md):
+3.5.0 is affected by CVE-2024-33663/CVE-2026-85394 and CVE-2026-120459 with no fixed release, and
+python-jose was replaced by PyJWT.)* Verified drop-in against this application's exact
 usage: HS256 encode and decode, and an `alg: none` token still refused. All 159 unit tests
 pass on it.
 

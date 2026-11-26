@@ -10,6 +10,10 @@
 #
 # Adding a route means adding a line here. That is the point: the authorization posture of
 # this surface is checked-in state, not an emergent property of thirty function signatures.
+#
+# The inventory is every route the booted application serves (brief 0073, ADR 0047): a route on
+# the app object, a transport route and the framework's own routes are routes too, and a `Mount`
+# is declared as `MOUNT <path>`, a WebSocket route as `WS <path>`.
 
 version = 1
 
@@ -36,6 +40,22 @@ guard = "user"
 
 [[routes]]
 route = "POST /auth/apikey/regenerate"
+guard = "user"
+
+# Brief 0070: hashed API keys. `user` is the guard; creating, revoking and the deprecated regenerate
+# above additionally refuse an API key as the credential inside the handler (403) — only a
+# signed-in session may mint or end one. The deprecated `GET /auth/apikey` above returns the legacy
+# key only to a signed-in session or to the legacy key itself; any other key gets "" (review round 2).
+[[routes]]
+route = "POST /auth/apikeys"
+guard = "user"
+
+[[routes]]
+route = "GET /auth/apikeys"
+guard = "user"
+
+[[routes]]
+route = "DELETE /auth/apikeys/{key_id}"
 guard = "user"
 
 [[routes]]
@@ -194,3 +214,69 @@ guard = "user"
 [[routes]]
 route = "POST /tasks/{uuid}/stop"
 guard = "user"
+
+# --- routes outside backend/app/routers/ (brief 0073, RISK-SEC-005) ---------------------------
+# Served all along and declared nowhere, because the checker used to read one directory.
+
+[[routes]]
+route = "GET /health"
+guard = "open"
+reason = """
+The container healthcheck, the post-deploy check and an MCP client probing the server call it
+before holding any credential. It returns a fixed {"status": "ok"} and reads nothing.
+"""
+
+[[routes]]
+route = "POST /mcp"
+guard = "open"
+reason = """
+The MCP transport (Streamable HTTP, stateless, ADR 0045). The endpoint itself takes no credential:
+every tool call becomes a request to its own route, which enforces that route's guard with the
+forwarded X-Api-Key/Authorization header, and only that route (mcp_gate.bind_mcp_target). The
+in-flight budget and deadline bound what an anonymous caller can hold; initialize and tools/list
+describe the public surface only.
+"""
+
+[[routes]]
+route = "GET /mcp"
+guard = "open"
+reason = """
+The same transport endpoint; in stateless mode a GET opens no stream and holds nothing (ADR 0045).
+"""
+
+[[routes]]
+route = "DELETE /mcp"
+guard = "open"
+reason = """
+The same transport endpoint; there is no session to delete in stateless mode (ADR 0045).
+"""
+
+[[routes]]
+route = "GET /openapi.json"
+guard = "open"
+reason = """
+FastAPI's served schema of this public API. The repository is public and README documents the
+surface for third parties; ops/surfaces/openapi.json is the same document, checked in.
+"""
+
+[[routes]]
+route = "GET /docs"
+guard = "open"
+reason = """
+FastAPI's interactive documentation of the same public schema. It calls nothing by itself; a
+request made from it carries the caller's own credential like any other client.
+"""
+
+[[routes]]
+route = "GET /docs/oauth2-redirect"
+guard = "open"
+reason = """
+A static helper page of the interactive documentation; it holds and returns no data.
+"""
+
+[[routes]]
+route = "GET /redoc"
+guard = "open"
+reason = """
+The alternative rendering of the same public schema.
+"""

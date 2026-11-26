@@ -31,13 +31,14 @@ required free text, and the override consumed it, so writes failed. That is a pr
 third-party argument grammar, not a control we own, and it could change in any release.
 """
 
+import errno
 import json
 import logging
 import os
 import re
 import subprocess
 
-from app.config import settings
+from app.task_storage import TaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,9 @@ _SYSTEM_FAULT = re.compile(
 # What a 500 for such a fault says. The stderr goes to the log, never to the caller.
 _SYSTEM_FAULT_MESSAGE = "Taskwarrior could not access its data store"
 
+# What a 400 says when Taskwarrior's own refusal would name the data path. The stderr is logged.
+_DATA_PATH_REFUSAL = "Taskwarrior refused a value: it is not a valid date or value here"
+
 # Free text is passed after this. Taskwarrior stops interpreting options at it.
 SEPARATOR = "--"
 
@@ -91,6 +95,20 @@ class TaskwarriorRejected(ValueError):
     or unreachable store, which stays a RuntimeError. A ValueError, so every router maps it
     to 400; before this it surfaced as a 500. The message is Taskwarrior's stderr; for the
     input refusals checked on 3.5.0 it names the offending value and nothing about the server.
+    The exception is a value the binary *evaluates*: a DOM reference such as `rc.data.location`
+    is echoed as the store's absolute path. A stderr naming the data directory is therefore
+    replaced by `_DATA_PATH_REFUSAL` and logged (second review of brief 0074).
+    """
+
+
+class ArgumentTooLong(Exception):
+    """The kernel refused to start `task` because one argument, or the whole argv, is too long.
+
+    `execve` fails with E2BIG past `MAX_ARG_STRLEN` (131 072 bytes for one argument on Linux) or
+    past the total argument budget. The request models bound every field far below that
+    (RISK-SEC-004, brief 0073), so this is defence in depth: it is the caller's input, not a fault
+    of the system, and `app.main` answers it with 413 instead of the 500 an OSError used to be.
+    Neither a ValueError nor a RuntimeError on purpose, so no router's mapping catches it first.
     """
 
 
@@ -109,8 +127,13 @@ def reject_structural_tokens(args: list[str]) -> None:
             )
 
 
-def _run(username: str, args: list[str], text: list[str] | None = None) -> str:
-    """Invoke `task` for one user.
+def _run(store: TaskStore, args: list[str], text: list[str] | None = None) -> str:
+    """Invoke `task` for one account's store.
+
+    `store` is a directory `task_storage.resolve` has already checked — never a username.
+    Until brief 0065 this took the username and joined it onto the data root itself, which is
+    how `alice/../alice` became alice's store (finding SEC-001). The type is the control: there
+    is no name here left to turn into a path.
 
     `args` are structural: filters, subcommands, modifiers — parsed by Taskwarrior.
     `text` is free text supplied by a user and is placed after `--`, where it cannot be
@@ -118,30 +141,37 @@ def _run(username: str, args: list[str], text: list[str] | None = None) -> str:
     """
     reject_structural_tokens(args)
 
-    user_data_dir = settings.data_root / username
-    taskrc_path = user_data_dir / ".taskrc"
-
     env = {
         **os.environ,
-        "TASKDATA": str(user_data_dir),
-        "TASKRC": str(taskrc_path),
-        "HOME": str(user_data_dir),
+        "TASKDATA": str(store.path),
+        "TASKRC": str(store.taskrc),
+        "HOME": str(store.path),
     }
 
     cmd = ["task", *_OWN_OVERRIDES, *args]
     if text:
         cmd += [SEPARATOR, *text]
 
-    result = subprocess.run(  # noqa: S603  # argv is validated above; shell=False by list form
-        cmd,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        # Never the server's terminal: a prompt must not wait for an answer (see above).
-        stdin=subprocess.DEVNULL,
-        # shell=False is the default when passing a list — shell injection is impossible
-    )
+    try:
+        result = subprocess.run(  # noqa: S603  # argv is validated above; shell=False by list form
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            # Never the server's terminal: a prompt must not wait for an answer (see above).
+            stdin=subprocess.DEVNULL,
+            # shell=False is the default when passing a list — shell injection is impossible
+        )
+    except OSError as failure:
+        if failure.errno == errno.E2BIG:
+            # Sizes only: the argument is user text and stays out of the log.
+            logger.warning(
+                "taskwarrior argument list refused by the kernel",
+                extra={"argv_items": len(cmd), "argv_bytes": sum(len(a.encode()) for a in cmd)},
+            )
+            raise ArgumentTooLong("A value is too long for the task store") from failure
+        raise
 
     if result.returncode == 2:
         stderr = result.stderr.strip()
@@ -149,6 +179,12 @@ def _run(username: str, args: list[str], text: list[str] | None = None) -> str:
             # Not the caller's error, and the stderr may name the data path: log it, 500.
             logger.error("taskwarrior store fault (rc 2): %s", stderr)
             raise RuntimeError(_SYSTEM_FAULT_MESSAGE)
+        if str(store.path.parent) in stderr:
+            # An input refusal that names the server's data directory: the binary evaluated a
+            # DOM reference such as `rc.data.location` inside a value (second review of brief
+            # 0074). The service grammar refuses those; this holds if something slips past it.
+            logger.warning("taskwarrior refusal named the data path (rc 2): %s", stderr)
+            raise TaskwarriorRejected(_DATA_PATH_REFUSAL)
         raise TaskwarriorRejected(stderr or "Taskwarrior rejected the command")
     if result.returncode not in (0, 1):
         raise RuntimeError(result.stderr.strip() or "task command failed")
@@ -156,46 +192,46 @@ def _run(username: str, args: list[str], text: list[str] | None = None) -> str:
     return result.stdout
 
 
-def export_tasks(username: str, filter_args: list[str] | None = None) -> list[dict]:
+def export_tasks(store: TaskStore, filter_args: list[str] | None = None) -> list[dict]:
     args = [*(filter_args or []), "export"]
-    raw = _run(username, args)
+    raw = _run(store, args)
     if not raw.strip():
         return []
     return json.loads(raw)
 
 
-def export_latest(username: str) -> list[dict]:
+def export_latest(store: TaskStore) -> list[dict]:
     """The task most recently added, via Taskwarrior's own `+LATEST` virtual tag.
 
     Replaces re-querying by description text, which put user input into a *filter* position —
     the one place `--` cannot protect, and a second injection surface for the same string.
     """
-    return export_tasks(username, ["+LATEST"])
+    return export_tasks(store, ["+LATEST"])
 
 
-def add_task(username: str, mods: list[str], text: list[str]) -> str:
-    return _run(username, ["add", *mods], text)
+def add_task(store: TaskStore, mods: list[str], text: list[str]) -> str:
+    return _run(store, ["add", *mods], text)
 
 
-def modify_task(username: str, uuid: str, mods: list[str], text: list[str] | None = None) -> str:
-    return _run(username, [uuid, "modify", *mods], text)
+def modify_task(store: TaskStore, uuid: str, mods: list[str], text: list[str] | None = None) -> str:
+    return _run(store, [uuid, "modify", *mods], text)
 
 
-def done_task(username: str, uuid: str) -> str:
-    return _run(username, [uuid, "done"])
+def done_task(store: TaskStore, uuid: str) -> str:
+    return _run(store, [uuid, "done"])
 
 
-def delete_task(username: str, uuid: str) -> str:
-    return _run(username, [uuid, "delete"])
+def delete_task(store: TaskStore, uuid: str) -> str:
+    return _run(store, [uuid, "delete"])
 
 
-def start_task(username: str, uuid: str) -> str:
-    return _run(username, [uuid, "start"])
+def start_task(store: TaskStore, uuid: str) -> str:
+    return _run(store, [uuid, "start"])
 
 
-def stop_task(username: str, uuid: str) -> str:
-    return _run(username, [uuid, "stop"])
+def stop_task(store: TaskStore, uuid: str) -> str:
+    return _run(store, [uuid, "stop"])
 
 
-def annotate_task(username: str, uuid: str, text: str) -> str:
-    return _run(username, [uuid, "annotate"], [text])
+def annotate_task(store: TaskStore, uuid: str, text: str) -> str:
+    return _run(store, [uuid, "annotate"], [text])

@@ -22,9 +22,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import create_access_token, hash_password
+from app.auth import create_access_token, hash_password, legacy_bcrypt_hash
 from app.config import settings
-from app.database import generate_api_key
 from app.logging_setup import (
     REDACTION_MARKER,
     REQUEST_ID_HEADER,
@@ -35,6 +34,16 @@ from app.logging_setup import (
     resolve_level,
 )
 from app.middleware import REQUEST_ID_LENGTH
+
+
+def generate_api_key() -> str:
+    """A key in the previous image's cleartext shape (`secrets.token_urlsafe(32)`). The
+    application mints none any more (brief 0070); the shape is still redacted and still has to
+    be — a log line is read long after it is written, and old backups hold such keys."""
+    import secrets
+
+    return secrets.token_urlsafe(32)
+
 
 BACKEND = Path(__file__).resolve().parents[2]
 
@@ -228,7 +237,7 @@ def test_an_innocent_field_survives():
 
 
 def test_a_real_jwt_is_redacted_under_a_neutral_name():
-    token = create_access_token("alice")
+    token = create_access_token("alice", auth_version=1)
     assert token.startswith("eyJ")
 
     with isolated_logger() as (logger, stream):
@@ -251,9 +260,15 @@ def test_a_real_api_key_is_redacted_under_a_neutral_name():
     assert key not in stream.getvalue()
 
 
-def test_a_bcrypt_hash_is_redacted_under_a_neutral_name():
-    hashed = hash_password("correct horse battery staple")
-    assert hashed.startswith("$2")
+@pytest.mark.parametrize(
+    ("make", "prefix"),
+    [(legacy_bcrypt_hash, "$2b$"), (hash_password, "$argon2id$")],
+    ids=["bcrypt", "argon2id"],
+)
+def test_a_password_hash_is_redacted_under_a_neutral_name(make, prefix):
+    """Both stored shapes: the passlib-era bcrypt hash and, since brief 0067, Argon2id."""
+    hashed = make("correct horse battery staple")
+    assert hashed.startswith(prefix)
 
     with isolated_logger() as (logger, stream):
         logger.info("row was %s", hashed, extra={"detail": hashed})

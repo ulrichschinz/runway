@@ -42,7 +42,13 @@
 
       <!-- Change Password -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
-        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">Change Password</h3>
+        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Change Password</h3>
+        <p class="text-sm text-gray-400 dark:text-gray-500 mb-4">
+          Changing your password signs out every other session. Your API key keeps working until you regenerate it below.
+        </p>
+        <p v-if="pwRequired" class="text-xs text-red-600 dark:text-red-400 mb-3" role="status">
+          Please set a new password now. Your current one was only checked up to its first 72 bytes; after a transition period it will stop signing you in.
+        </p>
         <div class="space-y-3 max-w-sm">
           <div>
             <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Current password</label>
@@ -64,7 +70,7 @@
               class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors">
               Update password
             </button>
-            <span v-if="pwSaved" class="text-xs text-green-500">Password updated!</span>
+            <span v-if="pwSaved" class="text-xs text-green-500">Password updated. Every other session was signed out; your API key still works &mdash; regenerate it below if it may be compromised.</span>
             <span v-if="pwError" class="text-xs text-red-500">{{ pwError }}</span>
           </div>
         </div>
@@ -240,9 +246,11 @@
 
 <script setup>
 import { ref, computed, onMounted, reactive } from 'vue'
+import { useRoute } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import { useAuthStore } from '../stores/auth.js'
 import client from '../api/client.js'
+import { passwordProblem } from '../shared/passwordPolicy.js'
 import { mcpSnippets, mcpUrl } from '../shared/mcpSnippets.js'
 import { PLUGIN_UPDATE, RUNWAY_PROJECT_LINE, connectClaudeSteps, skillZipUrl } from '../shared/claudeConnect.js'
 
@@ -272,20 +280,32 @@ async function saveProfile() {
 const pwForm = reactive({ current: '', next: '', confirm: '' })
 const pwSaved = ref(false)
 const pwError = ref('')
+// Sent here by the login (SEC-006): a bcrypt-era password of 72 bytes or more must be replaced.
+const pwRequired = useRoute().query.password === 'change'
 
 async function changePassword() {
   pwError.value = ''
   if (!pwForm.next) { pwError.value = 'New password cannot be empty'; return }
   if (pwForm.next !== pwForm.confirm) { pwError.value = 'Passwords do not match'; return }
+  if (passwordProblem(pwForm.next, { isNew: true })) { pwError.value = 'A new password needs 8 to 1024 bytes (an umlaut counts as two).'; return }
   try {
-    await client.put('/auth/password', { current_password: pwForm.current, new_password: pwForm.next })
+    const { data } = await client.put('/auth/password', { current_password: pwForm.current, new_password: pwForm.next })
+    // Every earlier session ended with the change, this one too; keep the token it returned.
+    if (data?.access_token) auth.adoptToken(data.access_token)
     pwForm.current = ''
     pwForm.next = ''
     pwForm.confirm = ''
     pwSaved.value = true
     setTimeout(() => (pwSaved.value = false), 2000)
   } catch (e) {
-    pwError.value = e.response?.data?.detail || 'Failed to update password'
+    // A 422 is the password rule (SEC-006), and its detail is pydantic's list, not a sentence.
+    const detail = e.response?.data?.detail
+    pwError.value = e.response?.status === 422
+      // The server's own sentence where it gives one: the rule has parts no local check knows
+      // (no NUL; shorter than 72 bytes in the week after an upgrade).
+      ? (Array.isArray(detail) && typeof detail[0]?.msg === 'string' && detail[0].msg)
+        || 'A new password needs 8 to 1024 bytes (an umlaut counts as two).'
+      : (typeof detail === 'string' && detail) || 'Failed to update password'
   }
 }
 

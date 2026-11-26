@@ -5,8 +5,13 @@ from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.models import (
+    DEPENDS_MAX_ITEMS,
+    DESCRIPTION_MAX,
+    TAG_MAX,
+    TAGS_MAX_ITEMS,
     GtdSummary,
     LastReview,
+    LimitExceeded,
     ProjectOverview,
     Task,
     TaskCreate,
@@ -14,6 +19,11 @@ from app.models import (
     validate_project_name,
 )
 from app.services import task_runner
+from app.task_storage import TaskStore
+
+# Re-exported for `app.main`'s 413 handler: be/app may reach be/services, and this keeps the
+# adapter's name out of the assembly (brief 0073, RISK-SEC-004).
+ArgumentTooLong = task_runner.ArgumentTooLong
 
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
@@ -167,6 +177,13 @@ def _tag_diff(current: list[str], desired: set[str]) -> tuple[list[str], list[st
     return removes, adds
 
 
+def _check_grown_set(field: str, current: list[str], desired: set[str], bound: int) -> None:
+    """A set over `bound` is refused only when it is also larger than the stored one: a task the
+    previous deploy gave more tags or dependencies stays editable and may shrink, never grow."""
+    if len(desired) > bound and len(desired) > len(set(current)):
+        raise LimitExceeded(field, f"List should have at most {bound} items, not {len(desired)}")
+
+
 def _depends_diff(current: list[str], desired: list[str]) -> list[str]:
     """Modifiers that turn `current` dependencies into `desired`.
 
@@ -228,15 +245,15 @@ def scope_key(tags: list[str] | None) -> str:
     return "+".join(sorted({token[1:] for token in _tag_filters(tags)}))
 
 
-def list_tasks(username: str, filter_args: list[str] | None = None) -> list[Task]:
-    raw_list = task_runner.export_tasks(username, filter_args)
+def list_tasks(store: TaskStore, filter_args: list[str] | None = None) -> list[Task]:
+    raw_list = task_runner.export_tasks(store, filter_args)
     tasks = [_raw_to_task(r) for r in raw_list]
     tasks.sort(key=lambda t: t.urgency, reverse=True)
     return tasks
 
 
 def search_tasks(
-    username: str,
+    store: TaskStore,
     *,
     status: str | None = None,
     include_done: bool | None = None,
@@ -299,7 +316,7 @@ def search_tasks(
         filters.append(f"project.is:{validate_project_name(project)}")
     filters += _tag_filters(tags)
 
-    tasks = list_tasks(username, filters)
+    tasks = list_tasks(store, filters)
     if "due_before" in days:
         tasks = [t for t in tasks if t.due and _local_day(t.due) < days["due_before"]]
     if "due_after" in days:
@@ -320,12 +337,49 @@ def search_tasks(
     return tasks[:limit] if limit is not None else tasks
 
 
-def get_task(username: str, uuid: str) -> Task:
+def get_task(store: TaskStore, uuid: str) -> Task:
     _validate_uuid(uuid)
-    raw_list = task_runner.export_tasks(username, [uuid])
+    raw_list = task_runner.export_tasks(store, [uuid])
     if not raw_list:
         raise ValueError("Task not found")
     return _raw_to_task(raw_list[0])
+
+
+# The four date modifiers (brief 0074, plan M9). Finding SEC-007 — an `rc.` override inside a date
+# value, which reaches the argv before `--` — is refuted on Taskwarrior 3.5.0: each argv element is
+# one value and an embedded override is dropped (`tests/container`, `TestDateValuesAreOneArgument`).
+# Defence in depth on top, not a fix: a date is one word. That admits the documented `YYYY-MM-DD` and
+# `YYYY-MM-DDTHH:MM`, the stored `20261031T230000Z`, ISO with seconds or an offset, and every one-word
+# Taskwarrior expression (`tomorrow`, `eom`, `now+3d`, `2026-W05`, `P3D`). It refuses whitespace
+# inside the value (3.5.0 lexes it: `now + 1d` evaluates, `2026-01-01 10:00` silently drops the
+# time, a newline turns the token into description text), `=`, `/`, quotes, shell characters,
+# parentheses, control characters and anything not ASCII.
+#
+# A character set alone is not enough (second review of brief 0074): 3.5.0 evaluates a DOM
+# reference inside a date — `rc.data.location`, `rc.<key>`, `system.os`, `tw.version`, `1.due` —
+# and echoes the result in its refusal, the store's absolute path among them; and `rc.<key>:<v>`
+# is the override's colon spelling, one word. So `DATE_DOM_RE` refuses a dot next to a letter
+# (every DOM reference has one; no date form does — ISO fractional seconds are `.<digit>`) and
+# `rc:` at a word start (the rc-file form). Both case-insensitive, as Taskwarrior is.
+DATE_FIELDS = ("due", "scheduled", "wait", "until")
+DATE_VALUE_RE = re.compile(r"[A-Za-z0-9:+.\-]+")
+DATE_DOM_RE = re.compile(r"[A-Za-z]\.|\.[A-Za-z]|(?<![A-Za-z])rc:", re.IGNORECASE)
+
+
+def _validate_date_value(name: str, value: str) -> str:
+    """`value` stripped, if it is one date-shaped word; `""` if it was only whitespace.
+
+    Taskwarrior 3.5.0 ignored surrounding whitespace, and read a whitespace-only value as `field:`
+    (clear on modify, nothing on create), so stripping keeps both meanings. Only ASCII whitespace is
+    stripped: a no-break space or any other non-ASCII character is refused like the rest.
+    """
+    stripped = value.strip(" \t\n\r\f\v")
+    if stripped and (not DATE_VALUE_RE.fullmatch(stripped) or DATE_DOM_RE.search(stripped)):
+        raise ValueError(
+            f"{value!r} is not a valid date for {name}: use YYYY-MM-DD or YYYY-MM-DDTHH:MM; a "
+            "Taskwarrior date expression is one word without spaces (now+3d, eom)"
+        )
+    return stripped
 
 
 VALID_RECUR_RE = re.compile(
@@ -378,6 +432,8 @@ def _build_args(
         "recur": recur,
     }
     for name, value in fields.items():
+        if value is not None and name in DATE_FIELDS:
+            value = _validate_date_value(name, value)
         if value is None or (value == "" and mode == "create"):
             continue
         if value == "":
@@ -400,7 +456,7 @@ def _build_args(
     return mods, text
 
 
-def create_task(username: str, task: TaskCreate) -> Task:
+def create_task(store: TaskStore, task: TaskCreate) -> Task:
     mods, text = _build_args(
         task.description,
         task.project,
@@ -414,19 +470,19 @@ def create_task(username: str, task: TaskCreate) -> Task:
         task.depends,
         mode="create",
     )
-    task_runner.add_task(username, mods, text)
+    task_runner.add_task(store, mods, text)
 
     # Read back by Taskwarrior's own +LATEST virtual tag rather than by re-querying the
     # description. The old form put the user's text into a *filter* position — the one place
     # the `--` separator cannot protect — so the same string was an injection surface twice,
     # and it silently returned the wrong task whenever two tasks shared a description.
-    latest = task_runner.export_latest(username)
+    latest = task_runner.export_latest(store)
     if latest:
         return _raw_to_task(latest[0])
-    return list_tasks(username)[0]
+    return list_tasks(store)[0]
 
 
-def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
+def modify_task(store: TaskStore, uuid: str, task: TaskModify) -> Task:
     """Change the fields that are set; leave the rest alone.
 
     `tags` is the complete desired set, `tags_add`/`tags_remove` are deltas, and `depends`
@@ -440,20 +496,30 @@ def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
         raise ValueError("Send either tags (full set) or tags_add/tags_remove, not both")
     tags_add = [_validate_tag(t) for t in task.tags_add or []]
     tags_remove = [_validate_existing_tag(t) for t in task.tags_remove or []]
+    description = task.description
+    long_description = description is not None and len(description) > DESCRIPTION_MAX
     # Read by uuid, which matches regardless of status, so a task hidden by a future `wait`
-    # is re-tagged like any other. Needed for every set-shaped field, and for a non-empty
-    # project, whose name is validated only when it differs from the current one (D4).
+    # is re-tagged like any other. Needed for every set-shaped field, for a non-empty
+    # project, whose name is validated only when it differs from the current one (D4), and for
+    # a description over the bound, which is kept only when it is the stored one (brief 0073).
     needs_current = (
         task.tags is not None
         or bool(tags_add)
         or bool(tags_remove)
         or task.depends is not None
         or bool(task.project)
+        or long_description
     )
-    current = get_task(username, uuid) if needs_current else None
+    current = get_task(store, uuid) if needs_current else None
+    if long_description:
+        if current is None or description != current.description:
+            raise LimitExceeded(
+                "description", f"String should have at most {DESCRIPTION_MAX} characters"
+            )
+        description = None  # the stored description, resent unchanged: nothing to write
     project_is_new = bool(task.project) and (current is None or task.project != current.project)
     mods, text = _build_args(
-        task.description,
+        description,
         task.project,
         None,
         task.priority,
@@ -472,62 +538,68 @@ def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
                 desired = set(task.tags)
             else:
                 desired = (set(current.tags) | set(tags_add)) - set(tags_remove)
+            _check_grown_set("tags", current.tags, desired, TAGS_MAX_ITEMS)
+            field = "tags" if task.tags is not None else "tags_add"
+            for tag in desired - set(current.tags):
+                if len(tag) > TAG_MAX:
+                    raise LimitExceeded(field, f"A tag should have at most {TAG_MAX} characters")
             removes, adds = _tag_diff(current.tags, desired)
             mods += [f"-{t}" for t in removes] + [f"+{t}" for t in adds]
         if task.depends is not None:
             if not task.depends:
                 mods.append("depends:")
             else:
+                _check_grown_set("depends", current.depends, set(task.depends), DEPENDS_MAX_ITEMS)
                 mods += _depends_diff(current.depends, task.depends)
 
     if not mods and not text:
-        return get_task(username, uuid)
-    task_runner.modify_task(username, uuid, mods, text)
-    return get_task(username, uuid)
+        return get_task(store, uuid)
+    task_runner.modify_task(store, uuid, mods, text)
+    return get_task(store, uuid)
 
 
-def complete_task(username: str, uuid: str) -> None:
+def complete_task(store: TaskStore, uuid: str) -> None:
     _validate_uuid(uuid)
-    task_runner.done_task(username, uuid)
+    task_runner.done_task(store, uuid)
 
 
-def remove_task(username: str, uuid: str) -> None:
+def remove_task(store: TaskStore, uuid: str) -> None:
     _validate_uuid(uuid)
-    task_runner.delete_task(username, uuid)
+    task_runner.delete_task(store, uuid)
 
 
-def start_task(username: str, uuid: str) -> Task:
+def start_task(store: TaskStore, uuid: str) -> Task:
     _validate_uuid(uuid)
-    task_runner.start_task(username, uuid)
-    return get_task(username, uuid)
+    task_runner.start_task(store, uuid)
+    return get_task(store, uuid)
 
 
-def stop_task(username: str, uuid: str) -> Task:
+def stop_task(store: TaskStore, uuid: str) -> Task:
     _validate_uuid(uuid)
-    task_runner.stop_task(username, uuid)
-    return get_task(username, uuid)
+    task_runner.stop_task(store, uuid)
+    return get_task(store, uuid)
 
 
-def annotate_task(username: str, uuid: str, text: str) -> Task:
+def annotate_task(store: TaskStore, uuid: str, text: str) -> Task:
     _validate_uuid(uuid)
-    task_runner.annotate_task(username, uuid, text)
-    return get_task(username, uuid)
+    task_runner.annotate_task(store, uuid, text)
+    return get_task(store, uuid)
 
 
-def gtd_list(username: str, view: GtdView, tags: list[str] | None = None) -> list[Task]:
+def gtd_list(store: TaskStore, view: GtdView, tags: list[str] | None = None) -> list[Task]:
     """One GTD list, sorted by urgency; the tickler by `wait`, soonest first.
 
     The tickler sorts on the stored `wait` string: Taskwarrior exports every date in the same
     UTC basic format (`20300101T000000Z`), so string order is date order.
     """
     filters = [*_VIEW_FILTERS[view], *_tag_filters(tags)]
-    tasks = list_tasks(username, filters)
+    tasks = list_tasks(store, filters)
     if view == "tickler":
         tasks.sort(key=lambda t: t.wait or "")
     return tasks
 
 
-def project_tasks(username: str, name: str, tags: list[str] | None = None) -> list[Task]:
+def project_tasks(store: TaskStore, name: str, tags: list[str] | None = None) -> list[Task]:
     """A project's visible tasks, matched exactly (D2).
 
     `project:X` is Taskwarrior's hierarchical prefix match, so `alpha` also returned
@@ -541,12 +613,12 @@ def project_tasks(username: str, name: str, tags: list[str] | None = None) -> li
     is created.
     """
     return list_tasks(
-        username,
+        store,
         [*PENDING, f"project.is:{validate_project_name(name)}", *_tag_filters(tags)],
     )
 
 
-def project_names(username: str) -> list[str]:
+def project_names(store: TaskStore) -> list[str]:
     """Distinct project names across a user's open tasks, in first-seen order.
 
     Open includes tasks hidden by a future `wait`, so parking a project's only task in the
@@ -558,7 +630,7 @@ def project_names(username: str) -> list[str]:
     RULE-ARCH-001 now forbids.
     """
     seen: dict[str, None] = {}
-    for raw in task_runner.export_tasks(username, OPEN):
+    for raw in task_runner.export_tasks(store, OPEN):
         project = raw.get("project")
         if project:
             seen[project] = None
@@ -577,14 +649,14 @@ def _is_hidden(raw: dict, now: datetime) -> bool:
     return wait is not None and wait != "" and _parse_tw(wait) > now
 
 
-def _open_raw(username: str) -> list[dict]:
+def _open_raw(store: TaskStore) -> list[dict]:
     """One export of everything the user still owns and has not finished.
 
     Every counter in `summarize` and every project in `project_rollup` is a view over this
     one list. A counter per list would mean a dozen `task` invocations for one summary, and
     they would not even agree with each other: each would see the store at its own instant.
     """
-    return task_runner.export_tasks(username, OPEN)
+    return task_runner.export_tasks(store, OPEN)
 
 
 def project_rollup(raw: list[dict], now: datetime) -> dict[str, dict[str, int]]:
@@ -645,7 +717,7 @@ def _is_stalled(status: str, counts: dict[str, int], exists: bool) -> bool:
 
 
 def project_overview(
-    username: str,
+    store: TaskStore,
     explicit: dict[str, bool] | None = None,
     statuses: dict[str, str] | None = None,
 ) -> list[ProjectOverview]:
@@ -668,7 +740,7 @@ def project_overview(
     explicit = explicit or {}
     statuses = statuses or {}
     now = _now()
-    rollup = project_rollup(_open_raw(username), now)
+    rollup = project_rollup(_open_raw(store), now)
     names: dict[str, None] = dict.fromkeys(rollup)
     for name in (*explicit, *statuses):
         names.setdefault(name, None)
@@ -693,7 +765,7 @@ def project_overview(
 
 
 def summarize(
-    username: str,
+    store: TaskStore,
     tags: list[str] | None = None,
     explicit: set[str] | None = None,
     statuses: dict[str, str] | None = None,
@@ -728,7 +800,7 @@ def summarize(
     statuses = statuses or {}
     now = _now()
     today = now.date()
-    raw = _open_raw(username)
+    raw = _open_raw(store)
 
     visible = [t for t in raw if not _is_hidden(t, now)]
     inbox = [t for t in visible if not t.get("project") and not t.get("tags")]

@@ -417,8 +417,10 @@ rules:
 
   - id: RULE-SEC-001
     statement: >
-      Every HTTP route MUST declare its required guard in rules/route-guards.toml, the
-      declaration MUST match the guard the handler enforces, and a route declared open
+      Every HTTP and WebSocket route the booted application serves — wherever it is declared, framework and
+      transport routes included — MUST declare its required guard in rules/route-guards.toml, the
+      declaration MUST match the guard the route's resolved dependency tree enforces, every
+      operation in the served OpenAPI schema MUST be in that inventory, and a route declared open
       MUST record why.
     class: executable
     check: tools/checks/route-guards.sh
@@ -434,7 +436,11 @@ rules:
       thirty handlers. Declaring the posture as checked-in state turns "did anyone think
       about authorization for this route" into a question the gate answers. Open routes
       carry a reason because a route anyone can reach is a decision, and a decision with no
-      recorded reason cannot be told apart from an oversight.
+      recorded reason cannot be told apart from an oversight. The inventory became the running
+      application on 2026-11-25 (brief 0073, ADR 0047): reading one directory left six served
+      routes undeclared, and a route beside GET /health would have shipped green (RISK-SEC-005).
+      A WebSocket route has no HTTP method and no OpenAPI entry; it is declared as `WS <path>`,
+      and a route kind the checker cannot classify fails the gate instead of being skipped.
 
   - id: RULE-SEC-002
     statement: >
@@ -453,6 +459,28 @@ rules:
       "temporary" becomes permanent by default rather than by decision. The countdown has
       to be enforced by something that goes red, exactly as RULE-RULE-002 does for waivers.
       A date nothing checks is a wish.
+
+  - id: RULE-SEC-003
+    statement: >
+      Only backend/app/task_storage.py may build a path from the data root: no other module of
+      the serving application may read `data_root` from settings or from the resolver, except
+      database.audit_db_path for the audit database's fixed name.
+    class: executable
+    check: tools/checks/storage-binding.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/security.md#the-taskwarrior-boundary
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      Finding SEC-001 was `settings.data_root / username`, written in two modules, with nothing
+      but review between a caller-chosen name and the directory Taskwarrior opened: `alice/../alice`
+      was alice's store. Brief 0065 names every store by a random, immutable storage id and decides
+      the directory in one function that refuses anything but a real directory directly under the
+      resolved root. A second place that builds paths from the root is how the finding comes back,
+      and it would arrive looking like an ordinary convenience. Non-waivable because the store is
+      the only tenancy boundary the system has. Name-based and static — see RISK-SEC-006 for what
+      the rule does not see.
 
   - id: RULE-ARCH-004
     statement: >
@@ -557,6 +585,29 @@ rules:
       skill does, and a stale copy of it is worse than stale skill text — the skill is read
       by a model that can notice it is wrong, the hook is executed.
 
+  - id: RULE-SURF-005
+    statement: >
+      The schema init_db() produces from an empty file and from every historical baseline in
+      backend/tests/fixtures/schema_history/ MUST be semantically identical — columns in order with
+      type, NOT NULL, default and key; CHECK clauses; AUTOINCREMENT; indexes by columns, uniqueness
+      and predicate; foreign keys; triggers; and the applied schema version.
+    class: executable
+    check: tools/checks/surfaces.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#make-surfaces
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      RULE-SURF-001 snapshots the schema a fresh database gets, and production is not a fresh
+      database: it was created in April 2026 and migrated by ALTER TABLE ever since. For seven months
+      the snapshot recorded an api_key UNIQUE constraint and a column order production did not have,
+      and the rule compared the snapshot against itself and passed (RISK-SURF-001). The upgrade path
+      has to be built and compared, not assumed. Statement text is not compared — the same schema is
+      spelled differently by CREATE and by ALTER — what it means is. A schema change now goes into
+      VERSIONED_MIGRATIONS, which runs on both paths; a CREATE edited instead fails here because a
+      database that already has the table never sees the edit. Brief 0073, ADR 0047.
+
   - id: RULE-DEP-002
     statement: >
       Every dependency's licence MUST be classified by policy/licenses.yaml, and MUST NOT be
@@ -591,6 +642,11 @@ rules:
       file, a fixture or a documentation example, in a file that belongs here. This repository
       is public, so a committed credential is disclosed the moment it is pushed and rotation
       is the only remedy — the cheapest moment to catch it is before the push.
+
+      Extended 2026-11-25 (brief 0070, ADR 0044 Decision 6) to this application's own API keys,
+      `rwk_<16 hex>_<43-character secret>`: a real key pasted into a test or an example is a
+      working credential in a public repository. Proved by the `DEP-003-apikey` arm, which
+      commits one built at run time; the scan before this change passed it.
 
   - id: RULE-DEP-004
     statement: >
@@ -1036,8 +1092,14 @@ residual_risks:
       The runtime redaction filter in backend/app/logging_setup.py is the second half of a
       two-part control and it is bounded in the mirror image of the first. It removes a value
       by the field name it arrives under, and by the shapes it has been taught — a JWT, a
-      bcrypt hash, the 43-character token_urlsafe(32) an API key is, and the resolved
-      JWT_SECRET matched literally. It is therefore blind to a credential that has neither: a
+      bcrypt hash, an Argon2id PHC string (added with brief 0067, when that format was
+      introduced), an API key in the hashed-key format `rwk_<16 hex>_<secret>` (added with
+      brief 0070, when that format was introduced), the 43-character token_urlsafe(32) a legacy
+      API key is, and the resolved JWT_SECRET matched literally. The SHA-256 an API key is stored
+      as has no distinctive shape — 64 hex characters are also every digest this application
+      handles — so it is kept out of the stream by never being logged, by its name (`secret_hash`;
+      `secret` is in both vocabularies, proved by the `OPS-002-apikey-hash` arm) and by the
+      acceptance search in test_api_keys.py, not by this filter. It is therefore blind to a credential that has neither: a
       user's password is an arbitrary string under an arbitrary name, so `logger.info("got",
       extra={"detail": password})` survives the filter and is caught only by RULE-OPS-002 at
       the call site — and only while the name says what it is. A credential minted by some
@@ -1096,22 +1158,20 @@ residual_risks:
 
   - id: RISK-SURF-001
     statement: >
-      A fresh database and a migrated one do not have the same schema, and the snapshot that
-      is supposed to be the truth about the schema only ever describes the fresh one.
-      CREATE_USERS declares `api_key TEXT UNIQUE`; the migration that back-fills that column
-      into an existing database declares plain `TEXT`, because SQLite cannot add a UNIQUE
-      column by ALTER TABLE at all. So an instance created after the column existed enforces
-      uniqueness and an instance migrated into it does not — and production is the second
-      kind. tools/surfaces.py captures the schema by running init_db() against an empty
-      temporary file, which is the fresh path, so ops/surfaces/db-schema.sql records the
-      UNIQUE constraint that production does not have. RULE-SURF-001 compares that snapshot
-      against itself and passes: the mechanism cannot see this class of drift, because both
-      sides of the comparison are generated the same way. The practical exposure is small —
-      api_key is secrets.token_urlsafe(32), so a collision is not a real event — but the
-      snapshot is relied on as a description of production and on this point it is wrong.
+      Closed in this repository on 2026-11-25 (brief 0073, ADR 0047); open until production
+      reports it. The drift: CREATE_USERS declared `api_key TEXT UNIQUE` while a database migrated by
+      ALTER TABLE — production, created in April 2026 — had plain TEXT and another column order, and
+      ops/surfaces/db-schema.sql described only the fresh path, so RULE-SURF-001 compared the snapshot
+      against itself and passed. Now: versioned step 1 rebuilds `users` into one declared shape on
+      both paths (plain `api_key TEXT`, as production has it; the column goes with the API-key
+      contract), and RULE-SURF-005 builds every historical baseline in
+      backend/tests/fixtures/schema_history/ and requires it to mean what a fresh database means.
+      What is not yet evidence: that production ran step 1. A role that is neither 'user' nor 'admin'
+      refuses the step and leaves the old shape in place; verify-deploy compares the
+      `schema_version` production reports with the snapshot's and fails until it matches.
     owner: maintainer
-    re_open_trigger: "a migrations/ directory with a version table exists, or a second column diverges between the created and migrated schemas, or a uniqueness assumption is written against api_key"
-    decision_record: docs/adr/0025-narrowing-the-migration-except.md
+    re_open_trigger: "verify-deploy reports a schema_version below the snapshot's, a historical database shape is found that the baselines do not cover, or a schema change lands outside VERSIONED_MIGRATIONS"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   - id: RISK-OPS-002
     statement: >
@@ -1145,9 +1205,20 @@ residual_risks:
       nothing reads /opt/services/runway/docker-compose.yml, so a compose that drifted, or a
       deploy that never rewrote it, still looks exactly like one that did as long as the
       containers it already runs answer correctly.
+
+      Narrowed 2026-11-25 (brief 0073, ADR 0047 Decision 4). The deploy compose now mounts its
+      own file read-only into the backend, and GET /skill reports the SHA-256 of that host-applied
+      file beside the SHA-256 of the compose baked into the image, the build id (the workflow run
+      that pushed the image) and the schema version. verify-deploy requires all four to match this
+      run and this commit, and requires the registry's :latest and :<sha> to resolve to the digest
+      build-and-push pushed; a stubbed run of both steps fails for each mismatch
+      (test_deploy_evidence.py). What remains: CI still cannot ask the host which digest its
+      container runs — the chain is the build id plus the registry digest — and nothing compares
+      anything between deploys. That a deploy of this change actually passed the new checks is a
+      production observation not yet made.
     owner: maintainer
-    re_open_trigger: "a check confirms after a deploy that the host's compose matches the deployed commit, or a documented topology claim is found to be false again"
-    decision_record: docs/adr/0032-the-deploy-mechanism-correction.md
+    re_open_trigger: "verify-deploy fails on the applied compose, the build id or the digest, the host gains a way to report its container's image digest, or a documented topology claim is found to be false again"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   - id: RISK-DOC-002
     statement: >
@@ -1194,16 +1265,17 @@ residual_risks:
 
   - id: RISK-DEP-003
     statement: >
-      passlib 1.7.4 is the LATEST release and it is from 2020-10-08 — unmaintained rather than
-      merely pinned. It is the only thing hashing and verifying passwords here. bcrypt is held
-      at 4.0.1 because passlib reads an attribute bcrypt removed: bcrypt 5.0.0 does not warn,
-      it fails every hash with "password cannot be longer than 72 bytes" (tested 2026-08-26).
-      So the security-relevant dependency is frozen by a dead one, and Dependabot will keep
-      offering the bump that breaks every login. Replacing passlib means re-verifying stored
-      hashes against a different implementation, which is its own change with its own
-      migration evidence.
+      Narrowed on 2026-11-24 by brief 0067, whose password-hashing migration was this risk's
+      re-open trigger. passlib (unmaintained since 2020-10-08) is gone: new passwords are hashed
+      with Argon2id by argon2-cffi, and the bcrypt hashes passlib wrote are verified by the bcrypt
+      package directly, against vectors passlib itself produced (test_password_kdf.py). What
+      remains: bcrypt 4.0.1 stays pinned, now only to verify those legacy hashes until the
+      contract step of SHIM-SEC-009 removes it. The pin is no longer load-bearing — app/auth.py
+      truncates to 72 bytes itself, so bcrypt 5's refusal of longer input would not break a
+      login — but moving it is a change of its own. argon2-cffi-bindings is a native extension
+      pinned in the intent file to a release older than two weeks.
     owner: maintainer
-    re_open_trigger: "a passlib advisory is published, or the bcrypt pin blocks a fix, or a password-hashing migration is scheduled"
+    re_open_trigger: "a bcrypt or argon2-cffi advisory is published, the bcrypt pin blocks a fix, or SHIM-SEC-009's contract step removes bcrypt"
     decision_record: docs/adr/0021-supply-chain-pinning.md
 
   - id: RISK-DEP-002
@@ -1219,16 +1291,30 @@ residual_risks:
 
   - id: RISK-SEC-003
     statement: >
-      Login rate limiting is in-process and per-worker: the counters live in a module dict,
+      Login rate limiting is in-process and per-worker: the counters live in module memory,
       reset on restart, and are not shared between processes. Under one host and one worker
       (decision F1) that is the whole population, so the limit is real; add a second worker
-      or a second host and the effective limit multiplies by the process count. Keying on
-      username rather than IP is also a deliberate trade: an attacker who knows a username
-      can deny it password login for the window. API keys are checked before any password
-      path, so agents, MCP clients and the webhook keep working through a lockout.
+      or a second host and every budget multiplies by the process count. Since brief 0069 the
+      budget is reserved before the account lookup and the KDF, in three tiers (normalised
+      username, network source behind TRUSTED_PROXIES, global), in a store bounded by TTL, a
+      clock-driven sweep and a hard key cap — that part of the risk (REV-003) is closed and
+      tested, for the login and for the current-password check of PUT /auth/password. What
+      remains is the process boundary, and the lockout trade it was always paired with, which
+      lasts as long as the attack (a spray is repeated every window): someone who knows a
+      username can deny it password login (10 failures per 5 minutes), and 300 failures per 5
+      minutes from anywhere (10 IPv4 sources, or one IPv6 /60) deny every account password
+      login. Until the operator sets TRUSTED_PROXIES the source tier is off behind nginx (a
+      proxy-shaped peer is not counted), so a spray is bounded by the global brake alone.
+      Requests with an API key are not throttled, so agents, MCP clients and the webhook keep
+      working through a lockout — and a lockout does nothing against what a stolen key can do,
+      except guess the password. The trigger is executable but reads files only:
+      backend/tests/unit/test_login_budget.py (TestTheSingleWorkerAssumption,
+      TestTheSingleWorkerPinIsWholeFile) fails when the Dockerfile's CMD stops pinning
+      --workers 1, the Dockerfile sets WEB_CONCURRENCY, an ENTRYPOINT or gunicorn, or a compose
+      file sets WEB_CONCURRENCY, replicas, scale or --workers.
     owner: maintainer
-    re_open_trigger: "a second worker or host is introduced, or an account lockout is used against a real user"
-    decision_record: docs/adr/0018-cors-startup-refusal-and-the-inbox-shim.md
+    re_open_trigger: "a second worker or host is introduced (TestTheSingleWorkerAssumption or TestTheSingleWorkerPinIsWholeFile goes red), an account or global lockout is used against a real user, or the deploy runs with TRUSTED_PROXIES unset for longer than the rollout"
+    decision_record: docs/security.md
 
   - id: RISK-SEC-001
     statement: >
@@ -1243,19 +1329,39 @@ residual_risks:
 
   - id: RISK-SEC-002
     statement: >
-      The users.role column is TEXT DEFAULT 'user' with no database-level constraint, so a
-      value written outside the application — by hand on the host, or by a future migration
-      — is not rejected. Every in-application writer validates against VALID_ROLES, and an
-      unrecognised value is not equal to 'admin', so the failure is closed rather than open.
-      A CHECK constraint cannot be added by ALTER TABLE at all; it needs the table copied,
-      which is a different shape of migration from the additive loop init_db runs. Half of
-      this risk's re-open trigger fired on 2026-08-28: WAIVER-OPS-001 is resolved and a failed
-      migration now reports itself (docs/adr/0025-narrowing-the-migration-except.md), so a
-      half-applied rebuild would at least be loud. It would still be half-applied, and the
-      rebuild has no home until there is a migrations/ directory with a version table.
+      Closed in this repository on 2026-11-25 (brief 0073, ADR 0047); open until production
+      reports it. Versioned step 1 rebuilds `users` with `role TEXT NOT NULL DEFAULT 'user'
+      CHECK (role IN ('user', 'admin'))`, so a value written outside the application — by hand on the
+      host or by a future migration — is refused by the database; NULL and '' (what every reader
+      already treated as 'user') become 'user'. A database that already holds another value refuses
+      the step, logs `schema migration refused` with a count, and keeps the old unconstrained column,
+      where every in-application writer still validates against VALID_ROLES and an unrecognised value
+      is not 'admin' (fail closed). Whether production holds such a row is a production read; until
+      verify-deploy has seen schema_version 1 the constraint is not known to be in force there. The
+      constraint does not stop an operator writing 'admin': that is a role.
     owner: maintainer
-    re_open_trigger: "a migrations/ directory with a version table exists, or a third role is introduced"
+    re_open_trigger: "verify-deploy reports schema_version 0, a third role is introduced, or the users table is rebuilt again"
     decision_record: docs/security.md
+
+  - id: RISK-SEC-006
+    statement: >
+      SEC-001 is contained but not closed until the operator has migrated. Accounts created
+      before brief 0065 keep storage_layout='legacy' and are served from DATA_ROOT/<username>/ in
+      the default `compat` mode (SHIM-SEC-007) — only when the name is one path component that
+      is, in exactly that spelling, a real directory directly under the root, so a separator,
+      `.`/`..`, a symlink, a storage-id-shaped name, or a spelling a case- or
+      normalisation-insensitive filesystem only reaches by folding it (`ALICE` opening `alice`)
+      is refused. The migration groups legacy accounts by the inode their raw name opens, so
+      such a pair is blocked there too. That the production volume is case- and
+      normalisation-sensitive (ext4 is expected) is an operator check, not something this
+      repository can see. Whether production holds an alias account already is unknown from
+      this repository; the migration's dry run answers it. RULE-SEC-003 is a static scan of
+      backend/app/ by name: a path built from os.environ, from a copied value, or by a library is
+      outside it. The container tier that proves isolation against the real binary runs only in
+      CI on amd64 (RISK-TEST-001); locally it was run against the host's Taskwarrior 3.5.0.
+    owner: maintainer
+    re_open_trigger: "the migration's plan reports an alias or a blocked account in production, TASK_STORAGE_MODE=strict is set (downgrade this risk), SHIM-SEC-007 expires, or the legacy directories are removed (close it)"
+    decision_record: docs/adr/0043-account-identity-and-taskwarrior-storage.md
 
   - id: RISK-TEST-001
     statement: >
@@ -1277,10 +1383,15 @@ residual_risks:
 
   - id: RISK-TEST-003
     statement: >
-      The suite runs bcrypt at its minimum cost factor so the gate stays inside its
-      runtime budget. The production cost factor is therefore covered by no test.
+      The suite runs Argon2id at reduced parameters (t=1, 8 KiB) and bcrypt at cost 4 so the
+      gate stays inside its runtime budget (backend/tests/conftest.py, marked test-only). Since
+      brief 0067 exactly one test hashes and verifies at the production Argon2id parameters,
+      so they are proven valid and consistent with the constants — but no test measures their
+      latency or memory on the deploy host, and the cost-12 bcrypt dummy runs in production only.
+      The latency budget (250 ms, 64 MiB) rests on the operator's measurement with
+      `python -m app.auth` on that host.
     owner: maintainer
-    re_open_trigger: "the password hashing scheme or its parameters change"
+    re_open_trigger: "the password hashing scheme or its parameters change, or a login is observed slower than the documented budget"
     decision_record: backend/tests/conftest.py
 
   - id: RISK-GOV-001
@@ -1394,39 +1505,40 @@ residual_risks:
 
   - id: RISK-MCP-002
     statement: >
-      The MCP endpoint itself is unauthenticated. `mount_http()` is mounted with no
-      dependencies, so anyone who can reach /api/mcp may complete a handshake and list all
-      27 tools without presenting a credential. Every tool CALL is authenticated, by the
-      REST endpoint the call is forwarded to — tests/unit/test_mcp_session.py pins that a
-      call without a credential comes back 401 — so this discloses the tool inventory and
-      nothing else. The inventory is published in README.md and ops/surfaces/mcp-tools.json
-      anyway, which is why this is accepted rather than fixed. Closing it means passing
-      `dependencies=` to the mount, which would also refuse anonymous discovery.
+      The MCP endpoint itself is unauthenticated: anyone who can reach /api/mcp may complete a
+      handshake and list all 27 tools — names, descriptions and input schemas — without a
+      credential. Every tool CALL is authenticated by the REST endpoint it is forwarded to, and
+      since brief 0071 may reach only that endpoint (REV-005,
+      tests/unit/test_mcp_target_binding.py). Since brief 0071 an anonymous handshake also costs
+      no session: the transport is stateless, a request without a credential header holds at
+      most a quarter of the in-flight budget, and it is torn down when it ends (REV-004,
+      tests/unit/test_mcp_budget.py). The share counts a header's presence, not its validity:
+      a made-up header escapes it, though not the global and per-source ceilings. What remains is disclosure of the inventory, which is
+      published in README.md and ops/surfaces/mcp-tools.json anyway, so it stays accepted.
+      Closing it — authenticating every MCP request before the transport, behind a dated soak —
+      is designed (ADR 0045) and deferred: it makes backend/app/mcp_gate.py an importer of
+      backend/app/dependencies.py, a fan-in ratchet raise (RULE-ARCH-003) the owner decides.
     owner: maintainer
-    re_open_trigger: "a tool is added whose name or description reveals something not already public, or the endpoint is exposed on a network where enumeration itself matters"
-    decision_record: docs/adr/0033-the-mcp-server-nobody-could-connect-to.md
+    re_open_trigger: "a tool is added whose name or description reveals something not already public, the endpoint is exposed on a network where enumeration itself matters, or the owner approves the dependencies.py fan-in raise"
+    decision_record: docs/adr/0045-mcp-authentication-and-resource-budget.md
 
   - id: RISK-OPS-006
     statement: >
-      NOTHING PRUNES THE AUDIT DATABASE. `data/audit.db` grows for the lifetime of the
-      deployment and no retention period, no vacuum and no archival step exists — that is a
-      deliberate omission, not an oversight: a first cut that deletes rows is a first cut
-      that can delete the evidence `SHIM-SEC-006` is waiting on, and choosing what may be
-      forgotten is a decision with a legal and an operational half that has not been taken.
-      The growth is dominated by one row per SUCCESSFULLY authenticated request, roughly
-      150 bytes each, so a deployment serving ten thousand requests a day accumulates on the
-      order of half a gigabyte a year on the same partition that holds `users.db` and the
-      Taskwarrior data — the same partition whose exhaustion the container log rotation added
-      in Step 15a was written to prevent, now with a second unbounded writer on it that
-      Docker's log driver does not bound. There is a second, smaller
-      amplification: a login failure writes a row and the rate limiter is per-username, so a
-      caller cycling usernames can append faster than a legitimate one. Rejected credentials
-      deliberately write nothing at all, which is what keeps that bounded by the login route
-      rather than open to any unauthenticated request. Nothing measures the file, nothing
-      alerts on it, and the disk it shares is the one that takes the database down with it.
+      NOTHING PRUNES THE AUDIT DATABASE — but since 2026-11-25 (brief 0073, ADR 0047) something
+      measures it. `data/audit.db` grows for the lifetime of the deployment, about 150 bytes per
+      successfully authenticated request, on the partition that holds `users.db` and the Taskwarrior
+      data. The backend now stats the file (with -wal and -shm) at boot and hourly, keeps the largest
+      size seen as a high-water mark in the file's audit_meta table, and logs `audit store size` at
+      INFO, at WARNING above AUDIT_DB_WARN_BYTES (default 100 MiB). That makes the growth visible; it
+      does not bound it. Bounding it needs a retention period, and choosing what may be forgotten has
+      a legal and an operational half — SHIM-SEC-006's evidence, revocations, role changes and storage
+      migrations must outlive their own evidence period — that is the operator's decision (plan gate
+      D7), not taken. ADR 0047 Decision 1 records what the retention job must respect when it is
+      built. Nothing alerts outside the log stream, and nothing measures the partition's free space.
+      The amplification by login failures is bounded by the login budget (brief 0069).
     owner: maintainer
-    re_open_trigger: "audit.db exceeds 100 MB, a retention period is agreed, disk pressure is observed on the deploy host, or the SHIM-SEC-006 soak completes and the evidence is no longer needed live"
-    decision_record: docs/adr/0026-the-audit-log.md
+    re_open_trigger: "a WARNING 'audit store size' is logged, a retention period is agreed (D7), disk pressure is observed on the deploy host, or the SHIM-SEC-006 soak completes and the evidence is no longer needed live"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   - id: RISK-OPS-001
     statement: >
@@ -1481,44 +1593,40 @@ residual_risks:
 
   - id: RISK-SEC-004
     statement: >
-      No request field declares a length limit. backend/app/models.py constrains types and
-      nothing else — no Field(max_length=...), no constr, no annotated bound on any of the
-      string fields, and TaskCreate.description, AnnotationCreate.text and InboxItem.note
-      are the ones that matter, because they travel into the Taskwarrior argv and into that
-      user's task store. Neither uvicorn nor Starlette imposes a body-size limit by default,
-      so the bound on a single task description is whatever Traefik and the kernel happen to
-      allow. Two consequences, and their severity is deliberately not overstated: a very
-      large description is storage growth in a per-user data directory on the same partition
-      as users.db and audit.db (the partition RISK-OPS-006 is already about), and an
-      argument long enough to exceed the kernel's per-argument limit makes execve fail,
-      which task_runner surfaces as a 500 rather than a 400. The second was NOT reproduced
-      here: the limit is a Linux constant and this repository's development host is macOS,
-      where a one-megabyte argument executed fine. Both are capacity questions, which
-      decision F1 puts out of scope — recorded rather than silently assumed, which is what
-      F1 asks for.
+      Narrowed 2026-11-25 by brief 0073 (plan M8): every free-text field a request carries is now
+      bounded in backend/app/models.py — a username at 256 characters at login and registration
+      (before it reaches an audit row or a log line; audit.py also cuts actor and subject at 256),
+      a task description at 2 000 characters, an annotation and an inbox note at 32 KiB of UTF-8
+      (the cut capping.js and Android's Capping.kt already make), date-like fields at 64, tags at
+      100 each and 50 per task, plan texts at 20 000 — and one past a limit is 422 while the body is
+      parsed, before any handler runs; MCP tool calls meet the same bounds through the tool input
+      schema and the route. The largest Taskwarrior argument is therefore at most 32 KiB, a
+      quarter of Linux's MAX_ARG_STRLEN, and an E2BIG that still occurs is task_runner.ArgumentTooLong, answered 413,
+      not 500. What remains is volume, not size: nothing bounds how many tasks, annotations or plan
+      revisions one account writes, so a user's own store can still grow on the partition that
+      holds users.db and audit.db (RISK-OPS-006). That is a capacity question decision F1 keeps
+      out of scope, recorded rather than assumed. The kernel limit itself was still not reproduced
+      here (the development host is macOS); the 413 path is tested at the subprocess seam.
     owner: maintainer
-    re_open_trigger: "a 500 is observed from a long description or annotation, disk usage grows from task data rather than from logs or audit rows, a body-size limit is set at the proxy, or F1's capacity exclusion is revisited"
+    re_open_trigger: "a 500 is observed from a long field, a field is added to a request model without a bound, disk usage grows from task data rather than from logs or audit rows, or F1's capacity exclusion is revisited"
     decision_record: docs/adr/0027-the-threat-model.md
 
   - id: RISK-SEC-005
     statement: >
-      RULE-SEC-001 reads backend/app/routers/*.py and nothing else — tools/checks/route_guards.py
-      globs that one directory — so a route declared anywhere outside the routers package is
-      neither observed nor required to appear in rules/route-guards.toml. One route is outside
-      it today: GET /health, declared on the app object in backend/app/main.py, unauthenticated,
-      returning a fixed {"status": "ok"}. That route is harmless and it is also the proof of the
-      gap: the declaration file has thirty-nine entries and the application serves forty
-      routes, and nothing anywhere says so. The consequence is not the health check, it is the
-      next route someone adds beside it — a guard forgotten there fails exactly the way
-      RULE-SEC-001 was written to prevent, silently and for everybody, while the gate stays
-      green. The partial backstop is RULE-SURF-001: a new route changes the OpenAPI snapshot,
-      so it cannot arrive unnoticed, but regenerating that snapshot is a normal part of adding
-      a route and it demands no guard declaration. Closing this means widening the checker's
-      scope to every module that can hold a decorator, which also means deciding what an
-      infrastructure route like /health declares.
+      Narrowed 2026-11-25 by brief 0073 (plan M8). RULE-SEC-001 used to glob backend/app/routers/*.py,
+      so GET /health, the three methods of /mcp and the framework's documentation routes were served
+      and declared nowhere, and a route added beside them would have needed no guard decision. The
+      checker now boots the application and inventories fastapi.routing.iter_route_contexts(app.routes),
+      reads each guard from the resolved dependency tree (router-level dependencies included),
+      requires every served OpenAPI operation to be in the inventory and a Mount to be declared; the
+      eight routes are declared open with reasons, and a negative fixture puts a route in main.py.
+      What remains is outside the application object: a path the nginx in front answers itself
+      (the SPA and its fallback), and a handler that authenticates inside its body rather than by
+      dependency — the checker classifies it open, so it must be declared open with a reason, but
+      the checker cannot tell whether that reason is true.
     owner: maintainer
-    re_open_trigger: "a second route is declared outside backend/app/routers/, an authenticated or state-changing route is added to main.py, or the route-guard checker is given a wider scope"
-    decision_record: docs/adr/0027-the-threat-model.md
+    re_open_trigger: "a route authenticates without get_current_user/get_current_admin, nginx answers an API path itself, a sub-application is mounted, or fastapi.routing.iter_route_contexts changes meaning"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   # --- found by the Phase 4 audit, Step 16d (docs/adr/0031-the-phase-4-audit.md) ------
 
