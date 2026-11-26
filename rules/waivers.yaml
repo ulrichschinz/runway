@@ -94,6 +94,19 @@ waivers:
       keep users.db untracked and git-ignored, the deploy host publishes no ports and the
       database is not reachable from outside the compose network, and keys are
       secrets.token_urlsafe(32), so guessing one is not the threat.
+
+      Progress, 2026-11-25 (brief 0070, ADR 0044 Decision 6) — expand and migrate, NOT the
+      close. New keys are `rwk_<id>_<secret>`, stored only as a SHA-256 in `api_keys`, shown once
+      by POST /auth/apikeys, with expiry, revocation and last use; key management needs a session.
+      Every cleartext value is hashed into a `legacy` row at boot and only the hash authenticates
+      from the first request; registration writes no cleartext. Revoking or regenerating an
+      account's key empties its `users.api_key`. Legacy keys are refused from the cutoff
+      (API_KEY_LEGACY_CUTOFF, default and latest 2027-01-15) without a deploy, and the first boot
+      after it revokes every legacy row and empties the column in every row — which also empties a
+      pre-migration backup restored later. What keeps this entry open until the contract step:
+      until the cutoff, `users.api_key` still holds the cleartext of every account that has not
+      moved (the rollback target reads it), GET /auth/apikey still returns it (deprecated), and
+      every backup taken before the cutoff holds working keys until that day.
     owner: maintainer
     approver: maintainer
     approved_on: 2026-08-28

@@ -1,11 +1,14 @@
+import hmac
 import logging
 import time
+from datetime import UTC, datetime
+from email.utils import format_datetime
 
 from aiosqlite import Connection
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 
-from app import audit, rate_limit
+from app import audit, database, rate_limit
 from app.auth import (
     KdfPhase,
     check_password,
@@ -18,18 +21,28 @@ from app.auth import (
 )
 from app.config import settings
 from app.database import (
+    API_KEY_PREFIX,
+    TooManyApiKeys,
     create_account,
+    create_api_key,
     delete_account,
-    generate_api_key,
     get_allow_registration,
     get_db,
     get_password_kdf_expand_at,
+    legacy_api_key,
+    list_api_keys,
     rehash_password,
     replace_password,
+    revoke_api_key,
+    rotate_api_keys,
 )
 from app.dependencies import get_current_user
 from app.models import (
+    API_KEY_MAX_DAYS,
+    ApiKeyCreate,
+    ApiKeyCreated,
     ApiKeyInfo,
+    ApiKeyMetadata,
     PasswordChange,
     SiteSettings,
     Token,
@@ -104,9 +117,7 @@ async def register(request: Request, body: UserCreate, db: Connection = Depends(
     phase = await _phase(db)
     _refuse_new_password(phase, body.password, "password")
     try:
-        account = await create_account(
-            db, body.username, hash_for(phase, body.password), generate_api_key()
-        )
+        account = await create_account(db, body.username, hash_for(phase, body.password))
     except Exception as e:
         audit.record(
             audit.REGISTERED,
@@ -389,45 +400,239 @@ async def change_password(
     return {"detail": "Password updated", **fresh.model_dump(exclude={"password_change_required"})}
 
 
-@router.get("/apikey", response_model=ApiKeyInfo)
-async def get_apikey(
+# --- API keys (WAIVER-SEC-003, ADR 0044 Decision 6, brief 0070) ------------------------------
+#
+# A key is stored as the SHA-256 of itself and shown exactly once, in the answer that minted it.
+# The two old routes stay for the announced window, marked deprecated; after the legacy cutoff the
+# GET has nothing left to return, and the contract step (its own change) answers 410.
+
+# When the old routes were deprecated (RFC 9745 `Deprecation: @<epoch>`): 2026-11-25T00:00Z.
+APIKEY_DEPRECATED_AT = 1795564800
+_KEY_DAY = 86400
+_DEPRECATED = "Deprecated since 2026-11-25 (brief 0070): API keys are stored as hashes. "
+
+
+def _iso(epoch: int | None) -> str | None:
+    return None if epoch is None else datetime.fromtimestamp(epoch, UTC).isoformat()
+
+
+def _key_state(row: dict, now: int, cutoff: int) -> str:
+    if row["revoked_at"] is not None:
+        return "revoked"
+    if row["expires_at"] is not None and now >= row["expires_at"]:
+        return "expired"
+    if row["kind"] == "legacy" and now >= cutoff:
+        return "expired"
+    return "active"
+
+
+def _metadata(row: dict, now: int, cutoff: int) -> dict:
+    return {
+        "key_id": row["key_id"],
+        "label": row["label"],
+        "kind": row["kind"],
+        "prefix": f"{API_KEY_PREFIX}{row['key_id']}" if row["kind"] == "issued" else "",
+        "created_at": _iso(row["created_at"]),
+        "expires_at": _iso(row["expires_at"]),
+        "revoked_at": _iso(row["revoked_at"]),
+        "last_used_at": _iso(row["last_used_at"]),
+        "state": _key_state(row, now, cutoff),
+    }
+
+
+def _require_session(request: Request) -> None:
+    """Key management needs a signed-in session, not a key: a stolen key must not be able to mint
+    its own successor, or revoking it would not end the intrusion (brief 0070, scenario 3). The
+    deprecated read-back holds the same line in `_may_read_legacy_key` (scenario 6)."""
+    if getattr(request.state, "auth_shape", None) != audit.SHAPE_BEARER_JWT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Managing API keys needs a signed-in session, not an API key",
+        )
+
+
+def _may_read_legacy_key(request: Request, value: str) -> bool:
+    """A signed-in session may read the legacy key; an API key only if it IS that key."""
+    shape = getattr(request.state, "auth_shape", None)
+    if shape == audit.SHAPE_BEARER_JWT:
+        return True
+    if shape == audit.SHAPE_API_KEY_HEADER:
+        presented = request.headers.get("x-api-key", "")
+    elif shape == audit.SHAPE_BEARER_API_KEY:
+        scheme, _, presented = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer":
+            return False
+    else:
+        return False
+    return hmac.compare_digest(presented.strip().encode(), value.encode())
+
+
+def _deprecation_headers(response: Response) -> None:
+    cutoff = datetime.fromtimestamp(database.legacy_cutoff(), UTC)
+    response.headers["Deprecation"] = f"@{APIKEY_DEPRECATED_AT}"
+    response.headers["Sunset"] = format_datetime(cutoff, usegmt=True)
+    # Relative, so it resolves under /api externally and at the root internally alike.
+    response.headers["Link"] = '<apikeys>; rel="successor-version"'
+
+
+@router.post(
+    "/apikeys",
+    response_model=ApiKeyCreated,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create an API key; the key is shown in this response only",
+    description="Needs a signed-in session (`Authorization: Bearer <jwt>`); an API key gets 403. "
+    "The key is stored as a hash and cannot be retrieved again. At most 10 active keys per "
+    "account (409 beyond).",
+)
+async def create_apikey(
     request: Request,
+    body: ApiKeyCreate | None = None,
     username: str = Depends(get_current_user),
     db: Connection = Depends(get_db),
 ):
-    async with db.execute("SELECT api_key FROM users WHERE username=?", (username,)) as cur:
-        row = await cur.fetchone()
-    # This route hands back a permanent, unscoped credential in cleartext, which is finding
-    # SEC-5 and is not fixed here — the fix changes this response contract and is therefore a
-    # public-surface migration of its own. What this row buys meanwhile is the ability to
-    # answer "when was this key last disclosed, and to whom" after the fact.
+    _require_session(request)
+    body = body or ApiKeyCreate.model_validate({})
+    now = database.api_key_clock()
+    try:
+        made = await create_api_key(
+            db,
+            username,
+            label=body.label.strip(),
+            now=now,
+            expires_at=now + body.expires_in_days * _KEY_DAY,
+        )
+    except TooManyApiKeys as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Too many active API keys; revoke one first",
+        ) from e
+    if made is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    issued, row = made
+    logger.info("api key created", extra={"username": username, "key_id": issued.key_id})
     audit.record(
-        audit.APIKEY_DISCLOSED,
+        audit.APIKEY_CREATED,
         outcome=audit.SUCCESS,
         actor=username,
         route=audit.route_of(request),
-        detail="the API key was returned in cleartext (finding SEC-5)",
+        detail=f"key {issued.key_id}, expires {_iso(row['expires_at'])}",
     )
-    return ApiKeyInfo(api_key=row["api_key"] if row else "")
+    return {**_metadata(row, now, database.legacy_cutoff()), "api_key": issued.api_key}
 
 
-@router.post("/apikey/regenerate", response_model=ApiKeyInfo)
-async def regenerate_apikey(
+@router.get(
+    "/apikeys",
+    response_model=list[ApiKeyMetadata],
+    summary="The account's API keys, as metadata (never a key, never its hash)",
+)
+async def list_apikeys(
+    username: str = Depends(get_current_user),
+    db: Connection = Depends(get_db),
+):
+    now, cutoff = database.api_key_clock(), database.legacy_cutoff()
+    return [_metadata(row, now, cutoff) for row in await list_api_keys(db, username)]
+
+
+@router.delete(
+    "/apikeys/{key_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke one API key (it stops working immediately)",
+    description="Needs a signed-in session; an API key gets 403. 404 when this account holds no "
+    "key with this id. Revoking an already revoked key is not an error.",
+)
+async def revoke_apikey(
+    key_id: str,
     request: Request,
     username: str = Depends(get_current_user),
     db: Connection = Depends(get_db),
 ):
-    new_key = generate_api_key()
-    await db.execute("UPDATE users SET api_key=? WHERE username=?", (new_key, username))
-    await db.commit()
+    _require_session(request)
+    kind = await revoke_api_key(db, username, key_id, database.api_key_clock())
+    if kind is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such API key")
+    logger.info("api key revoked", extra={"username": username, "key_id": key_id})
+    audit.record(
+        audit.APIKEY_REVOKED,
+        outcome=audit.SUCCESS,
+        actor=username,
+        route=audit.route_of(request),
+        detail=f"{kind} key {key_id}",
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/apikey",
+    response_model=ApiKeyInfo,
+    deprecated=True,
+    description=_DEPRECATED + "Returns a key issued before then until the legacy cutoff "
+    "(`API_KEY_LEGACY_CUTOFF`, at the latest 2027-01-15), and an empty string after it and for "
+    "every key created since. Only a signed-in session, or the legacy key itself, reads it; any "
+    'other API key gets `""`. Use `GET /auth/apikeys` (metadata) and `POST /auth/apikeys`.',
+)
+async def get_apikey(
+    request: Request,
+    response: Response,
+    username: str = Depends(get_current_user),
+    db: Connection = Depends(get_db),
+):
+    _deprecation_headers(response)
+    value = ""
+    if database.api_key_clock() < database.legacy_cutoff():
+        value = await legacy_api_key(db, username)
+    if value and not _may_read_legacy_key(request, value):
+        # Brief 0070, scenario 6 (review round 2): the legacy key is a second credential, alive
+        # until the cutoff and independent of the key asking. Handed to an `rwk_` key it would
+        # turn a stolen short-lived key into a long-lived one that survives the stolen key's
+        # revocation. Only a session, or the legacy key reading itself back, gets it.
+        value = ""
+    # Recorded only when a value actually leaves: what an operator asks this row is "when was a
+    # cleartext key last disclosed, and to whom" (finding SEC-5).
+    if value:
+        audit.record(
+            audit.APIKEY_DISCLOSED,
+            outcome=audit.SUCCESS,
+            actor=username,
+            route=audit.route_of(request),
+            detail="a legacy API key was returned in cleartext (deprecated route, WAIVER-SEC-003)",
+        )
+    return ApiKeyInfo(api_key=value)
+
+
+@router.post(
+    "/apikey/regenerate",
+    response_model=ApiKeyInfo,
+    deprecated=True,
+    description=_DEPRECATED + "Needs a signed-in session (`Authorization: Bearer <jwt>`); an "
+    "API key gets 403. Ends EVERY key of the account and returns one new key, shown in this "
+    "response only. Use `POST /auth/apikeys` and `DELETE /auth/apikeys/{key_id}`.",
+)
+async def regenerate_apikey(
+    request: Request,
+    response: Response,
+    username: str = Depends(get_current_user),
+    db: Connection = Depends(get_db),
+):
+    _deprecation_headers(response)
+    # Like create and revoke: a key that could call this would swap itself for a fresh 365-day
+    # key — a legacy one from a backup outliving the cutoff that way — and end its owner's keys.
+    _require_session(request)
+    now = database.api_key_clock()
+    made = await rotate_api_keys(
+        db, username, label="regenerated", now=now, expires_at=now + API_KEY_MAX_DAYS * _KEY_DAY
+    )
+    if made is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    issued, _ = made
+    new_key = issued.api_key
     # That it happened, and to whom. The key itself is returned to the caller and goes
     # nowhere else — the row below records the rotation, never the value.
-    logger.info("api key regenerated", extra={"username": username})
+    logger.info("api key regenerated", extra={"username": username, "key_id": issued.key_id})
     audit.record(
         audit.APIKEY_REGENERATED,
         outcome=audit.SUCCESS,
         actor=username,
         route=audit.route_of(request),
-        detail="the previous key stopped working at this moment",
+        detail=f"every earlier key stopped working at this moment; new key {issued.key_id}",
     )
     return ApiKeyInfo(api_key=new_key)

@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # layout in either mode. Anything unrecognised is treated as `strict`. `compat` is the
     # shim SHIM-SEC-007 and expires with it.
     task_storage_mode: str = "compat"
+    # The day (UTC, YYYY-MM-DD) from which an API key issued before hashed keys existed is
+    # refused (WAIVER-SEC-003, ADR 0044 Decision 6). It can move the cutoff EARLIER than the
+    # default, never later: a later or malformed value is ignored and reported at startup —
+    # every old backup holds these keys, so a knob that extended them would be the wrong knob.
+    api_key_legacy_cutoff: str = "2027-01-15"
     # How much of the JSON log stream is emitted. The *format* is not configurable and
     # neither is the redaction filter: a setting that turns a control off is the setting
     # that gets turned off at 3am. An unrecognised value falls back to INFO rather than

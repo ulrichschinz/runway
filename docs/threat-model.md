@@ -260,15 +260,23 @@ bound (R7); and the body of an auth
 request at 16 KiB. A hash is treated as credential-equivalent throughout, because it is
 offline-attackable; the log redaction knows both shapes.
 
-**API keys** — `secrets.token_urlsafe(32)` at
-[`backend/app/database.py:138-147`](../backend/app/database.py), so guessing one is not the threat.
-**Storing one is.** They are held in `users.db` as the cleartext value that authenticates, they are
-permanent, unscoped and un-expiring, and `GET /auth/apikey` hands the value back in cleartext
-([`backend/app/routers/auth.py:191-210`](../backend/app/routers/auth.py)). That is finding **SEC-5**,
-severity High, and it is the one open finding of its severity in this repository. It is not fixed
-here: the fix changes that endpoint's response contract, which decision **F2** makes a public-surface
-migration with its own step. It now has an owner and a date — `WAIVER-SEC-003`, expiring 2027-01-31
-in [`rules/waivers.yaml`](../rules/waivers.yaml).
+**API keys** — since 2026-11-25 (ADR 0044 Decision 6, brief 0070) `rwk_<key id>_<secret>`: a public
+16-hex id and a 256-bit secret (`new_api_key` in
+[`backend/app/database.py`](../backend/app/database.py)), so guessing one is not the threat. **Storing one
+was.** A key is now stored only as the SHA-256 of itself in the `api_keys` table
+([`backend/app/database.py`](../backend/app/database.py), `CREATE_API_KEYS`), shown once by
+`POST /auth/apikeys`, and it expires (at most 365 days), can be revoked, and records its last use.
+Creating and revoking keys, and the deprecated `regenerate`, need a signed-in session, so a stolen key
+cannot mint a successor that survives its revocation or its expiry, and a legacy key read from a backup
+cannot be swapped for an `rwk_` key that outlives the cutoff. The keys of the previous image (`secrets.token_urlsafe(32)`, held in
+cleartext in `users.api_key`) were hashed into `legacy` rows at the first boot and only the hash
+authenticates; they are refused from the legacy cutoff (`API_KEY_LEGACY_CUTOFF`, default and latest
+2027-01-15), and the first boot after it revokes them and empties the column. **Until then finding
+SEC-5 is mitigated, not closed**: the column still holds the cleartext of every account that has not
+moved — the rollback target reads it — `GET /auth/apikey` (deprecated) still returns it, and every
+backup taken before the cutoff holds working keys until that day. `WAIVER-SEC-003`, expiring
+2027-01-31 in [`rules/waivers.yaml`](../rules/waivers.yaml), stays open until the contract step drops
+the column.
 
 **The log stream** — the place all three of the above most easily end up. Two halves of one control,
 and neither is sufficient alone:
@@ -280,7 +288,8 @@ and neither is sufficient alone:
   [`backend/app/logging_setup.py:236-257`](../backend/app/logging_setup.py) is attached to the
   handler, so every emitted line passes through it whatever logger produced it — uvicorn's access
   lines included. It removes a value by the name it arrives under (lines 62-87), by shape — JWT,
-  bcrypt hash, and the 43-character `token_urlsafe(32)` an API key is (lines 102-106) — and by
+  bcrypt hash, Argon2id hash, an API key `rwk_<id>_<secret>` and the 43-character `token_urlsafe(32)`
+  a legacy API key is — and by
   matching the resolved `JWT_SECRET` literally (lines 125-134).
 
 The same `redact_text` is reused as a backstop on every string written to the audit database
@@ -297,7 +306,8 @@ a literal.
   both directions checked ([`.gitignore:1-3`](../.gitignore)).
 - `RULE-HYG-003` — the checked-in deploy compose file must reference every secret as `${VAR}`. A
   literal replacing a reference there looks like almost nothing in a diff, which is exactly why.
-- `RULE-DEP-003` — no credential is committed anywhere in the tree.
+- `RULE-DEP-003` — no credential is committed anywhere in the tree, this application's own
+  `rwk_` API keys included (brief 0070).
 - `RULE-RULE-002` — `WAIVER-SEC-003` cannot silently outlive 2027-01-31; the gate stops on the date.
 - `RULE-TEST-001` — the boot refusal, the redaction filter and the "no credential anywhere in the
   audit database" adversarial test all run every gate.
@@ -307,9 +317,12 @@ a literal.
   `RISK-OPS-004`.
 - The runtime filter matches shapes, so a credential with no recognisable shape — a plain password is
   the case that matters — passes it. `RISK-OPS-005`.
-- API keys sit in cleartext in `users.db` and in every backup of it. `WAIVER-SEC-003`, and the
-  mitigation is observation, not prevention: `auth.apikey.disclosed` records that a key was handed
-  out, which says nothing about a key read from the file directly.
+- Until the legacy cutoff (2027-01-15) the keys issued before 2026-11 still sit in cleartext in
+  `users.db` and in every backup of it, and authenticate. `WAIVER-SEC-003`. After it they are refused
+  and the column is emptied at the next boot, but backups taken before it keep the (then dead)
+  values until the operator's retention replaces them. New keys are hashes only; the hash itself has
+  no distinctive shape and is kept out of logs by never being logged, not by the filter
+  (`RISK-OPS-005`).
 - Secret scanning is pattern-based and reads only the current tree. `RISK-DEP-002`.
 - `bcrypt` 4.0.1 stays only to verify the hashes passlib wrote, until `SHIM-SEC-009`'s contract;
   passlib itself is gone (brief 0067). `RISK-DEP-003`.
@@ -403,9 +416,10 @@ reachable from outside the compose network except through the frontend.
 
 Four stores, three of them on one partition on the deploy host.
 
-**`users.db`** — accounts, password hashes, API keys, roles, profile fields, project plans, site
-settings, when each kind of review last happened and which projects are on hold or done. Six
-tables, created and migrated at
+**`users.db`** — accounts, password hashes, API-key hashes (and, until the legacy cutoff, the
+cleartext keys of the previous image), roles, profile fields, project plans, site
+settings, when each kind of review last happened and which projects are on hold or done, and the
+storage migration's protocol. Eight tables (`api_keys` added by brief 0070), created and migrated at
 [`backend/app/database.py:13-106`](../backend/app/database.py) and lines 112-117. Bind-mounted from
 `/opt/services/runway/users.db` ([`ops/deploy/docker-compose.yml:22-24`](../ops/deploy/docker-compose.yml)).
 Its schema is a protected surface, snapshotted at
@@ -573,15 +587,26 @@ version after rolling forward.
 
 ### API key theft
 
-**The exposure:** the key is stored in cleartext, is permanent, unscoped and un-expiring, and
-authenticates on every route including the admin ones when the account holds that role. A stolen key
-survives a password change. `users.db` is a bind-mounted file and is in every backup.
+**The exposure:** a key is unscoped — it authenticates on every route including the admin ones when
+the account holds that role — and a stolen key survives a password change. `users.db` is a bind-mounted
+file and is in every backup.
 
-**Partially mitigated:** every disclosure through `GET /auth/apikey` writes an
-`auth.apikey.disclosed` row, and every authenticated request records the credential shape and the
-route, so a stolen key's *use* is reconstructable and rotation is one `POST` away. That is
-observation, not prevention, and it says nothing about a key read from the file directly.
-`WAIVER-SEC-003`, expiring 2027-01-31.
+**Mitigated for new keys** (brief 0070, ADR 0044 Decision 6): a key is `rwk_<id>_<256-bit secret>`,
+stored only as its SHA-256, shown once by `POST /auth/apikeys`, expires after at most 365 days, can be
+revoked one by one, and records its last use. A read of the file or a backup yields hashes, not keys.
+Creating, revoking and the deprecated `regenerate` need a signed-in session, and the deprecated
+`GET /auth/apikey` hands the legacy key only to a session or to the legacy key itself (any other key gets
+`""`), so a stolen key can neither mint its successor, nor read back a second credential, nor extend its
+own life, nor end its owner's other keys. Every authenticated request
+records the credential shape and the route, so a stolen key's *use* is reconstructable.
+
+**Still open until the cutoff and the contract step:** the keys of the previous image are hashed into
+`legacy` rows and authenticate until `API_KEY_LEGACY_CUTOFF` (at the latest 2027-01-15); until then the
+column still holds the cleartext of every account that has not moved, `GET /auth/apikey` (deprecated)
+returns it and writes an `auth.apikey.disclosed` row, and every backup taken before the cutoff holds
+working keys until that day. An account this image has closed (registered here, legacy key revoked or
+rotated) gets nothing imported from the column again, so a rollback's backfill does not hand it a
+working key. `WAIVER-SEC-003`, expiring 2027-01-31, stays open until the contract step drops the column.
 
 **Mitigated for agent sessions:** the MCP surface is an allowlist (ADR 0037). No authentication,
 API-key, user or admin operation is a tool, so an agent — or a prompt injected into one — holding a

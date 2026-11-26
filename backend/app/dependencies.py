@@ -2,10 +2,16 @@ from aiosqlite import Connection
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app import audit, task_storage
+from app import audit, database, task_storage
 from app.auth import TokenClaims, decode_token
 from app.config import settings
-from app.database import get_account, get_auth_version, get_auth_version_expand_at, get_db
+from app.database import (
+    authenticate_api_key,
+    get_account,
+    get_auth_version,
+    get_auth_version_expand_at,
+    get_db,
+)
 from app.task_storage import StorageRefused, TaskStore
 
 bearer = HTTPBearer(auto_error=False)
@@ -33,12 +39,13 @@ async def get_current_user(
     adds nothing to the OpenAPI schema and no route or MCP tool moves.
     """
     if x_api_key:
-        async with db.execute("SELECT username FROM users WHERE api_key=?", (x_api_key,)) as cur:
-            row = await cur.fetchone()
-        if not row:
+        # WAIVER-SEC-003 (ADR 0044 Decision 6): only the hash is compared, never the cleartext
+        # column. Unknown, malformed, expired, revoked, and legacy after the cutoff: one answer.
+        username = await _api_key_owner(db, x_api_key)
+        if username is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-        _record(row["username"], audit.SHAPE_API_KEY_HEADER, request)
-        return row["username"]
+        _record(username, audit.SHAPE_API_KEY_HEADER, request)
+        return username
 
     if credentials:
         claims = decode_token(credentials.credentials)
@@ -69,13 +76,10 @@ async def get_current_user(
         # Tracked in rules/shims.yaml with a removal step. Deliberately last: a real JWT is
         # tried first, so this costs one database read only for a credential that was going
         # to be rejected anyway.
-        async with db.execute(
-            "SELECT username FROM users WHERE api_key=?", (credentials.credentials,)
-        ) as cur:
-            row = await cur.fetchone()
-        if row:
-            _record(row["username"], audit.SHAPE_BEARER_API_KEY, request)
-            return row["username"]
+        owner = await _api_key_owner(db, credentials.credentials)
+        if owner is not None:
+            _record(owner, audit.SHAPE_BEARER_API_KEY, request)
+            return owner
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
@@ -99,7 +103,16 @@ async def _presented_version(db: Connection, claims: TokenClaims) -> int:
     return 1
 
 
+async def _api_key_owner(db: Connection, api_key: str) -> str | None:
+    return await authenticate_api_key(
+        db, api_key, database.api_key_clock(), database.legacy_cutoff()
+    )
+
+
 def _record(username: str, shape: str, request: Request) -> None:
+    # Which shape authenticated this request, for the routes that accept only a signed-in
+    # session (API-key management, brief 0070). Request state, so no route or schema moves.
+    request.state.auth_shape = shape
     audit.record(
         audit.AUTHENTICATED,
         outcome=audit.SUCCESS,

@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,7 @@ from fastapi_mcp import FastApiMCP
 from app import audit, rate_limit, startup_checks, task_storage
 from app.auth import prepare_dummies
 from app.config import cors_origin_list, settings
-from app.database import init_db
+from app.database import init_db, legacy_cutoff, legacy_cutoff_problem
 from app.logging_setup import configure_logging, resolve_level
 from app.middleware import BodyLimitMiddleware, RequestIdMiddleware
 from app.routers import admin, auth, gtd, inbox, projects, skill, tasks
@@ -60,6 +61,11 @@ async def lifespan(app: FastAPI):
             "TRUSTED_PROXIES is not set: the login source budget does not apply to "
             "loopback or private peers (a proxy); see docs/operations.md, The login budget"
         )
+    # WAIVER-SEC-003 (ADR 0044 Decision 6): a cutoff the setting tried to push later, or could
+    # not parse, is not applied — the default is. Said once, at the boot that ignores it.
+    cutoff_problem = legacy_cutoff_problem()
+    if cutoff_problem:
+        logger.warning("API_KEY_LEGACY_CUTOFF ignored: " + cutoff_problem)
     logger.info(
         "startup complete",
         # The storage mode as the resolver will apply it, so an operator can see the switch
@@ -69,6 +75,7 @@ async def lifespan(app: FastAPI):
             "registration_seed": settings.allow_registration,
             "task_storage_mode": task_storage.storage_mode(),
             "login_trusted_proxies": len(rate_limit.trusted_networks(settings.trusted_proxies)),
+            "legacy_key_cutoff": datetime.fromtimestamp(legacy_cutoff(), UTC).date().isoformat(),
         },
     )
     yield

@@ -401,7 +401,7 @@ concurrently, and a correlation id that correlates the wrong lines is worse than
 | | catches | misses |
 |---|---|---|
 | `RULE-OPS-002` (static) | anything named `password`, `token`, `api_key`, `jwt_secret`, … at a logging call in `backend/app/` | the same value under a neutral name; uvicorn, libraries, tracebacks |
-| the redaction filter (runtime) | a JWT, a bcrypt hash, an Argon2id hash, a 43-character API key and the resolved `JWT_SECRET` **anywhere in the line**, whatever it is called, plus any field whose name says credential | a value with no recognised shape under a name that does not say credential — a plain password, for one |
+| the redaction filter (runtime) | a JWT, a bcrypt hash, an Argon2id hash, an API key (`rwk_…` and the legacy 43-character one) and the resolved `JWT_SECRET` **anywhere in the line**, whatever it is called, plus any field whose name says credential | a value with no recognised shape under a name that does not say credential — a plain password, for one |
 
 What remains after both is recorded as `RISK-OPS-005`.
 
@@ -585,7 +585,8 @@ Until that window has passed, `SHIM-SEC-006` stays, and its expiry has not moved
 ### Other questions this table answers
 
 ```sh
-# every disclosure of an API key in cleartext (finding SEC-5), most recent first
+# every disclosure of a legacy API key in cleartext (finding SEC-5; only the deprecated GET, until the
+# legacy cutoff), most recent first
 sqlite3 -header -column data/audit.db "
   SELECT recorded_at, actor FROM audit_events
   WHERE event = 'auth.apikey.disclosed' ORDER BY id DESC LIMIT 20;"
@@ -726,6 +727,87 @@ Registration may be reopened once the commit running in production has its conta
 `strict` has run for 14 days and one migrated account has been restored from the backup. Until then the legacy
 directories are the rollback source; the backup still has to include them.
 
+## API keys
+
+Since brief 0070 (`WAIVER-SEC-003`, ADR 0044 Decision 6) a key is `rwk_<key id>_<secret>`, stored only as a
+SHA-256 in the `api_keys` table of `users.db`, and shown once — nobody, operator included, can read one
+back. Keys issued before 2026-11-25 (43 characters, kept in cleartext in `users.api_key`) were hashed into
+`legacy` rows at the first boot of this image and authenticate by that hash only, **until the legacy
+cutoff**: `API_KEY_LEGACY_CUTOFF`, default and latest `2027-01-15` (00:00 UTC). The startup line carries
+the effective date as `legacy_key_cutoff`; a later or malformed value is ignored with a `WARNING`.
+
+**Before the cutoff — who has not moved yet** (counts and names only; the query selects no key):
+
+```sh
+sqlite3 -header -column users.db "
+  SELECT u.username, datetime(k.last_used_at, 'unixepoch') AS legacy_last_used
+  FROM api_keys k JOIN users u ON u.id = k.user_id
+  WHERE k.kind = 'legacy' AND k.revoked_at IS NULL ORDER BY k.last_used_at DESC;"
+```
+
+Tell those users to create a new key in Einstellungen → API-Key and put it where the old one was. Moving
+the cutoff earlier (once that list is empty, or in an incident) is `API_KEY_LEGACY_CUTOFF=<YYYY-MM-DD>` in
+the host `.env` and a redeploy; it cannot be moved later. The boot after the change also moves the
+`expires_at` of every live legacy row to the new date, so the settings page announces the day the key
+really stops working. That is one-way: moving the setting back later again does not extend those rows.
+
+**On the cutoff day — restart the backend once** (`docker compose up -d --force-recreate backend`, or any
+deploy). Authentication refuses legacy keys from 00:00 UTC without it; the boot is what **revokes every
+legacy row and empties `users.api_key` in every row**, so that the file holds no cleartext key. Check:
+
+```sh
+sqlite3 users.db "SELECT COUNT(*) FROM users WHERE api_key IS NOT NULL;"   # 0 after that boot
+```
+
+**Backups.** Every backup of `users.db` taken before the cutoff holds the legacy keys in cleartext; until
+the cutoff they are working credentials, after it they are refused. Protect those backups as credentials
+until then, and replace them by the retention policy afterwards. **A restored backup** is opened by a boot,
+and a boot after the cutoff empties the column before the first request; before the cutoff, a restore
+brings the restored keys back as valid legacy keys — and restores revocations made since then as undone.
+After a restore, end every key that was revoked since the backup again (below).
+
+**Rollback.** Until the contract step the previous image still reads `users.api_key`, so a rollback
+inside the window keeps legacy keys working; keys created with this image (`rwk_…`) do not work under the
+previous image. **Every rollback, before the cutoff as after it, re-mints cleartext keys:** the previous
+image's boot gives every row whose `users.api_key` is NULL a fresh cleartext key — every account registered
+under this image, and every account whose legacy key was revoked or rotated here — and its
+`GET /auth/apikey` returns that key to the account. While the previous image runs, those keys work and lie in
+`users.db` and in every backup taken then. **After rolling forward**, this image's boot imports nothing for
+those accounts: `users.api_key_closed_at` marks the account as closed, and the boot empties its column
+instead (brief 0070, review round 1). A key one of them obtained from the previous image therefore stops at
+the roll-forward; the user creates a new one. An account that never met this image — one with
+`api_key_closed_at` NULL, including one the previous image registered during the rollback — keeps its key as
+a legacy key until the cutoff, and a regenerate by the previous image replaces that account's legacy key.
+Check after the roll-forward boot that the closed accounts hold no cleartext:
+
+```sh
+sqlite3 users.db "SELECT COUNT(*) FROM users WHERE api_key IS NOT NULL AND api_key_closed_at IS NOT NULL;"  # 0
+```
+
+Backups taken while the previous image ran hold those re-minted keys; after the roll-forward they are not
+credentials to this image, but they are to the previous one — replace them by the retention policy.
+**Do not roll back past this image after the cutoff** unless you accept that re-minting for every row. The
+cutoff is never rolled back.
+
+### Ending API keys
+
+One key: Einstellungen → API-Key → Widerrufen, or `DELETE /api/auth/apikeys/{key_id}` with a session. Every
+key of one account (an incident; the account's owner does it with the deprecated
+`POST /api/auth/apikey/regenerate`, or the operator on the host):
+
+```sh
+sqlite3 users.db "
+  UPDATE api_keys SET revoked_at = strftime('%s','now')
+    WHERE revoked_at IS NULL AND user_id = (SELECT id FROM users WHERE username = 'alice');
+  UPDATE users SET api_key = NULL, api_key_closed_at = COALESCE(api_key_closed_at, strftime('%s','now'))
+    WHERE username = 'alice';"
+```
+
+Without the `WHERE … username` / `user_id` conditions the same two statements end every key of every
+account. A revoked key stays revoked (trigger `api_keys_revocation_is_final`). Who used which key last is
+`last_used_at` (to the minute); `auth.apikey.created` and `auth.apikey.revoked` in the audit log name the
+public key id, never the key.
+
 ## Ending sessions
 
 Since brief 0066 (finding REV-001, ADR 0044) every JWT carries the account's `users.auth_version`, and
@@ -747,8 +829,8 @@ sqlite3 users.db "UPDATE users SET auth_version = auth_version + 1;"
 ```
 
 The version can only go up (trigger `users_auth_version_monotone`); a statement that lowers it fails. If
-the key may be compromised too, rotate it as well (`POST /auth/apikey/regenerate`, Einstellungen →
-API-Key) — a password change deliberately does not.
+a key may be compromised too, end it as well (Einstellungen → API-Key → Widerrufen, or *Ending API keys*
+below) — a password change deliberately does not.
 
 **The deploy that introduces it.** Tokens issued by the previous image have no `auth_version`. For one
 `JWT_EXPIRE_HOURS` after this image first boots they are accepted as version 1 (`SHIM-SEC-008`); after that
@@ -835,8 +917,8 @@ A wrong value fails safe in one direction only: an address that is not a proxy i
 listed, but a listed address is believed. Rolling back to an image before brief 0069 ignores the variable.
 
 **Recovery after a suspected credential compromise** needs both credentials: a password change (or the
-`auth_version` bump in *Ending sessions*) ends JWT sessions, and `POST /auth/apikey/regenerate` replaces the
-API key. The login budget protects neither once the attacker holds one.
+`auth_version` bump in *Ending sessions*) ends JWT sessions, and *Ending API keys* ends the
+API keys. The login budget protects neither once the attacker holds one.
 
 **The budgets' other variables.** `LOGIN_RATE_LIMIT`, `LOGIN_RATE_WINDOW_SECONDS`, `LOGIN_SOURCE_RATE_LIMIT`,
 `LOGIN_GLOBAL_RATE_LIMIT` and `LOGIN_RATE_MAX_KEYS` are passed through by both compose files with the

@@ -218,14 +218,17 @@ class TestPasswordChange:
 
 
 class TestApiKey:
-    def test_is_issued_at_registration(self, client, registered):
-        assert registered["api_key"]
+    def test_is_created_in_the_hashed_format(self, client, registered):
+        """Since brief 0070 an account's key is created through `POST /auth/apikeys`."""
+        assert registered["api_key"].startswith("rwk_")
 
-    def test_is_returned_in_cleartext(self, client, auth, registered):
-        """CURRENT behaviour, and finding SEC-5: keys are stored and returned in the clear."""
+    def test_is_no_longer_returned_in_cleartext(self, client, auth, registered):
+        """Finding SEC-5, fixed by brief 0070: the pinned defect was `GET /auth/apikey` returning
+        the stored key. A hashed key cannot be returned; the deprecated route answers `""`."""
         r = client.get("/auth/apikey", headers=auth)
         assert r.status_code == 200
-        assert r.json()["api_key"] == registered["api_key"]
+        assert r.json()["api_key"] == ""
+        assert registered["api_key"] not in r.text
 
     def test_regeneration_invalidates_the_previous_key(self, client, auth, registered):
         new_key = client.post("/auth/apikey/regenerate", headers=auth).json()["api_key"]

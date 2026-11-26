@@ -1,5 +1,27 @@
+-- index api_keys_secret_hash
+CREATE INDEX api_keys_secret_hash ON api_keys (secret_hash);
+
+-- index api_keys_user
+CREATE INDEX api_keys_user ON api_keys (user_id);
+
 -- index users_storage_id
 CREATE UNIQUE INDEX users_storage_id ON users (storage_id);
+
+-- table api_keys
+CREATE TABLE api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_id TEXT NOT NULL UNIQUE
+        CHECK (length(key_id) = 16 AND key_id NOT GLOB '*[^0-9a-f]*'),
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('issued', 'legacy')),
+    secret_hash TEXT NOT NULL
+        CHECK (length(secret_hash) = 64 AND secret_hash NOT GLOB '*[^0-9a-f]*'),
+    label TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    revoked_at INTEGER,
+    last_used_at INTEGER
+);
 
 -- table project_plans
 CREATE TABLE project_plans (
@@ -77,7 +99,20 @@ CREATE TABLE users (
     hashed_password TEXT NOT NULL,
     api_key TEXT UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-, role TEXT DEFAULT 'user', full_name TEXT DEFAULT '', email TEXT DEFAULT '', storage_id TEXT CHECK (storage_id IS NULL OR (length(storage_id) = 32 AND storage_id NOT GLOB '*[^0-9a-f]*')), storage_layout TEXT NOT NULL DEFAULT 'legacy' CHECK (storage_layout IN ('legacy', 'storage_id')), auth_version INTEGER NOT NULL DEFAULT 1 CHECK (auth_version >= 1));
+, role TEXT DEFAULT 'user', full_name TEXT DEFAULT '', email TEXT DEFAULT '', storage_id TEXT CHECK (storage_id IS NULL OR (length(storage_id) = 32 AND storage_id NOT GLOB '*[^0-9a-f]*')), storage_layout TEXT NOT NULL DEFAULT 'legacy' CHECK (storage_layout IN ('legacy', 'storage_id')), auth_version INTEGER NOT NULL DEFAULT 1 CHECK (auth_version >= 1), api_key_closed_at INTEGER);
+
+-- trigger api_keys_identity_is_immutable
+CREATE TRIGGER api_keys_identity_is_immutable
+    BEFORE UPDATE OF key_id, user_id, kind, secret_hash ON api_keys
+    WHEN NEW.key_id IS NOT OLD.key_id OR NEW.user_id IS NOT OLD.user_id
+      OR NEW.kind IS NOT OLD.kind OR NEW.secret_hash IS NOT OLD.secret_hash
+    BEGIN SELECT RAISE(ABORT, 'an api key''s identity is immutable'); END;
+
+-- trigger api_keys_revocation_is_final
+CREATE TRIGGER api_keys_revocation_is_final
+    BEFORE UPDATE OF revoked_at ON api_keys
+    WHEN OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS NOT OLD.revoked_at
+    BEGIN SELECT RAISE(ABORT, 'a revoked api key stays revoked'); END;
 
 -- trigger users_auth_version_monotone
 CREATE TRIGGER users_auth_version_monotone

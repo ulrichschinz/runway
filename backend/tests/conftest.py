@@ -137,9 +137,13 @@ def register_user(client: TestClient, username: str = "alice") -> dict[str, str]
     r = client.post("/auth/register", json=body)
     assert r.status_code == 201, r.text
     token = client.post("/auth/login", json=body).json()["access_token"]
-    api_key = client.get("/auth/apikey", headers={"Authorization": f"Bearer {token}"}).json()[
-        "api_key"
-    ]
+    # A new account has no key until it creates one, shown once (brief 0070): create it the way
+    # the settings page does, with the session.
+    created = client.post(
+        "/auth/apikeys", headers={"Authorization": f"Bearer {token}"}, json={"label": "test"}
+    )
+    assert created.status_code == 201, created.text
+    api_key = created.json()["api_key"]
     return {
         "username": body["username"],
         "password": body["password"],

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
+import { keyName, keyStateKey, oneTimeKey } from '../src/shared/apiKeys.js'
 import { connectClaudeSteps } from '../src/shared/claudeConnect.js'
 import { followUpOptions } from '../src/shared/dates.js'
 import { projectNameError } from '../src/shared/gtdRules.js'
@@ -169,8 +170,12 @@ describe('the keys the rules return instead of calling t()', () => {
       passwordError({ current: 'a', next: 'b', confirm: 'c' }),
       ...[409, 404, undefined, 500].map(roleError),
       copyFailedKey('x', null), copyFailedKey('••••5a69', 'rw_key5a69'),
-      'set.pw.wrong', 'set.role.admin', 'set.role.user', 'set.saved', 'set.pw.done', 'set.regenDone',
+      'set.pw.wrong', 'set.role.admin', 'set.role.user', 'set.saved', 'set.pw.done',
       ...connectClaudeSteps('https://runway.example', null).map((step) => `set.step.${step.id}`),
+      // brief 0070: the API-key rules and the page's own keys
+      ...['active', 'expired', 'revoked'].map((state) => keyStateKey({ state })),
+      keyName({ kind: 'legacy' }).key, oneTimeKey().show('x') && 'set.key.confirmFirst',
+      'set.key.made', 'set.key.revokedDone', 'set.key.tooMany', 'set.key.legacyDeadline', 'set.key.none',
     ]
     expect(keys.filter((key) => !known(key))).toEqual([])
   })

@@ -1,12 +1,14 @@
 import { reactive, ref } from 'vue'
 import client from '../api/client.js'
+import { LABEL_MAX, oneTimeKey } from '../shared/apiKeys.js'
 import { passwordError, roleAfter, roleError } from '../shared/settingsRules.js'
 import { useAuthStore } from '../stores/auth.js'
 
 /**
  * What Einstellungen reads and writes (plan M14, brief 0061), with the requests of the old
  * `views/SettingsView.vue`: the profile (`PUT /auth/me`), the password (`PUT /auth/password`), the
- * API key (`GET /auth/apikey`, `POST /auth/apikey/regenerate`) and, for an admin, the site's
+ * API keys (`GET`/`POST /auth/apikeys`, `DELETE /auth/apikeys/{key_id}`; brief 0070 — the new key is
+ * shown once and held in memory only) and, for an admin, the site's
  * registration and the users' roles (`/admin/settings`, `/admin/users`). Not through the outbox
  * (plan §6.4 lists none of them): each is one request, and the caller keeps what was typed when it
  * fails.
@@ -17,8 +19,7 @@ import { useAuthStore } from '../stores/auth.js'
  * ONE REQUEST AT A TIME PER ACTION (brief 0061, review). A second click while the first request is
  * out sends nothing and answers `{ busy: true }`: two clicks on the registration switch would
  * otherwise both send the same value (the switch flips only on the answer), two on "Neuen Key
- * erzeugen" would rotate the key twice and could leave the page showing the one the server already
- * replaced, and a role button clicked twice would repeat the same change. Each action has its own
+ * erzeugen" would create two keys and show only one, and a role button clicked twice would repeat the same change. Each action has its own
  * key (`reg`, `key`, `profile`, `password`, `role:<name>`), so a pending change on one user leaves
  * the other users' buttons free; `pending(key)` tells the page which one to show as busy.
  */
@@ -43,26 +44,53 @@ export function useAccount() {
     }
   }
 
-  const apiKey = ref(null)
+  // ── API keys (brief 0070): metadata from the server, the one new key in memory only ──
+  const keys = ref([])
   /** '' | 'loading' | 'failed' */
   const keyState = ref('')
+  const keepOnce = oneTimeKey()
+  /** The key just created, while it is on the screen; null otherwise. Never stored anywhere. */
+  const apiKey = ref(null)
 
-  async function loadKey() {
+  async function loadKeys() {
     keyState.value = 'loading'
     try {
-      const [{ data }] = await Promise.all([client.get('/auth/apikey'), auth.fetchMe()])
-      apiKey.value = data.api_key
+      const [{ data }] = await Promise.all([client.get('/auth/apikeys'), auth.fetchMe()])
+      keys.value = data
       keyState.value = ''
     } catch {
       keyState.value = 'failed'
     }
   }
 
-  function regenerateKey() {
+  function createKey(label) {
     return once('key', async () => {
       try {
-        const { data } = await client.post('/auth/apikey/regenerate')
-        apiKey.value = data.api_key
+        const { data } = await client.post('/auth/apikeys', { label: (label ?? '').trim().slice(0, LABEL_MAX) })
+        const { api_key: fresh, ...meta } = data
+        apiKey.value = keepOnce.show(fresh)
+        keys.value = [meta, ...keys.value]
+        return { ok: true }
+      } catch (e) {
+        if (e?.response?.status === 409) return { error: 'set.key.tooMany' }
+        return { error: failure(e) }
+      }
+    })
+  }
+
+  /** Forget the new key — only once the person confirmed they stored it. */
+  function dismissKey(confirmed) {
+    const result = keepOnce.dismiss(confirmed)
+    apiKey.value = keepOnce.key
+    return result
+  }
+
+  function revokeKey(keyId) {
+    return once(`revoke:${keyId}`, async () => {
+      try {
+        await client.delete(`/auth/apikeys/${encodeURIComponent(keyId)}`)
+        const { data } = await client.get('/auth/apikeys')
+        keys.value = data
         return { ok: true }
       } catch (e) {
         return { error: failure(e) }
@@ -153,7 +181,7 @@ export function useAccount() {
 
   return {
     auth, pending,
-    apiKey, keyState, loadKey, regenerateKey,
+    keys, apiKey, keyState, loadKeys, createKey, dismissKey, revokeKey,
     saveProfile, changePassword,
     registration, users, adminState, loadAdmin, toggleRegistration, toggleRole,
   }

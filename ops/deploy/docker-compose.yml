@@ -78,6 +78,8 @@ services:
       - LOGIN_SOURCE_RATE_LIMIT=${LOGIN_SOURCE_RATE_LIMIT:-30}
       - LOGIN_GLOBAL_RATE_LIMIT=${LOGIN_GLOBAL_RATE_LIMIT:-300}
       - LOGIN_RATE_MAX_KEYS=${LOGIN_RATE_MAX_KEYS:-10000}
+      # Brief 0070: legacy API keys are refused from this day; earlier only, never later.
+      - API_KEY_LEGACY_CUTOFF=${API_KEY_LEGACY_CUTOFF:-2027-01-15}
     networks:
       - traefik-public
     # Lands with the next deploy through the mechanism above; until that deploy runs, the host
