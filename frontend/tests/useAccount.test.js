@@ -113,7 +113,7 @@ describe('the profile and the password', () => {
     await answer('put', '/auth/me', { full_name: 'Anna', email: 'anna@example.com' })
     expect(await first).toEqual({ ok: true })
 
-    const form = { current: 'alt', next: 'neu', confirm: 'neu' }
+    const form = { current: 'alt', next: 'neu-lang-genug', confirm: 'neu-lang-genug' }
     const pw = account.changePassword(form)
     expect(await account.changePassword(form)).toEqual({ busy: true })
     expect(sent('put', '/auth/password')).toHaveLength(1)
@@ -131,14 +131,20 @@ describe('the profile and the password', () => {
 
 describe('a password change ends every earlier session (REV-001, ADR 0044)', () => {
   it('keeps the token the answer carries, so this session survives its own revocation', async () => {
-    const pw = account.changePassword({ current: 'alt', next: 'neu', confirm: 'neu' })
+    const pw = account.changePassword({ current: 'alt', next: 'neu-lang-genug', confirm: 'neu-lang-genug' })
     await answer('put', '/auth/password', { detail: 'Password updated', access_token: 'eyJ.neu', token_type: 'bearer' })
     expect(await pw).toEqual({ ok: true })
     expect(adopted).toEqual(['eyJ.neu'])
   })
 
+  it('a 422 says the rule, not "wrong password" (SEC-006)', async () => {
+    const pw = account.changePassword({ current: 'alt', next: 'neu-lang-genug', confirm: 'neu-lang-genug' })
+    await answer('put', '/auth/password', httpError(422))
+    expect(await pw).toEqual({ error: 'set.pw.rule' })
+  })
+
   it('a refused change keeps the session it has', async () => {
-    const pw = account.changePassword({ current: 'falsch', next: 'neu', confirm: 'neu' })
+    const pw = account.changePassword({ current: 'falsch', next: 'neu-lang-genug', confirm: 'neu-lang-genug' })
     await answer('put', '/auth/password', httpError(400))
     expect(await pw).toEqual({ error: 'set.pw.wrong' })
     expect(adopted).toEqual([])

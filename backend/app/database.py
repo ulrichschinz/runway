@@ -151,6 +151,12 @@ MIGRATIONS = (
 # if it expires within one JWT lifetime of this moment (SHIM-SEC-008, ADR 0044). Written once.
 AUTH_VERSION_EXPAND_KEY = "auth_version_expand_at"
 
+# The moment (UTC epoch seconds) this image first booted on this database, for the password-hash
+# timeline of ADR 0044 Decision 5 (`auth.kdf_phase`): bcrypt writes for KDF_SOAK, then Argon2id;
+# the ambiguous >=72-byte bcrypt login accepted until KDF_SOAK + LONG_BCRYPT_WINDOW. Written
+# once (SEC-006, brief 0067). Missing means Argon2id and no ambiguous login: fail closed.
+KDF_EXPAND_KEY = "password_kdf_expand_at"
+
 # The migration's protocol (SEC-001, M1.2): one row per decision the operator CLI took about
 # one account. Ids, a path relative to DATA_ROOT, counts and a manifest digest — never a task's
 # text and never a credential. `manifest` is a SHA-256 over the sorted (path, size, SHA-256)
@@ -292,6 +298,47 @@ async def get_auth_version_expand_at(db) -> int | None:
         return int(row[0]) if row else None
     except (TypeError, ValueError):
         return None
+
+
+async def get_password_kdf_expand_at(db) -> int | None:
+    """When this image first booted here, for `auth.kdf_phase`; None fails closed."""
+    async with db.execute("SELECT value FROM site_settings WHERE key=?", (KDF_EXPAND_KEY,)) as cur:
+        row = await cur.fetchone()
+    try:
+        return int(row[0]) if row else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def rehash_password(db, username: str, expected_hash: str, new_hash: str) -> bool:
+    """Replace a hash with a stronger hash OF THE SAME PASSWORD (rehash-on-login, SEC-006).
+
+    Unlike `replace_password` the version is untouched: the password did not change, so no
+    session ends. A compare-and-swap on the hash that was verified: if a password change (or
+    another login's rehash) replaced it meanwhile, nothing is written and False is returned —
+    the login that verified the old hash must never put the old password back.
+    """
+    cur = await db.execute(
+        "UPDATE users SET hashed_password=? WHERE username=? AND hashed_password=?",
+        (new_hash, username, expected_hash),
+    )
+    await db.commit()
+    return cur.rowcount == 1
+
+
+async def reset_password(db, username: str, new_hash: str) -> int | None:
+    """The operator reset (`app.services.password_reset`, docs/operations.md): set the hash and end
+    every session, in one statement, whatever the stored hash is. Returns the new version, or None
+    when there is no such account. Unlike `replace_password` there is no compare-and-swap — the
+    operator's decision, made after out-of-band confirmation, is the authority here."""
+    async with db.execute(
+        "UPDATE users SET hashed_password=?, auth_version=auth_version+1"
+        " WHERE username=? RETURNING auth_version",
+        (new_hash, username),
+    ) as cur:
+        row = await cur.fetchone()
+    await db.commit()
+    return int(row[0]) if row else None
 
 
 async def replace_password(db, username: str, expected_hash: str, new_hash: str) -> int | None:
@@ -583,6 +630,11 @@ async def init_db() -> str:
         await db.execute(
             "INSERT OR IGNORE INTO site_settings (key, value) VALUES (?, ?)",
             (AUTH_VERSION_EXPAND_KEY, str(int(time.time()))),
+        )
+        # SEC-006: the start of the password-hash timeline, once and never moved.
+        await db.execute(
+            "INSERT OR IGNORE INTO site_settings (key, value) VALUES (?, ?)",
+            (KDF_EXPAND_KEY, str(int(time.time()))),
         )
         await db.execute(CREATE_REVIEWS)
         await db.execute(CREATE_PROJECT_STATUS)

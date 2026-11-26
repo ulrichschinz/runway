@@ -71,10 +71,10 @@ class TestPlans:
         )
         con.commit()
         con.close()
-        client.post("/auth/register", json={"username": "mallory", "password": "pw"})
-        other = client.post("/auth/login", json={"username": "mallory", "password": "pw"}).json()[
-            "access_token"
-        ]
+        client.post("/auth/register", json={"username": "mallory", "password": "pw-long-enough"})
+        other = client.post(
+            "/auth/login", json={"username": "mallory", "password": "pw-long-enough"}
+        ).json()["access_token"]
         r = client.get("/projects/plans/mine", headers={"Authorization": f"Bearer {other}"})
         assert r.json()["purpose"] == ""
 
@@ -245,10 +245,10 @@ class TestProjectStatus:
         )
         con.commit()
         con.close()
-        client.post("/auth/register", json={"username": "mallory", "password": "pw"})
-        other = client.post("/auth/login", json={"username": "mallory", "password": "pw"}).json()[
-            "access_token"
-        ]
+        client.post("/auth/register", json={"username": "mallory", "password": "pw-long-enough"})
+        other = client.post(
+            "/auth/login", json={"username": "mallory", "password": "pw-long-enough"}
+        ).json()["access_token"]
         headers = {"Authorization": f"Bearer {other}"}
         client.post("/tasks", json={"description": "t", "project": "website"}, headers=headers)
         rows = client.get("/gtd/projects/overview", headers=headers).json()

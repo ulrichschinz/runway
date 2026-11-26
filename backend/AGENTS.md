@@ -50,5 +50,8 @@ Coverage floor is a ratchet, not a target — raise it, never lower it to fit a 
   deleted by the next deploy. `users.db` alone is no longer a complete backup.
 - An audit write **never** fails a request: it catches its own error and logs at `ERROR`. So a
   missing row is not the same as a missing event.
-- `bcrypt` runs at its minimum cost factor in tests. At the production factor the suite
-  took 36 seconds; the production factor is consequently covered by no test.
+- Password hashing runs at **reduced, test-only parameters** (`tests/conftest.py`): Argon2id at
+  t=1/8 KiB, bcrypt at cost 4, and no 7-day soak, so a fresh test database writes Argon2id.
+  Exactly one test hashes at the production parameters; none measures their latency
+  (`RISK-TEST-003`). Every login does one Argon2id and one bcrypt operation on purpose — the
+  uniform work that keeps an unknown account from being faster (brief 0067).

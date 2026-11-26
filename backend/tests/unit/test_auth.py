@@ -25,20 +25,20 @@ def _set_registration(enabled: bool) -> None:
 class TestRegistration:
     def test_registers_and_returns_the_profile(self, client):
         _set_registration(True)
-        r = client.post("/auth/register", json={"username": "bob", "password": "pw"})
+        r = client.post("/auth/register", json={"username": "bob", "password": "pw-long-enough"})
         assert r.status_code == 201
         assert r.json() == {"username": "bob", "role": "user", "full_name": "", "email": ""}
 
     def test_is_refused_when_the_site_setting_is_off(self, client):
         _set_registration(False)
-        r = client.post("/auth/register", json={"username": "bob", "password": "pw"})
+        r = client.post("/auth/register", json={"username": "bob", "password": "pw-long-enough"})
         assert r.status_code == 403
         assert r.json()["detail"] == "Registration is disabled"
 
     def test_duplicate_username_is_rejected(self, client):
         _set_registration(True)
-        client.post("/auth/register", json={"username": "bob", "password": "pw"})
-        r = client.post("/auth/register", json={"username": "bob", "password": "other"})
+        client.post("/auth/register", json={"username": "bob", "password": "pw-long-enough"})
+        r = client.post("/auth/register", json={"username": "bob", "password": "another-password"})
         assert r.status_code == 400
 
     def test_any_insert_failure_is_reported_as_username_taken(self, client):
@@ -50,8 +50,8 @@ class TestRegistration:
         this would need to distinguish.
         """
         _set_registration(True)
-        client.post("/auth/register", json={"username": "bob", "password": "pw"})
-        r = client.post("/auth/register", json={"username": "bob", "password": "pw"})
+        client.post("/auth/register", json={"username": "bob", "password": "pw-long-enough"})
+        r = client.post("/auth/register", json={"username": "bob", "password": "pw-long-enough"})
         assert r.status_code == 400
         assert r.json()["detail"] == "Username already taken"
 
@@ -59,7 +59,7 @@ class TestRegistration:
         """Since brief 0065 (SEC-001) the directory is named by the account's storage id,
         never by its name, and nothing named after the account is created."""
         _set_registration(True)
-        client.post("/auth/register", json={"username": "bob", "password": "pw"})
+        client.post("/auth/register", json={"username": "bob", "password": "pw-long-enough"})
         con = sqlite3.connect(settings.db_path)
         storage_id, layout = con.execute(
             "SELECT storage_id, storage_layout FROM users WHERE username='bob'"
@@ -180,7 +180,7 @@ class TestPasswordChange:
     def test_requires_the_current_password(self, client, auth):
         r = client.put(
             "/auth/password",
-            json={"current_password": "wrong", "new_password": "new"},
+            json={"current_password": "wrong", "new_password": "new-long-enough"},
             headers=auth,
         )
         assert r.status_code == 400
@@ -260,13 +260,17 @@ class TestRegistrationStatus:
         _set_registration(False)
         assert client.get("/auth/registration-status").json()["allow_registration"] is False
         assert (
-            client.post("/auth/register", json={"username": "erin", "password": "pw"}).status_code
+            client.post(
+                "/auth/register", json={"username": "erin", "password": "pw-long-enough"}
+            ).status_code
             == 403
         )
 
         _set_registration(True)
         assert client.get("/auth/registration-status").json()["allow_registration"] is True
         assert (
-            client.post("/auth/register", json={"username": "erin", "password": "pw"}).status_code
+            client.post(
+                "/auth/register", json={"username": "erin", "password": "pw-long-enough"}
+            ).status_code
             == 201
         )

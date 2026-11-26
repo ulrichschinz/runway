@@ -126,3 +126,34 @@ shims:
     expires: 2027-01-31
     re_open_trigger: "the expiry passes, JWT_EXPIRE_HOURS is raised in production, or a rollback to an image before brief 0066 happens"
     decision_record: docs/adr/0044-credential-lifecycle-jwt-password-and-api-key.md
+
+  - id: SHIM-SEC-009
+    what: >
+      `auth.check_password` verifies a passlib-era bcrypt hash (`$2a$`/`$2b$`/`$2y$`), and every
+      login runs a dummy bcrypt check at cost 12 so a bcrypt account costs what any other does;
+      during the first 7 days after this image first boots (`site_settings.password_kdf_expand_at`)
+      new passwords are still written as bcrypt; until 67 days after it, a bcrypt match for an
+      input of 72 bytes or more is accepted with `password_change_required` (backend/app/auth.py).
+    why: >
+      Every account created before brief 0067 has a bcrypt hash, and only a successful login can
+      turn one into Argon2id — the hash cannot be converted without the password. Refusing bcrypt
+      on the deploy would lock every existing user out at once; writing Argon2id from the first
+      minute would lock out every changed or rehashed account if the image is rolled back
+      (finding SEC-006, ADR 0044 Decision 5).
+    removal: >
+      The contract step of brief 0067, its own change: delete bcrypt verification, the bcrypt
+      dummy, the soak writer, the `password_kdf_expand_at` row and the `bcrypt` dependency, once
+      no bcrypt hash is left in `users` — the accounts that never logged in during the window are
+      reset by the operator (docs/operations.md) — and the 67-day window has passed in production.
+    evidence: >
+      `SELECT COUNT(*) FROM users WHERE hashed_password LIKE '$2%'` on the deploy host is zero, and
+      the audit log's `auth.password.rehashed` rows show the migration ran. Both are queries on the
+      host, not something this repository can see; the unit tests show each phase's behaviour.
+    owner: maintainer
+    # Written by the implementing agent on the owner's order of 2026-11-24 to carry out M2.2;
+    # the owner has not yet reviewed this entry itself (RISK-GOV-001: no independent review).
+    # Explicit owner sign-off before merge is a deferred step of brief 0067.
+    approved_on: 2026-11-24
+    expires: 2027-04-30
+    re_open_trigger: "the expiry passes, a rollback to an image before brief 0067 happens after its soak, or the bcrypt pin blocks a fix"
+    decision_record: docs/adr/0044-credential-lifecycle-jwt-password-and-api-key.md

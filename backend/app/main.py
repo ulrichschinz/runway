@@ -6,10 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP
 
 from app import audit, startup_checks, task_storage
+from app.auth import prepare_dummies
 from app.config import cors_origin_list, settings
 from app.database import init_db
 from app.logging_setup import configure_logging, resolve_level
-from app.middleware import RequestIdMiddleware
+from app.middleware import BodyLimitMiddleware, RequestIdMiddleware
 from app.routers import admin, auth, gtd, inbox, projects, skill, tasks
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,9 @@ async def lifespan(app: FastAPI):
     # reachable, and a container that refuses to start is a louder signal than one that
     # serves forgeable tokens quietly (finding SEC-1).
     startup_checks.run_all()
+    # The dummy hashes every login verifies against when an account has no hash of that kind:
+    # made now, so the first login after a boot costs what every other one costs (SEC-006).
+    prepare_dummies()
     # Before init_db, because init_db can promote an administrator and that promotion is the
     # first thing there would otherwise be nowhere to write.
     audit.init_store()
@@ -80,6 +84,10 @@ if _cors_origins:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+# Inside the request id (a 413 carries one) and in front of everything else: an oversized body
+# is refused before CORS, routing, body parsing, hashing or a query (SEC-006, brief 0067).
+app.add_middleware(BodyLimitMiddleware)
 
 # Added last, so it is the outermost layer: every request gets a correlation id before any
 # other middleware can answer it, and every response carries the id back — including the

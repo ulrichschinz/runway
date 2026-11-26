@@ -30,6 +30,8 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('token', data.access_token)
     localStorage.setItem('username', user)
     await fetchMe()
+    // The answer, for the page to decide where to go (`landingAfterLogin`, SEC-006).
+    return data
   }
 
   /**
@@ -44,7 +46,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function register(user, pass) {
     await client.post('/auth/register', { username: user, password: pass })
-    await login(user, pass)
+    return login(user, pass)
   }
 
   function logout() {
