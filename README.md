@@ -46,7 +46,7 @@ git clone https://github.com/ulrichschinz/runway.git
 cd runway
 
 cp .env.example .env
-# Set JWT_SECRET to a long random string:
+# Replace JWT_SECRET with a generated value — the placeholder is refused at startup:
 #   openssl rand -base64 48
 ```
 
@@ -62,8 +62,13 @@ direction, so a variable documented here always does something and a variable th
 something is always here.
 
 ```env
-# Required. The app refuses to start on a default, an empty value, or fewer than 32
-# characters. Generate one with: openssl rand -base64 48
+# Required. Generate one with: openssl rand -base64 48
+# The app refuses to start on an empty value, fewer than 32 characters, any value published in
+# this repository (the defaults, the examples on this page and in .env.example, or one that still
+# reads like a placeholder), a public key (PEM, OpenSSH, a JWK or JWK set, DER or an uncompressed
+# EC point in hex or base64), one that is mostly repetition or a run, or an estimated entropy
+# under 80 bits. `python -m app.startup_checks` runs the same
+# checks against an environment and prints a verdict, never the value (brief 0072).
 JWT_SECRET=
 
 # Seeded into the database on FIRST RUN ONLY. Afterwards the stored value wins and an
@@ -119,8 +124,12 @@ MCP_SOURCE_MAX_INFLIGHT=8
 # A malformed entry, or 0.0.0.0/0, is ignored and reported at startup. See docs/operations.md.
 TRUSTED_PROXIES=
 
-# JWT signing algorithm and token lifetime.
+# Deprecated, and no longer a choice: tokens are always signed and verified with HS256 (ADR 0046).
+# Still read only so an existing .env keeps starting; any other value refuses to start. Remove it
+# from your .env — the variable itself goes in a later release (SHIM-SEC-010).
 JWT_ALGORITHM=HS256
+
+# Token lifetime.
 JWT_EXPIRE_HOURS=24
 
 # How much of the log stream is emitted: DEBUG, INFO, WARNING, ERROR or CRITICAL. An

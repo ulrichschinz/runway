@@ -37,7 +37,11 @@ Two credentials reach the same principal, checked in this order by `get_current_
    outlives the cutoff. The deprecated `GET /auth/apikey` returns the legacy key only to a session or
    to that legacy key itself (any other key gets `""`), so a stolen `rwk_` key cannot read back a
    second credential that would survive its revocation. `GET /auth/apikeys` lists metadata only.
-2. **`Authorization: Bearer <jwt>`** — signed with `JWT_SECRET`, `HS256`, 24h. A valid
+2. **`Authorization: Bearer <jwt>`** — signed with `JWT_SECRET`, `HS256`, 24h. `HS256` is a constant
+   in the code, not a setting (ADR 0046, finding SEC-002): a token whose header names any other
+   algorithm — `none`, `HS512`, `RS256` — or carries its own key (`jwk`, `jku`, `kid`) is refused, and
+   PyJWT, not python-jose, verifies it. `JWT_SECRET` itself is refused at startup when it is published,
+   a public key, degenerate or short (see `docs/threat-model.md` §3). A valid
    signature is not enough: the account the token names must still exist, or the request
    gets the same **401** as no credential at all, on every route. A token outlives the row
    it was issued for; until 2026-11-10 it kept working everywhere except `GET /auth/me`,

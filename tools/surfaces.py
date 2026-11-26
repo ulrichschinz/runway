@@ -33,6 +33,7 @@ import ast
 import importlib.util
 import json
 import re
+import secrets
 import sqlite3
 import sys
 import tempfile
@@ -57,7 +58,9 @@ def _booted_app():
     sys.path.insert(0, str(ROOT / "backend"))
     from app.config import settings
 
-    settings.jwt_secret = "surface-capture-secret-long-enough-to-boot"  # noqa: S105  # secret-scan: allow — throwaway, lets startup_checks pass
+    # Generated per capture: a value written here would be published, and startup_checks refuses
+    # every published value (brief 0072).
+    settings.jwt_secret = secrets.token_urlsafe(48)
     from app.main import app, mcp
 
     return app, mcp

@@ -160,3 +160,79 @@ class TestNoRouteParsesMultipart:
         )
         assert response.status_code == 200
         assert parsed == ["multipart"]
+
+
+class TestTheRuntimeImageCheck:
+    """`tools/installed_matches_lock.py`, which deploy.yml runs inside the pushed backend image against
+    that image's own `/app/requirements.lock` before the deploy job may start (brief 0072, review round
+    1). The test image installs `requirements-dev.lock`, so only this sees the closure that ships."""
+
+    SCRIPT = BACKEND.parent / "tools" / "installed_matches_lock.py"
+
+    def _run(self, lock: Path, *, pythonpath: Path | None = None):
+        import os
+        import subprocess
+        import sys
+
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        if pythonpath is not None:
+            env["PYTHONPATH"] = str(pythonpath)
+        # stdin, as deploy.yml feeds it to the image's interpreter
+        return subprocess.run(  # noqa: S603  # this interpreter and a repository script
+            [sys.executable, "-", str(lock)],
+            input=self.SCRIPT.read_text(encoding="utf-8"),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    def _lock(self, tmp_path: Path, edit=lambda text: text) -> Path:
+        """A lock of what this interpreter actually has installed, for every package the dev lock
+        names. A bootstrapped venv installs the intent, not the lock, so its transitives may be newer
+        than the lock's; the script's logic is tested against a lock that is true here by construction."""
+        lines = []
+        for name in pins(BACKEND / "requirements-dev.lock"):
+            try:
+                lines.append(f"{name}=={metadata.version(name)} \\\n    --hash=sha256:00\n")
+            except metadata.PackageNotFoundError:
+                continue
+        path = tmp_path / "installed.lock"
+        path.write_text(edit("".join(lines)), encoding="utf-8")
+        return path
+
+    def test_positive_control_a_lock_of_what_is_installed_passes(self, tmp_path):
+        result = self._run(self._lock(tmp_path))
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.startswith("ok")
+
+    def test_a_package_at_another_version_fails(self, tmp_path):
+        lock = self._lock(
+            tmp_path, lambda t: re.sub(r"^pyjwt==\S+", "pyjwt==2.13.0", t, flags=re.M)
+        )
+        result = self._run(lock)
+        assert result.returncode == 1 and "pyjwt" in result.stderr
+
+    def test_a_lock_moved_back_to_a_vulnerable_multipart_fails(self, tmp_path):
+        """The script also holds the floor on its own (a lock moved back to 0.0.12 and an image that
+        installed it would agree with each other); here the version mismatch and the floor both say so."""
+        installed = metadata.version("python-multipart")
+        lock = self._lock(
+            tmp_path,
+            lambda t: re.sub(r"^python-multipart==\S+", "python-multipart==0.0.12", t, flags=re.M),
+        )
+        result = self._run(lock)
+        assert result.returncode == 1 and "python-multipart" in result.stderr
+        assert installed != "0.0.12"
+
+    def test_an_importable_jose_fails(self, tmp_path):
+        lock = self._lock(tmp_path)
+        (tmp_path / "jose").mkdir()
+        (tmp_path / "jose" / "__init__.py").write_text("", encoding="utf-8")
+        result = self._run(lock, pythonpath=tmp_path)
+        assert result.returncode == 1 and "jose" in result.stderr
+
+    def test_an_unreadable_or_tiny_lock_fails(self, tmp_path):
+        tiny = tmp_path / "tiny.lock"
+        tiny.write_text("fastapi==0.141.1\n", encoding="utf-8")
+        assert self._run(tiny).returncode == 1
+        assert self._run(tmp_path / "missing.lock").returncode == 1

@@ -91,6 +91,17 @@ jobs:
             ${{ env.REGISTRY }}/${{ github.repository }}-backend:latest
             ${{ env.REGISTRY }}/${{ github.repository }}-backend:${{ github.sha }}
 
+      # The image that ships installs requirements.lock; the container tier's test image installs
+      # requirements-dev.lock. So this is the only automated look at the closure production will
+      # run: every pin at exactly its locked version, python-multipart past its advisories, and no
+      # python-jose or ecdsa importable (brief 0072, review round 1). It runs inside the image just
+      # pushed, against the lock baked into it, and fails this job — so `deploy`, which needs it,
+      # never starts. The script is stdlib-only and fed on stdin, so nothing is added to the image.
+      - name: The backend image installs its own lock
+        run: |
+          docker run --rm -i "${{ env.REGISTRY }}/${{ github.repository }}-backend:${{ github.sha }}" \
+            python - /app/requirements.lock < tools/installed_matches_lock.py
+
       - name: Build and push frontend
         uses: docker/build-push-action@v7
         with:

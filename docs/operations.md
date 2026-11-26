@@ -808,6 +808,58 @@ account. A revoked key stays revoked (trigger `api_keys_revocation_is_final`). W
 `last_used_at` (to the minute); `auth.apikey.created` and `auth.apikey.revoked` in the audit log name the
 public key id, never the key.
 
+## The signing key: `JWT_SECRET`
+
+Tokens are HS256, always (ADR 0046); the key is `JWT_SECRET` from the host `.env`, and nothing in this
+repository ever holds a real one. **Generate it, never type it:**
+
+```sh
+openssl rand -base64 48
+```
+
+The backend refuses to start (finding SEC-002, brief 0072) on an empty value, fewer than 32 characters,
+any value published in this repository or one that reads like a placeholder, a public key (PEM, OpenSSH, a
+JWK or JWK set, DER or an uncompressed EC point in hex or base64, or anything PyJWT refuses as an HMAC key),
+a value that is mostly repetition or a run, or an estimated entropy under 80 bits — and on `JWT_ALGORITHM`
+set to anything but `HS256`. A raw Ed25519 key or a compressed EC point is *not* recognised (it looks like
+random bytes): generating the key is what rules those out. The refusal names the reason and never the value.
+
+**Before merging a change with new startup checks** (brief 0072 is one), run them against the host's
+environment — merging to `main` deploys with no manual step, so after the merge is too late. Run it through
+compose from the service directory, so the check sees exactly the environment the backend gets: compose
+interpolates `JWT_SECRET=${JWT_SECRET}` from the `.env` beside it (stripping quotes and a trailing comment)
+and passes nothing else from that file — `docker run --env-file` reads the `.env` by different rules and
+can answer for a value production never sees. It prints `ok` or the reason, never the secret, and touches
+no data.
+
+*Before the merge* the new image does not exist yet, so mount the branch's two checking modules over the
+deployed image's copies (both are self-contained: the standard library, `pydantic-settings` and PyJWT's
+`HMACAlgorithm`, all in the deployed image):
+
+```sh
+# from a checkout of the branch, on your machine
+scp backend/app/startup_checks.py backend/app/config.py <host>:/tmp/runway-check/
+# on the host
+cd /opt/services/runway
+docker compose run --rm --no-deps \
+  -v /tmp/runway-check/startup_checks.py:/app/app/startup_checks.py:ro \
+  -v /tmp/runway-check/config.py:/app/app/config.py:ro \
+  backend python -m app.startup_checks
+rm -r /tmp/runway-check
+```
+
+*After a deploy* (or for a rollback target), the image carries the checks itself:
+`RUNWAY_SHA=<sha> docker compose run --rm --no-deps backend python -m app.startup_checks`.
+
+If it refuses, rotate (below) before the merge. While there, remove a `JWT_ALGORITHM` line if the `.env`
+has one: it chooses nothing any more and goes with `SHIM-SEC-010`.
+
+**Rotating it** ends every session of every account at once — every JWT was signed with the old key — and
+leaves API keys, and so agents and MCP clients, untouched. Replace the value in the host `.env` with a newly
+generated one and recreate the backend container. Ending sessions without rotating is cheaper and usually
+what you want (next section); rotate when the key itself may be known — a leaked `.env`, a backup of it, a
+log line that should not exist.
+
 ## Ending sessions
 
 Since brief 0066 (finding REV-001, ADR 0044) every JWT carries the account's `users.auth_version`, and

@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
+import jwt
 from argon2 import PasswordHasher, Type
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
-from jose import JWTError, jwt
 
-from app.config import settings
+from app.config import JWT_SIGNING_ALGORITHM, settings
 
 # --- the password policy (finding SEC-006, ADR 0044 Decision 5) --------------------------------
 #
@@ -327,7 +327,7 @@ def create_access_token(username: str, *, auth_version: int) -> str:
             "auth_version": auth_version,
         },
         settings.jwt_secret,
-        algorithm=settings.jwt_algorithm,
+        algorithm=JWT_SIGNING_ALGORITHM,
     )
 
 
@@ -345,17 +345,19 @@ def _version(payload: dict) -> tuple[bool, int | None]:
 def decode_token(token: str) -> TokenClaims | None:
     """The verified claims, or None for anything that is not a well-formed token of ours.
 
-    `exp` and `sub` are required: python-jose checks `exp` only when it is present, so before
-    this change a correctly signed token without one never expired.
+    `exp` and `sub` are required: a JWT library checks `exp` only when it is present, so before
+    brief 0066 a correctly signed token without one never expired. Exactly one algorithm is
+    accepted, the code's (SEC-002, ADR 0046): the token's own `alg` header selects nothing, and
+    `jwk`/`jku`/`kid` headers are never read — the key is the server's and only the server's.
     """
     try:
         payload = jwt.decode(
             token,
             settings.jwt_secret,
-            algorithms=[settings.jwt_algorithm],
-            options={"require_exp": True, "require_sub": True},
+            algorithms=[JWT_SIGNING_ALGORITHM],
+            options={"require": ["exp", "sub"]},
         )
-    except JWTError:
+    except jwt.PyJWTError:
         return None
     username, expires_at = payload.get("sub"), payload.get("exp")
     if not isinstance(username, str) or not username or type(expires_at) is not int:

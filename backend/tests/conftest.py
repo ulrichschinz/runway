@@ -7,6 +7,7 @@ real ``users.db``.
 
 from __future__ import annotations
 
+import secrets
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -67,6 +68,11 @@ def isolated_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+# Generated per run, never written down: a signing key published in this repository is refused at boot
+# (finding SEC-002, brief 0072), and the test suite's key is no exception.
+TEST_JWT_SECRET = secrets.token_urlsafe(48)
+
+
 @pytest.fixture(autouse=True)
 def _bootable_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every TestClient runs the app's lifespan, which now refuses to start on a default or
@@ -76,7 +82,7 @@ def _bootable_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     Autouse on purpose: a test that boots the app without this would fail with a startup
     error whose cause is three layers away from the assertion that noticed.
     """
-    monkeypatch.setattr(settings, "jwt_secret", "test-secret-long-enough-to-pass-the-startup-check")
+    monkeypatch.setattr(settings, "jwt_secret", TEST_JWT_SECRET)
 
 
 @pytest.fixture(autouse=True)

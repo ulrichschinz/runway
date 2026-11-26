@@ -1,9 +1,12 @@
 fastapi==0.141.1
 uvicorn[standard]==0.53.0
-# 3.3.0 carried the algorithm-confusion and JWT-bomb advisories (finding SEC-7). 3.5.0 was
-# verified drop-in against this application's exact usage — HS256 encode/decode, and an
-# `alg: none` token still refused — on 2026-08-26.
-python-jose[cryptography]==3.5.0
+# Signs and verifies the session token (HS256 only; finding SEC-002, brief 0072, ADR 0046). Replaced
+# python-jose, whose last release, 3.5.0 (2025-05-28), carries CVE-2024-33663/CVE-2026-85394 (a public
+# key accepted as an HMAC secret) and CVE-2026-120459 (an empty HMAC key) with no fixed release — there
+# is no 3.5.1. PyJWT was already in the image as a dependency of mcp (at 2.13.0, which OSV lists with
+# advisories fixed in 2.14.0 and 2.15.0); 2.15.1 (2026-09-28) has none. No extra: HS256 needs no
+# `cryptography`, and mcp asks for `pyjwt[crypto]` itself.
+PyJWT==2.15.1
 
 # Argon2id for every new and changed password (finding SEC-006, ADR 0044 Decision 5, brief 0067).
 # argon2-cffi is maintained by the Argon2 reference binding's author and is used directly —
