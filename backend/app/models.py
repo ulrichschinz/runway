@@ -152,7 +152,11 @@ class Task(BaseModel):
 # Field descriptions reach MCP clients through the OpenAPI schema, so they are the only
 # documentation an agent sees. Generic on purpose (RISK-MCP-002): what a field means and
 # accepts, nothing about the deployment.
-_DATE_FORMAT = "`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time."
+_DATE_FORMAT = (
+    "`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date "
+    "expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is "
+    "refused (400)."
+)
 _CLEARS = "On modify, an empty string clears it; null or omitted leaves it unchanged."
 _RECURRING_KEEPS = "A recurring task cannot lose it (400)."
 

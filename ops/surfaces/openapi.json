@@ -1147,7 +1147,7 @@
                 "type": "null"
               }
             ],
-            "description": "Hard deadline only: the date by which it must be done. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
+            "description": "Hard deadline only: the date by which it must be done. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400).",
             "title": "Due"
           },
           "priority": {
@@ -1198,7 +1198,7 @@
                 "type": "null"
               }
             ],
-            "description": "Earliest start, or the day to follow up; does not hide the task. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
+            "description": "Earliest start, or the day to follow up; does not hide the task. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400).",
             "title": "Scheduled"
           },
           "tags": {
@@ -1222,7 +1222,7 @@
                 "type": "null"
               }
             ],
-            "description": "The task expires and is deleted after this date. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
+            "description": "The task expires and is deleted after this date. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400).",
             "title": "Until"
           },
           "wait": {
@@ -1235,7 +1235,7 @@
                 "type": "null"
               }
             ],
-            "description": "Hides the task from every list until this date (tickler). `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
+            "description": "Hides the task from every list until this date (tickler). `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400).",
             "title": "Wait"
           }
         },
@@ -1286,7 +1286,7 @@
                 "type": "null"
               }
             ],
-            "description": "Hard deadline only: the date by which it must be done. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged. A recurring task cannot lose it (400).",
+            "description": "Hard deadline only: the date by which it must be done. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400). On modify, an empty string clears it; null or omitted leaves it unchanged. A recurring task cannot lose it (400).",
             "title": "Due"
           },
           "priority": {
@@ -1337,7 +1337,7 @@
                 "type": "null"
               }
             ],
-            "description": "Earliest start, or the day to follow up; does not hide the task. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged.",
+            "description": "Earliest start, or the day to follow up; does not hide the task. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400). On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Scheduled"
           },
           "tags": {
@@ -1399,7 +1399,7 @@
                 "type": "null"
               }
             ],
-            "description": "The task expires and is deleted after this date. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged.",
+            "description": "The task expires and is deleted after this date. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400). On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Until"
           },
           "wait": {
@@ -1412,7 +1412,7 @@
                 "type": "null"
               }
             ],
-            "description": "Hides the task from every list until this date (tickler). `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged.",
+            "description": "Hides the task from every list until this date (tickler). `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400). On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Wait"
           }
         },

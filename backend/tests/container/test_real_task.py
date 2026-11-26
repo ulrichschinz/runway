@@ -219,6 +219,286 @@ class TestCrossTenantIsolation:
             task_runner.export_tasks(S["alice"], [f"rc.data.location={S['bob'].path}"])
 
 
+# The Taskwarrior major.minor the SEC-007 evidence was taken on (brief 0074). An archive-snapshot
+# bump that brings another one fails `test_the_binary_is_the_version_the_date_evidence_covers`
+# until someone re-runs the date regression below, and the audit's probe, against the new binary.
+DATE_EVIDENCE_VERSION = "3.5"
+
+DATE_FIELDS = ("due", "scheduled", "wait", "until")
+
+
+def _files(directory: Path) -> list[str]:
+    return sorted(str(f.relative_to(directory)) for f in directory.rglob("*") if f.is_file())
+
+
+class TestDateValuesAreOneArgument:
+    """Finding SEC-007, rejected — kept as a regression for every date field (brief 0074, plan M9).
+
+    The hypothesis: `_build_args` emits a date as `due:<value>` *before* `--`, and
+    `reject_structural_tokens` only refuses a token that starts with `rc.`, so a value such as
+    `2026-01-01 rc.data.location=<victim>` would redirect the store if Taskwarrior re-lexed the
+    element. Taskwarrior 3.5.0 does lex a date value (`now + 1d` evaluates) but drops an embedded
+    override. These tests call `task_runner` directly, past the service's date grammar, so they
+    hold the *binary's* behaviour; the grammar is defence in depth on top.
+
+    If one of them goes red after an upgrade, that is a **new** finding with its own attack path —
+    not SEC-007 reinterpreted (plan M9). Do not loosen the assertion; open the finding.
+    """
+
+    @pytest.fixture
+    def victim(self, real_data_root: Path) -> Path:
+        """An empty directory: any store Taskwarrior opens here leaves a file behind."""
+        directory = real_data_root / "victim"
+        directory.mkdir()
+        return directory
+
+    @pytest.fixture
+    def rc_loaded(self, real_data_root: Path) -> Path:
+        """The file `evil_rc`'s launch hook creates: it exists only if the rc file was loaded."""
+        return real_data_root / "rc-loaded"
+
+    @pytest.fixture
+    def evil_rc(self, real_data_root: Path, victim: Path, rc_loaded: Path) -> Path:
+        """An rc file whose load is observable on add *and* modify.
+
+        `data.location` alone proves nothing: TASKDATA, which `_run` always sets, outranks it, so
+        a loaded file would leave `victim` empty (third review of brief 0074). Hence two signals
+        TASKDATA does not override: an `on-launch` hook that creates `rc_loaded` on every command,
+        and `default.project=PWNED` on every add. Both are shown to fire by the controls below.
+        """
+        hooks = real_data_root / "evilhooks"
+        hooks.mkdir()
+        hook = hooks / "on-launch.rc-loaded"
+        hook.write_text(f"#!/bin/sh\ntouch '{rc_loaded}'\n")
+        hook.chmod(0o755)
+        rc = real_data_root / "evilrc"
+        rc.write_text(
+            f"data.location={victim}\ndefault.project=PWNED\nhooks=on\nhooks.location={hooks}\n"
+        )
+        return rc
+
+    @staticmethod
+    def _payloads(victim: Path, evil_rc: Path, marker: Path) -> list[str]:
+        return [
+            f"2026-01-01 rc.data.location={victim}",
+            f"2026-01-01\trc.data.location={victim}",
+            f"2026-01-01\nrc.data.location={victim}",
+            f"rc.data.location={victim}",
+            f"now + rc.data.location={victim}",
+            f"2026-01-01 rc:{evil_rc}",
+            # The colon spelling of an override, which Taskwarrior honours standalone
+            # (`test_the_harness_can_see_a_colon_redirect`), as the whole value and embedded;
+            # and the rc-file form as the whole value (second review of brief 0074).
+            f"rc.data.location:{victim}",
+            f"2026-01-01 rc.data.location:{victim}",
+            f"now+rc.data.location:{victim}",
+            "rc.data.location:..",
+            f"rc:{evil_rc}",
+            f"$(touch {marker})",
+            f"`touch {marker}`",
+            f"2026-01-01;touch {marker}",
+        ]
+
+    def test_the_binary_is_the_version_the_date_evidence_covers(self):
+        """The upgrade re-open trigger, made executable (plan M9).
+
+        On a failure: run this class, and the probe recorded in brief 0074, against the new
+        binary; if nothing redirects, set DATE_EVIDENCE_VERSION in the same change and say so in
+        its brief. If anything redirects, open a new finding (docs/operations.md, "Upgrading
+        Taskwarrior").
+        """
+        task_bin = shutil.which("task")
+        assert task_bin
+        version = subprocess.run(  # noqa: S603  # absolute path resolved above
+            [task_bin, "--version"], capture_output=True, text=True, timeout=10
+        ).stdout.strip()
+        major_minor = ".".join(version.split(".")[:2])
+        assert major_minor == DATE_EVIDENCE_VERSION, (
+            f"Taskwarrior {version} is not the {DATE_EVIDENCE_VERSION}.x the SEC-007 date evidence "
+            "covers: re-run the date regression and the grammar probe against it (brief 0074)"
+        )
+
+    @staticmethod
+    def _raw_task(args: list[str]) -> subprocess.CompletedProcess[str]:
+        """The binary on alice's store, past `_run` and its token check — for the controls."""
+        store = S["alice"]
+        task_bin = shutil.which("task")
+        assert task_bin
+        return subprocess.run(  # noqa: S603  # the binary, a synthetic store, no user input
+            [task_bin, "rc.confirmation=off", "rc.verbose=nothing", *args],
+            env={
+                **os.environ,
+                "TASKDATA": str(store.path),
+                "TASKRC": str(store.taskrc),
+                "HOME": str(store.path),
+            },
+            capture_output=True,
+            text=True,
+            timeout=10,
+            stdin=subprocess.DEVNULL,
+        )
+
+    @pytest.mark.parametrize("operator", ["=", ":"])
+    def test_the_harness_can_see_a_redirect(self, victim, operator):
+        """Positive control: a *standalone* override, in either spelling, does create a store in
+        `victim`, so the negative tests below would see one. (An rc file's `data.location` is no
+        control: TASKDATA, which `_run` always sets, outranks it — observed on 3.5.0, brief 0074;
+        the rc-file controls below watch its hook and default project instead.)"""
+        self._raw_task([f"rc.data.location{operator}{victim}", "add", "--", "control"])
+        assert "taskchampion.sqlite3" in _files(victim), "a standalone override did not redirect"
+
+    def test_the_harness_can_see_a_redirect_on_modify(self, victim):
+        """The same control on the modify path the negative modify test exercises."""
+        task = task_service.create_task(S["alice"], TaskCreate(description="host"))
+        self._raw_task([f"rc.data.location={victim}", task.uuid, "modify", "due:2030-01-01"])
+        assert "taskchampion.sqlite3" in _files(victim), "a standalone override did not redirect"
+
+    def test_the_harness_can_see_an_rc_file_load_on_add(self, evil_rc, rc_loaded):
+        """Positive control for the `rc:<file>` payloads: a standalone `rc:` loads the file, which
+        both runs its hook and sets the project, so the negative tests below would see a load."""
+        result = self._raw_task([f"rc:{evil_rc}", "add", "--", "control"])
+        assert result.returncode == 0, result.stderr
+        assert rc_loaded.exists(), "a standalone rc: did not run the rc file's hook"
+        projects = {t.description: t.project for t in task_service.list_tasks(S["alice"])}
+        assert projects == {"control": "PWNED"}, "a standalone rc: did not set the project"
+
+    def test_the_harness_can_see_an_rc_file_load_on_modify(self, evil_rc, rc_loaded):
+        task = task_service.create_task(S["alice"], TaskCreate(description="host"))
+        rc_loaded.unlink(missing_ok=True)
+        result = self._raw_task([f"rc:{evil_rc}", task.uuid, "modify", "due:2030-01-01"])
+        assert result.returncode == 0, result.stderr
+        assert rc_loaded.exists(), "a standalone rc: did not run the rc file's hook on modify"
+
+    @pytest.mark.parametrize("field", DATE_FIELDS)
+    def test_an_override_in_a_date_on_add_reaches_no_other_store(
+        self, real_data_root, victim, evil_rc, rc_loaded, field
+    ):
+        """Every payload, through `task_runner` past the service grammar: no store opened in
+        `victim` or touched in bob's directory, no rc file loaded, no shell command run."""
+        from app.services import task_runner
+
+        task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
+        bob_before = _files(S["bob"].path)
+        marker = real_data_root / "marker"
+        for payload in self._payloads(victim, evil_rc, marker):
+            token = f"{field}:{payload}"
+            try:
+                task_runner.add_task(S["alice"], [token], ["probe"])
+            except task_runner.TaskwarriorRejected:
+                pass  # refused by the binary: also no redirect
+            assert _files(victim) == [], f"{token!r} opened a store in the victim directory"
+            assert not rc_loaded.exists(), f"{token!r} loaded the rc file (its hook ran)"
+            assert "PWNED" not in {t.project for t in task_service.list_tasks(S["alice"])}, (
+                f"{token!r} loaded the rc file (its default.project applied)"
+            )
+            assert not marker.exists(), f"{token!r} ran a shell command"
+        assert _files(S["bob"].path) == bob_before, "bob's directory changed"
+        assert [t.description for t in task_service.list_tasks(S["bob"])] == ["bob private note"]
+        assert "probe" in [t.description for t in task_service.list_tasks(S["alice"])], (
+            "no payload was accepted, so the redirect was never really attempted"
+        )
+
+    @pytest.mark.parametrize("field", DATE_FIELDS)
+    def test_an_override_in_a_date_on_modify_reaches_no_other_store(
+        self, real_data_root, victim, evil_rc, rc_loaded, field
+    ):
+        from app.services import task_runner
+
+        task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
+        bob_before = _files(S["bob"].path)
+        task = task_service.create_task(S["alice"], TaskCreate(description="host"))
+        marker = real_data_root / "marker"
+        accepted = []
+        for payload in self._payloads(victim, evil_rc, marker):
+            token = f"{field}:{payload}"
+            try:
+                task_runner.modify_task(S["alice"], task.uuid, [token])
+                accepted.append(token)
+            except task_runner.TaskwarriorRejected:
+                pass  # refused by the binary: also no redirect
+            assert _files(victim) == [], f"{token!r} opened a store in the victim directory"
+            assert not rc_loaded.exists(), f"{token!r} loaded the rc file (its hook ran)"
+            assert not marker.exists(), f"{token!r} ran a shell command"
+        assert _files(S["bob"].path) == bob_before, "bob's directory changed"
+        assert [t.description for t in task_service.list_tasks(S["bob"])] == ["bob private note"]
+        assert accepted, "no payload was accepted, so the redirect was never really attempted"
+        assert task_service.get_task(S["alice"], task.uuid).uuid == task.uuid
+
+    @pytest.mark.parametrize("reference", ["rc.data.location", "rc.dateformat", "system.os"])
+    def test_a_dom_reference_in_a_date_is_evaluated_by_the_binary(self, reference):
+        """Characterisation, the reason for the grammar's dot rule (second review of brief 0074):
+        3.5.0 evaluates a DOM reference inside a date and echoes the result in its rc-2 stderr —
+        for `rc.data.location`, the store's absolute path. No redirect; a disclosure."""
+        result = self._raw_task(["add", f"due:{reference}", "--", "probe"])
+        assert result.returncode == 2
+        assert "is not a valid date" in result.stderr
+        if reference == "rc.data.location":
+            assert str(S["alice"].path) in result.stderr
+
+    def test_past_the_grammar_the_store_path_still_never_reaches_the_caller(self):
+        """`_run`'s own control, held with the grammar bypassed: the refusal that would carry the
+        data path is answered generically."""
+        from app.services import task_runner
+
+        for token in ("due:rc.data.location", "scheduled:rc.data.location"):
+            with pytest.raises(task_runner.TaskwarriorRejected) as refused:
+                task_runner.add_task(S["alice"], [token], ["probe"])
+            assert str(settings.data_root) not in str(refused.value)
+            assert S["alice"].path.name not in str(refused.value)
+
+    @pytest.mark.parametrize(
+        "value",
+        ["rc.data.location", "system.os", "tw.version", "now+rc.data.location", "rc:rc"],
+    )
+    def test_over_http_a_dom_reference_is_refused_and_names_nothing(self, real_client, value):
+        """Through the ASGI app against the real binary, REST and therefore MCP: 400 from the
+        grammar, no path, no OS, no version; and `now+rc.data.location` is not stored as `now`."""
+        client, headers = real_client
+        r = client.post("/tasks", json={"description": "t", "due": value}, headers=headers)
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert "not a valid date" in detail
+        assert str(settings.data_root) not in detail
+        assert "Darwin" not in detail and "Linux" not in detail and "3.5" not in detail
+        assert client.get("/tasks", headers=headers).json() == []
+
+    def test_a_newline_turns_the_token_into_description_text(self):
+        """Characterisation, not a redirect: on 3.5.0 an element with a newline is not read as
+        an attribute at all — `add` stores it as description text and sets no date, `modify`
+        replaces the description with it. One reason the service grammar refuses control
+        characters (brief 0074): the value was never the date it looked like."""
+        from app.services import task_runner
+
+        task_runner.add_task(S["alice"], ["due:2026-01-01\nx"], ["probe"])
+        latest = task_service._raw_to_task(task_runner.export_latest(S["alice"])[0])
+        assert latest.due is None
+        assert latest.description.startswith("due:2026-01-01\nx")
+
+    @pytest.mark.parametrize("field", DATE_FIELDS)
+    def test_the_documented_forms_are_stored_as_dates(self, field):
+        """UTC in this tier (`conftest._utc`): a bare day is midnight, a time is kept."""
+        day = task_service.create_task(
+            S["alice"], TaskCreate(description="day", **{field: "2031-03-04"})
+        )
+        timed = task_service.create_task(
+            S["alice"], TaskCreate(description="timed", **{field: "2031-03-04T10:30"})
+        )
+        assert getattr(day, field) == "20310304T000000Z"
+        assert getattr(timed, field) == "20310304T103000Z"
+
+    @pytest.mark.parametrize("field", DATE_FIELDS)
+    def test_the_service_refuses_the_payload_before_the_binary(self, field):
+        """The grammar on top: the shape SEC-007 needs never becomes an argument at all. (A short
+        path: the request models bound a date at 64 characters, brief 0073.)"""
+        before = _files(S["alice"].path)
+        with pytest.raises(ValueError, match="not a valid date"):
+            task_service.create_task(
+                S["alice"],
+                TaskCreate(description="t", **{field: "2026-01-01 rc.data.location=/v"}),
+            )
+        assert _files(S["alice"].path) == before, "the refused create wrote to the store"
+
+
 class TestTagsAreAFullSet:
     """`PUT /tasks/{uuid}` against the real binary: the `-tag` modifier and `depends:-uuid`.
 
