@@ -370,7 +370,7 @@ import sys
 
 p = pathlib.Path(sys.argv[1])
 t = p.read_text()
-old = "expires: 2026-11-25"
+old = "expires: 2027-01-31"
 assert old in t, "shim expiry not found"
 p.write_text(t.replace(old, "expires: 2020-01-01", 1))
 EXPIRESHIM
