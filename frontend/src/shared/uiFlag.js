@@ -7,11 +7,13 @@
  * valid choice renders the new UI; `?ui=alt` still reaches the old one, and a browser that stored
  * `alt` keeps it, until M17 removes the old UI and this switch with it.
  *
- * The key is written as a literal on purpose: `tools/surfaces.py` snapshots localStorage keys
- * only in that form, and `ui` is a public surface until the switch is removed. Storage access
- * is guarded because a browser may refuse site data; it then renders the default, or the
- * query's choice for that one page load.
+ * The key `ui` is declared in `shared/browserStorage.js` (a UI preference, kept across accounts
+ * and logouts), where `tools/surfaces.py` snapshots it: it is a public surface until the switch
+ * is removed. Storage access is guarded because a browser may refuse site data; it then renders
+ * the default, or the query's choice for that one page load.
  */
+
+import { KEY, readKey, writeKey } from './browserStorage.js'
 
 const UI_OLD = 'alt'
 export const UI_NEW = 'neu'
@@ -43,11 +45,7 @@ export function resolveUi(queryValue, storedValue) {
 
 /** @returns {string|null} the stored choice, or null when there is none or storage refuses */
 function storedUi() {
-  try {
-    return localStorage.getItem('ui')
-  } catch {
-    return null
-  }
+  return readKey(KEY.ui) ?? null
 }
 
 /**
@@ -69,9 +67,6 @@ export function currentUi(queryValue) {
 export function rememberUi(queryValue) {
   const ui = parseUi(queryValue)
   if (!ui) return
-  try {
-    localStorage.setItem('ui', ui)
-  } catch {
-    // Storage refused: the query still applies to this page load through currentUi().
-  }
+  // Storage refused: the query still applies to this page load through currentUi().
+  writeKey(KEY.ui, ui)
 }

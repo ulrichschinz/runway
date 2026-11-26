@@ -138,7 +138,7 @@ async def register(request: Request, body: UserCreate, db: Connection = Depends(
         raise HTTPException(status_code=500, detail="Could not create the account") from e
     logger.info("account registered", extra={"username": body.username})
     audit.record(audit.REGISTERED, outcome=audit.SUCCESS, actor=body.username, route=route)
-    return UserInfo(username=body.username)
+    return UserInfo(username=body.username, account_id=str(account.id))
 
 
 def _report_refusals(reports, route: str | None) -> None:
@@ -194,7 +194,7 @@ async def login(request: Request, body: UserLogin, db: Connection = Depends(get_
     # exception in the lookup or a cancelled request.
     with decision.reservation as attempt:
         async with db.execute(
-            "SELECT hashed_password, auth_version FROM users WHERE username = ?",
+            "SELECT id, hashed_password, auth_version FROM users WHERE username = ?",
             (body.username,),
         ) as cur:
             row = await cur.fetchone()
@@ -256,13 +256,21 @@ async def login(request: Request, body: UserLogin, db: Connection = Depends(get_
     return Token(
         access_token=create_access_token(body.username, auth_version=row["auth_version"]),
         password_change_required=check.change_required,
+        account_id=str(row["id"]),
     )
+
+
+def _utc_iso(stamp: str | None) -> str | None:
+    """SQLite's `CURRENT_TIMESTAMP` (`YYYY-MM-DD HH:MM:SS`, UTC) as ISO 8601 with `Z`."""
+    if not stamp:
+        return None
+    return f"{str(stamp).replace(' ', 'T')}Z"
 
 
 @router.get("/me", response_model=UserInfo, summary="Get current user profile")
 async def me(username: str = Depends(get_current_user), db: Connection = Depends(get_db)):
     async with db.execute(
-        "SELECT role, full_name, email FROM users WHERE username=?", (username,)
+        "SELECT id, role, full_name, email, created_at FROM users WHERE username=?", (username,)
     ) as cur:
         row = await cur.fetchone()
     # get_current_user already refuses a token whose account is gone; this is the narrow race
@@ -275,6 +283,8 @@ async def me(username: str = Depends(get_current_user), db: Connection = Depends
         role=row["role"] or "user",
         full_name=row["full_name"] or "",
         email=row["email"] or "",
+        account_id=str(row["id"]),
+        created_at=_utc_iso(row["created_at"]),
     )
 
 

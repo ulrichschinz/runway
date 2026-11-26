@@ -49,6 +49,11 @@ Rendering, routing and gestures are untested and recorded as `RISK-TEST-004`.
 
 ## Things that will surprise you
 
+- **No file but `src/shared/browserStorage.js` touches `localStorage`** (ADR 0050; a source scan in
+  `tests/browserStorage.test.js` fails otherwise). Declare a new key there with its data class:
+  account data goes under `…:{account}` and is purged by logout; only UI preferences are shared.
+  The declaration is what `tools/surfaces.py` snapshots into `ops/surfaces/spa.json`.
+
 - Taskwarrior returns a comma-entered tag as **one array element**: `"@home,@errands"`,
   not two entries. Every reader must split it. That rule lived in five copies and caused
   two shipped bugs; it now lives once, in `frontend/src/shared/contextTags.js`.

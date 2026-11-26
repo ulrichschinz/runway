@@ -456,6 +456,21 @@ p.write_text(t.replace(old, "urgency.user.tag.next.coefficient=99.0", 1))
 MOVESURFACE
 expect_red "SURF-001" "tools/checks/surfaces.sh" "RULE-SURF-001"
 
+# The S8 half (ADR 0050): a browser key declared in the storage inventory — the only place a
+# key can come from since every storage call goes through it — must appear in the snapshot.
+# Declare a new account-bound key and require the gate to notice.
+python3 - "$SANDBOX/frontend/src/shared/browserStorage.js" <<'NEWSTORAGEKEY'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "  accountId: declareKey('accountId', CLASS.IDENTITY),\n"
+assert old in t, "storage inventory entry not found"
+p.write_text(t.replace(old, old + "  shadow: declareKey('shadowCache:{account}', CLASS.OUTBOX),\n", 1))
+NEWSTORAGEKEY
+expect_red "SURF-001-storage" "tools/checks/surfaces.sh" "RULE-SURF-001"
+
 # --- RULE-SURF-005 — a CREATE statement edited instead of migrated -----------
 # The drift RISK-SURF-001 was: a fresh database gets the new shape, a database that already has the
 # table never sees it. Add a column to a CREATE, accept the snapshot (so RULE-SURF-001 is satisfied,

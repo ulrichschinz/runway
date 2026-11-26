@@ -192,9 +192,11 @@ Reports drift in the protected public surfaces, and with `--update` rewrites the
 ```
 
 Five surfaces are snapshotted: the served OpenAPI schema, the **runtime-observed** MCP tool list, the
-migrated database schema (with the schema version it reached), the Taskwarrior template, and the SPA routes
-and localStorage keys. Environment variables are cross-checked against `README.md` instead of snapshotted —
-`RULE-SURF-002` fails when a documented variable is unread or a read variable is undocumented.
+migrated database schema (with the schema version it reached), the Taskwarrior template, and the SPA routes and localStorage keys — the keys
+read from the `declareKey` inventory in `frontend/src/shared/browserStorage.js`, the only file that
+touches storage, and from any literal `localStorage` call (ADR 0050). Environment
+variables are cross-checked against `README.md` instead of snapshotted — `RULE-SURF-002` fails when a
+documented variable is unread or a read variable is undocumented.
 
 The database schema is also built the way production got it. `RULE-SURF-005` creates a database from every
 historical baseline in `backend/tests/fixtures/schema_history/`, runs `init_db()` on it, and fails when the
