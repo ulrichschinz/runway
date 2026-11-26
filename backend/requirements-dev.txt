@@ -2,7 +2,7 @@
 # a gate whose tools float is a gate whose verdict changes without anyone changing code.
 
 ruff==0.16.1
-mypy==2.3.0
+mypy==2.3.1
 
 pytest==9.1.1
 pytest-cov==7.1.0
