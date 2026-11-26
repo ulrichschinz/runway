@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # default, never later: a later or malformed value is ignored and reported at startup —
     # every old backup holds these keys, so a knob that extended them would be the wrong knob.
     api_key_legacy_cutoff: str = "2027-01-15"
+    # The MCP transport's budget (REV-004, brief 0071, ADR 0045): MCP requests allowed in flight
+    # at once, in total and per network source (the source as the login budget determines it,
+    # TRUSTED_PROXIES included). A request above either is refused before any other work, 503 or
+    # 429. A quarter of the total is the most that requests without a credential header may hold.
+    mcp_max_inflight: int = 32
+    mcp_source_max_inflight: int = 8
     # How much of the JSON log stream is emitted. The *format* is not configurable and
     # neither is the redaction filter: a setting that turns a control off is the setting
     # that gets turned off at 3am. An unrecognised value falls back to INFO rather than

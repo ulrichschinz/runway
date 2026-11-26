@@ -213,6 +213,33 @@ cannot read the key back, rotate it, or reach an admin route through MCP, whatev
 role. The list fails closed — a router with a new tag is not a tool until it is added — and
 `backend/tests/unit/test_mcp_session.py` pins it as a client receives it. ADR 0037.
 
+**A tool call runs only its own handler** (finding REV-005, brief 0071, ADR 0045). The allowlist used to
+check the tool's *name* only, and `fastapi-mcp` substitutes a path argument into the URL unencoded, so
+`get_task(uuid="../auth/apikey")` reached `GET /auth/apikey` and `modify_task(uuid="../auth/me", …)`
+changed the profile — with an admin's key, `../admin/settings` changed site settings. Now every path
+argument is sent as one percent-encoded segment, and `mcp_gate.bind_mcp_target` — the first
+dependency of every route — refuses with 400 a tool call whose selected route is not the tool's own,
+before the credential is looked up. `backend/tests/unit/test_mcp_target_binding.py` asserts the final
+handler for every path-parameter tool against traversal, encoded, double-encoded, query, fragment and
+Unicode look-alike values, not the status code. Encoding stops dot segments and query or fragment
+splitting only; an encoded `/` is decoded before routing, and a plain value like `plans` in
+`set_project_status(name="plans")` would select the sibling `upsert_plan` route. Those cases are
+stopped by the binding alone, and `TestOnlyTheBindingStopsASiblingRoute` fails when it is removed.
+
+**The transport holds no session and has a budget** (finding REV-004). Stateless Streamable HTTP: no
+`Mcp-Session-Id`, a fresh transport per request torn down when it ends; `GET`/`DELETE` are 405. Every
+request reserves a slot before any work — 32 in total, 8 per source, a quarter of the total for requests
+without a credential header (`MCP_MAX_INFLIGHT`, `MCP_SOURCE_MAX_INFLIGHT`) — and is cancelled after 30
+seconds, which is also what frees the slot of a client that disconnects. The anonymous share counts the
+*presence* of a credential header, not its validity: a made-up `X-Api-Key` escapes the share but not the
+total and per-source ceilings, and with `TRUSTED_PROXIES` unset behind nginx the total is the only
+ceiling, so unauthenticated traffic can still crowd out real users up to it. Closing that needs the
+deferred handshake authentication (`RISK-MCP-002`). `backend/tests/unit/test_mcp_budget.py`.
+
+**The handshake is not authenticated yet** (`RISK-MCP-002`): anyone who can reach the endpoint may
+list the tools; every call is authenticated by its route. The dated switch to 401 is designed and
+deferred (ADR 0045).
+
 ## Passwords
 
 Since brief 0067 (finding SEC-006, ADR 0044 Decision 5):

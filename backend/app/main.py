@@ -2,11 +2,10 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi_mcp import FastApiMCP
 
-from app import audit, rate_limit, startup_checks, task_storage
+from app import audit, mcp_gate, rate_limit, startup_checks, task_storage
 from app.auth import prepare_dummies
 from app.config import cors_origin_list, settings
 from app.database import init_db, legacy_cutoff, legacy_cutoff_problem
@@ -76,6 +75,8 @@ async def lifespan(app: FastAPI):
             "task_storage_mode": task_storage.storage_mode(),
             "login_trusted_proxies": len(rate_limit.trusted_networks(settings.trusted_proxies)),
             "legacy_key_cutoff": datetime.fromtimestamp(legacy_cutoff(), UTC).date().isoformat(),
+            "mcp_max_inflight": settings.mcp_max_inflight,
+            "mcp_source_max_inflight": settings.mcp_source_max_inflight,
         },
     )
     yield
@@ -85,6 +86,9 @@ app = FastAPI(
     title="Runway",
     description="A self-hosted GTD task manager. Authenticate with JWT (Authorization: Bearer <token>) or API key (X-Api-Key: <key>).",
     lifespan=lifespan,
+    # First on every route: an MCP tool call may run only its own handler (REV-005, brief 0071).
+    # It takes nothing but the request, so no route and no MCP tool gains a parameter.
+    dependencies=[Depends(mcp_gate.bind_mcp_target)],
 )
 
 # CORS is only mounted when an allowlist is configured (finding SEC-4).
@@ -156,7 +160,12 @@ def health():
 # until it is added here — the list fails closed. fastapi-mcp takes the union of the two
 # include kinds, and refuses include with exclude of the same kind. `include_operations`
 # ignores a name that matches nothing, so test_mcp_session.py pins both.
-mcp = FastApiMCP(
+#
+# `RunwayMCP` (backend/app/mcp_gate.py, brief 0071, ADR 0045) is FastApiMCP with three controls:
+# every tool call must reach the route its tool was made from (REV-005 — a `..` in a path argument
+# used to reach REST-only routes), the transport is stateless and holds no session (REV-004), and
+# every MCP request is reserved in an in-flight budget and bounded by a deadline.
+mcp = mcp_gate.RunwayMCP(
     app,
     headers=["authorization", "x-api-key"],
     include_tags=["tasks", "gtd", "projects", "inbox"],
