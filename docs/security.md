@@ -224,15 +224,78 @@ Since brief 0067 (finding SEC-006, ADR 0044 Decision 5):
 
 ## Login throttling
 
-`POST /auth/login` allows `LOGIN_RATE_LIMIT` failed attempts per username per
-`LOGIN_RATE_WINDOW_SECONDS`, then answers **429** with `Retry-After` (finding SEC-8). Only
-failures count, a success clears the budget, and the check runs *before* the password is
-verified so a locked-out username buys an attacker no bcrypt work.
+Every password verification — `POST /auth/login`, and the current-password check of
+`PUT /auth/password` whatever credential authenticated it — reserves a slot in three budgets
+**before** it looks the account up or runs the KDF (findings SEC-8 and REV-003, brief 0069), and
+answers **429** with `Retry-After` when any of them is full:
 
-Keyed on username rather than IP, because rotating source addresses is cheap. The trade is
-real and accepted: someone who knows a username can deny it password login for the window.
-API keys are unaffected, so agents keep working through a lockout. Unknown usernames are
-throttled identically — exempting them would make the limiter a user-enumeration oracle.
+| Tier | Key | Default per `LOGIN_RATE_WINDOW_SECONDS` (300) | Stops |
+|---|---|---|---|
+| account | the username, NFKC-normalised and casefolded — `Alice`, `ALICE` and `ａlice` are one | `LOGIN_RATE_LIMIT` = 10 | guessing one account's password |
+| source | the network source (below); IPv6 by /64 | `LOGIN_SOURCE_RATE_LIMIT` = 30 | a spray across many names from one place |
+| global | one key | `LOGIN_GLOBAL_RATE_LIMIT` = 300 | a spray from everywhere; caps the KDF work failed verifications cause |
+
+- **Reserved, then closed.** A tier counts its failures *and the attempts in flight*, under one
+  lock, so parallel requests cannot all pass a check that only counts finished failures. A refused
+  attempt costs no lookup and no KDF work. Every reservation is closed once: a success releases it
+  and clears the **account** tier only (so a valid account cannot refill the budget of the place a
+  spray comes from), and there only the failures recorded under its **exact** name — `Alice` and
+  `alice` can be two accounts sharing one budget, and a success on one must not wipe the guesses
+  against the other (brief 0069, R10); a failure is counted; an exception or a cancelled request
+  counts as a failure.
+- **Bounded memory.** Failures expire after the window; a sweep on a clock drops every expired key,
+  not only the one being tried. The account and source tiers hold at most `LOGIN_RATE_MAX_KEYS`
+  keys; a new key beyond that is **refused**, never made room for by forgetting an old one — that
+  would let a flood of random names reset a victim's counter. Account keys are 16-byte digests.
+- **The source.** The socket peer — unless the peer is listed in `TRUSTED_PROXIES`; then
+  `X-Forwarded-For` is read from the right, past every trusted proxy, to the first address that is
+  not one. What a client wrote to the left of that is never read. A malformed entry or `0.0.0.0/0`
+  is ignored and reported at boot. uvicorn's own proxy-header handling is off (`--no-proxy-headers`),
+  so this is the only place a forwarded address is believed, and nginx appends to the header rather
+  than passing a client's through. With `TRUSTED_PROXIES` empty — the default — a public peer is
+  counted as itself, but a loopback, RFC 1918, link-local or IPv6 ULA peer gets **no** source key:
+  it is a proxy nobody declared, and counting its address would make every client behind it one
+  budget that any one of them could exhaust for everyone. In the shipped topology that means the
+  source tier is off until the operator sets `TRUSTED_PROXIES` (a boot `WARNING` says so), and a
+  spray is bounded by the global tier alone (`docs/operations.md`). With `TRUSTED_PROXIES` set, a
+  proxy-shaped peer that is not listed but sends `X-Forwarded-For` gets no source key either: it is
+  a declared proxy that came back at another address after a recreate, and counting it would be the
+  same one-budget-for-everybody failure. The backend logs a `WARNING` (`login request from an
+  undeclared proxy`) at most once per window, without the address (brief 0069, R9).
+- **The global brake's size.** One failed verification (Argon2id + bcrypt) measured 0.26 s on the
+  development machine, and it runs on the event loop. 300 failures per 300 s window is therefore
+  about a quarter of the loop — enough to stop a spray before it degrades the service, high enough
+  that it is not the first thing an attacker trips.
+- **Audit and log.** Every failure inside the budget is an `auth.login.failed` row, as before — at
+  most `LOGIN_GLOBAL_RATE_LIMIT` per window; a wrong current password in a password change is an
+  `auth.password.changed` failure row, under the same budget. A refusal writes an `auth.login.throttled` row only for
+  the first refusal of a key in a window; later ones are counted and carried by the next row, or by a
+  summary when the key is swept. Every throttled row says `(refusals: N)`. Account rows name the
+  attempted username, as before; source and global rows name nothing — no address is recorded
+  (ADR 0026). The `login throttled` log line follows the same rule.
+
+**The balance against lockout.** Keyed on the username because rotating source addresses is cheap.
+The trade is real and accepted, and it lasts **as long as the attack**, not one window — an attacker
+simply repeats the spray each window:
+
+- someone who knows a username can deny it password login with 10 wrong guesses per 5 minutes;
+- with `TRUSTED_PROXIES` set, one address can deny nobody but the names it guesses (30 per window);
+- anyone who can send 300 failures per 5 minutes (1 per second; from 10 IPv4 addresses at the
+  source budget, or from one IPv6 /60 or larger, which holds 16 /64 keys) denies *every* account
+  password login — the admin's too — for as long as they keep it up. That is the emergency brake
+  doing its job without costing KDF work; it is not free for the attacker, and it is recorded:
+  the throttled rows carry the counts. The recovery path is an API key or the `grant-admin` CLI on
+  the host, neither of which goes through the budget.
+
+Unknown usernames are throttled identically — exempting them would make the limiter a
+user-enumeration oracle. **Requests authenticated by an API key are not throttled**, so agents, MCP
+clients and the webhook keep working through any lockout. What an API key cannot do is guess the
+account's password: `PUT /auth/password` verifies the current password through the same budget, so
+a stolen key gets the account budget's ten guesses per window and nothing while the account is
+locked. The other side remains: a lockout does nothing against what a stolen API key can do with
+the key itself. Recovery after a suspected compromise must deal with **both** credentials — a
+password change ends every JWT session (brief 0066) but not the API key, which is regenerated
+separately (`docs/operations.md`).
 
 ## The Taskwarrior boundary
 
@@ -356,4 +419,11 @@ third-party argument parser, and it could change in any release — as the theme
   Recorded as `RISK-SEC-002`.
 - **The login limiter is in-process and per-worker** (`RISK-SEC-003`). Under one host and
   one worker — decision F1 — that is the whole population; a second worker would multiply the
-  effective limit by the process count.
+  effective limit by the process count. The re-open trigger is executable:
+  `test_login_budget.py` (`TestTheSingleWorkerAssumption`, `TestTheSingleWorkerPinIsWholeFile`)
+  fails when the Dockerfile's CMD stops pinning `--workers 1`, the Dockerfile sets
+  `WEB_CONCURRENCY`, an `ENTRYPOINT` or gunicorn, or a compose file sets `WEB_CONCURRENCY`,
+  `replicas`, `scale` or `--workers`. It reads those files; it does not see a host that runs the
+  image some other way. When it fires, a
+  limiter shared by every worker — at the edge (Traefik) or in a datastore all workers reach — is a
+  precondition of the change, not a follow-up.

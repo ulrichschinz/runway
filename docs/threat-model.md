@@ -507,24 +507,43 @@ Eight, each with what actually stops it and what does not.
 
 ### Credential stuffing against `POST /auth/login`
 
-**Stopped by** a fixed-window attempt counter checked *before* the password is verified, so a
-locked-out username does not buy an attacker the bcrypt work as a lever
-([`backend/app/rate_limit.py:46-57`](../backend/app/rate_limit.py), called at
-[`backend/app/routers/auth.py:79`](../backend/app/routers/auth.py)). Ten attempts per five minutes by
-default. An unknown username counts too, deliberately: skipping it would turn the limiter into a user
-enumeration oracle, and the log line and the audit row are written not to distinguish "no such
-account" from "wrong password" for exactly the same reason (lines 100-111). Every failure is an audit
-row. **Nor does the time** (since brief 0067): every login does one Argon2id verification and one
-bcrypt check at the production cost, against a dummy where the account has no hash of that kind, so
-an unknown account, a bcrypt account and an Argon2id account cost the same and answer the same 401
-(`test_password_kdf.py::TestUniformWork`). That is equal work, not a constant-time guarantee: the
-event loop, the database lookup and the rehash on a *successful* login still differ, and nothing
-measures response times.
+**Stopped by** a login budget **reserved before the account lookup and the KDF**, atomically, in
+three tiers (brief 0069, findings SEC-8 and REV-003): per normalised username (ten per five minutes by
+default), per network source (30), and in total (300) — `rate_limit.reserve`, called first thing in
+`routers/auth.py::login` and before the current-password check of `change_password`, so an API key
+cannot guess the password either. A tier is full when its failures *plus the attempts still in flight* reach
+its budget, so a parallel burst cannot all pass a check that counts only finished failures, and a
+refused attempt costs no lookup and no KDF work (`test_login_budget.py::TestAParallelBurst`: 40
+parallel requests for one account, 10 reach the password check, 30 are 429). A spray across many
+names is stopped by the source tier, one from many sources by the global one. The store is bounded: a
+clock-driven sweep drops every expired key, and the username and source tiers hold at most
+`LOGIN_RATE_MAX_KEYS` keys, beyond which a new one is refused rather than an old one forgotten
+(`TestTheStoreIsBounded`). An unknown username counts too, deliberately: skipping it would turn the
+limiter into a user enumeration oracle, and the log line and the audit row are written not to
+distinguish "no such account" from "wrong password" for exactly the same reason. Every failure inside
+the budget is an audit row — so at most `LOGIN_GLOBAL_RATE_LIMIT` per window — and refusals are
+counted into one row per key and window plus a summary, so a hammered account cannot grow
+`audit.db` one row per request. **Nor does the time** (since brief 0067): every login does one
+Argon2id verification and one bcrypt check at the production cost, against a dummy where the account
+has no hash of that kind, so an unknown account, a bcrypt account and an Argon2id account cost the
+same and answer the same 401 (`test_password_kdf.py::TestUniformWork`). That is equal work, not a
+constant-time guarantee: the event loop, the database lookup and the rehash on a *successful* login
+still differ, and nothing measures response times.
 
-**Not stopped:** the limiter is keyed on **username, not IP**, which is a deliberate trade in both
-directions — an attacker rotating source addresses is unaffected by an IP limiter, and someone who
-knows a username can deny it password login for the window. It is also in-process and per-worker, so
-it is the whole population only under one host and one worker (decision **F1**). `RISK-SEC-003`.
+**Not stopped:** someone who knows a username can deny it password login, and anyone who sends 300
+failures per five minutes (one a second, from ten addresses or one IPv6 /60) can deny every account
+password login — and either lasts **as long as the attack**, because the spray can be repeated every
+window. That is the emergency brake working as designed, at no KDF cost; the throttled rows count it.
+API-key requests are not throttled, so agents keep working through any lockout, and for the same
+reason the limiter does nothing against what a stolen key can do — except guess the password, which
+goes through the budget. The source tier is only as precise as `TRUSTED_PROXIES`: empty (the default)
+counts a public peer as itself and a proxy-shaped one (loopback, private) not at all, so behind an
+undeclared proxy only the account and global tiers apply; listing a whole network trusts every peer
+on it to write `X-Forwarded-For`. Which addresses Traefik and nginx have in production is not visible from this
+repository (`RISK-OPS-002`). The counters are in-process and per-worker, so they are the whole
+population only under one host and one worker (decision **F1**); a test fails if the Dockerfile
+stops pinning `--workers 1` or sets `WEB_CONCURRENCY`, an `ENTRYPOINT` or gunicorn, or a compose file
+scales the backend — it reads the files, not the running host. `RISK-SEC-003`.
 
 ### A stolen session token
 

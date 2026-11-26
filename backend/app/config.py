@@ -20,9 +20,23 @@ class Settings(BaseSettings):
     # reaches the API through a same-origin /api proxy in production (nginx) and in
     # development (vite), so no browser ever makes a cross-origin request. See ADR 0018.
     cors_origins: str = ""
-    # Login attempts allowed per username per window before /auth/login answers 429.
+    # The login budget (SEC-8, REV-003, brief 0069): failed or in-flight attempts allowed per
+    # window before /auth/login answers 429 — per normalised username, per network source, and
+    # in total. A success clears the username's count only. Covers every password verification:
+    # the login and the current-password check of PUT /auth/password.
     login_rate_limit: int = 10
     login_rate_window_seconds: int = 300
+    login_source_rate_limit: int = 30
+    # Sized from the KDF, not from the account budget: one failed verification measured 0.26 s
+    # of event-loop time, so 300 per 300 s window is about a quarter of it (brief 0069, R2).
+    login_global_rate_limit: int = 300
+    # The most usernames, and separately the most sources, the limiter holds at once. A new one
+    # beyond that is refused (429), never made room for by forgetting an old one.
+    login_rate_max_keys: int = 10000
+    # Comma-separated addresses or CIDR networks of the proxies in front of the backend whose
+    # X-Forwarded-For is believed. Empty: none is, and the socket peer is the source. A
+    # malformed entry, or a network of prefix length 0, is ignored and reported at startup.
+    trusted_proxies: str = ""
     # Which Taskwarrior directory layout is served (ADR 0043, finding SEC-001). `compat` serves
     # an account not yet migrated from DATA_ROOT/<username>/ when that name is one safe path
     # component; `strict` serves only DATA_ROOT/<storage_id>/. New accounts never use the old

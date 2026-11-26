@@ -65,6 +65,19 @@ services:
       # this line setting it in the host .env would not reach the container at all.
       # backend/tests/unit/test_task_storage.py pins it.
       - TASK_STORAGE_MODE=${TASK_STORAGE_MODE:-compat}
+      # Brief 0069: the proxies whose X-Forwarded-For the login limiter believes. Empty (the
+      # default) believes none; nginx's address is then not counted as a source at all (it
+      # would be one budget for everybody), so only the account and global budgets apply.
+      # Set in the host .env, before the deploy; see docs/operations.md.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
+      # The login budget (brief 0069). Listed so a value in the host .env reaches the container;
+      # each default is the Settings default, because an empty value would not parse and the
+      # backend would not boot. test_login_budget.py pins every line.
+      - LOGIN_RATE_LIMIT=${LOGIN_RATE_LIMIT:-10}
+      - LOGIN_RATE_WINDOW_SECONDS=${LOGIN_RATE_WINDOW_SECONDS:-300}
+      - LOGIN_SOURCE_RATE_LIMIT=${LOGIN_SOURCE_RATE_LIMIT:-30}
+      - LOGIN_GLOBAL_RATE_LIMIT=${LOGIN_GLOBAL_RATE_LIMIT:-300}
+      - LOGIN_RATE_MAX_KEYS=${LOGIN_RATE_MAX_KEYS:-10000}
     networks:
       - traefik-public
     # Lands with the next deploy through the mechanism above; until that deploy runs, the host

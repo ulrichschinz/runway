@@ -97,5 +97,15 @@ RUN printf '%s\n' "$RUNWAY_COMMIT" > /app/BUILD_COMMIT
 #
 # log_config.json is generated from app.logging_setup.dict_config and a unit test holds the
 # two together; edit the module, then regenerate, never the other way round.
+#
+# --no-proxy-headers: uvicorn otherwise rewrites the client address from X-Forwarded-For whenever
+# the peer is 127.0.0.1 — under the development compose's host networking that is nginx and
+# every other local process. The login limiter's source tier decides which forwarded address to
+# believe from TRUSTED_PROXIES alone (brief 0069); two trust decisions would disagree.
+#
+# One worker, deliberately: the login limiter's state is this process's memory (RISK-SEC-003).
+# Pinned explicitly, because uvicorn otherwise takes the count from $WEB_CONCURRENCY, and an
+# explicit flag wins over the variable. test_login_budget.py fails if the pin changes, or if this
+# file sets WEB_CONCURRENCY, an ENTRYPOINT or a gunicorn wrapper.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--log-config", "log_config.json"]
+     "--log-config", "log_config.json", "--no-proxy-headers", "--workers", "1"]
