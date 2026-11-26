@@ -128,9 +128,12 @@ id = "be/app"
 scope = "backend"
 layer = 0
 owner = "maintainer"
-paths = ["backend/app/main.py", "backend/app/__init__.py"]
+paths = ["backend/app/main.py", "backend/app/__init__.py", "backend/app/mcp_gate.py"]
 note = """
 Application assembly. Imports routers and wires middleware; nothing imports it back.
+mcp_gate.py is here because it is assembly too: it wires the MCP library to this application
+(the target binding, the stateless transport, the in-flight budget; brief 0071) and only
+main.py imports it.
 """
 
 [[units]]
@@ -157,7 +160,7 @@ id = "be/services"
 scope = "backend"
 layer = 2
 owner = "maintainer"
-paths = ["backend/app/services/task_service.py", "backend/app/services/user_service.py", "backend/app/services/__init__.py"]
+paths = ["backend/app/services/task_service.py", "backend/app/services/user_service.py", "backend/app/services/storage_migration.py", "backend/app/services/password_reset.py", "backend/app/services/__init__.py"]
 
 [[units]]
 id = "be/adapters/db"
@@ -202,6 +205,7 @@ paths = [
   "backend/app/rate_limit.py",
   "backend/app/logging_setup.py",
   "backend/app/middleware.py",
+  "backend/app/task_storage.py",
 ]
 note = """
 Leaves depend on nothing above them, which is what lets anything reach them. logging_setup

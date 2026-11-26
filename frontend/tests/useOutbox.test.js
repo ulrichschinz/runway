@@ -150,7 +150,7 @@ describe('useOutbox when storage fills up after it took writes (review of brief 
   })
 })
 
-describe('useOutbox and the account namespace (brief 0075, ADR 0047)', () => {
+describe('useOutbox and the account namespace (brief 0075, ADR 0050)', () => {
   const queueKeys = () => [...browser.store.keys()].filter((k) => k.startsWith('outbox'))
 
   it('a session with no account bound yet keeps its queue where the previous deploy did, and still sends', async () => {

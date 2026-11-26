@@ -74,7 +74,7 @@ shims:
       `purgeAccount` (removal on explicit logout). Residual for the shim's life: the `created_at`
       line is drawn with the browser's clock, so a skewed client clock shifts it by the skew.
     why: >
-      Browsers that ran the bundle before ADR 0047 hold unsent work under the unnamespaced keys.
+      Browsers that ran the bundle before ADR 0050 hold unsent work under the unnamespaced keys.
       Without the migration the upgrade would strand it invisibly; without the cleanup an
       earlier account's leftovers would stay in a shared profile for good. An old tab that is
       still open after the deploy keeps writing the old keys until it reloads.
@@ -95,4 +95,119 @@ shims:
     approved_on: 2026-11-24
     expires: 2027-03-01
     re_open_trigger: "the expiry passes, or a user reports unsent work missing after the upgrade"
-    decision_record: docs/adr/0047-local-browser-data-on-logout.md
+    decision_record: docs/adr/0050-local-browser-data-on-logout.md
+
+  - id: SHIM-SEC-007
+    what: >
+      `task_storage.resolve` in `compat` mode (TASK_STORAGE_MODE, the default) serves an account
+      with users.storage_layout='legacy' from DATA_ROOT/<username>/, when that name is one path
+      component that is, in exactly that spelling, a real directory directly under the root.
+    why: >
+      Every account created before brief 0065 still has its tasks there. Refusing the layout in
+      the same change would take every existing user's task list away on the deploy, before the
+      operator has taken a restore point and run the migration (finding SEC-001, ADR 0043).
+    removal: >
+      The contract step of brief 0065, its own change: once `python -m
+      app.services.storage_migration plan` reports every account `done` in production,
+      TASK_STORAGE_MODE=strict has been set and run for 14 days, and a migrated account has been
+      restored from backup once. Then the compat branch, the legacy layout value and the old
+      directories go.
+    evidence: >
+      `SELECT COUNT(*) FROM users WHERE storage_layout='legacy'` on the deploy host is zero, and
+      the audit log shows no `storage.refused` row with reason "legacy layout refused in strict
+      mode" over the soak. Both are queries on the host, not something this repository can see.
+    owner: maintainer
+    # Written by the implementing agent on the owner's order of 2026-11-24 to carry out M1;
+    # the owner has not yet reviewed this entry itself (RISK-GOV-001: no independent review).
+    # Explicit owner sign-off before merge is a deferred step of brief 0065.
+    approved_on: 2026-11-24
+    expires: 2027-02-28
+    re_open_trigger: "the expiry passes, the plan reports a blocked account that cannot be migrated, or an alias account is found"
+    decision_record: docs/adr/0043-account-identity-and-taskwarrior-storage.md
+
+  - id: SHIM-SEC-008
+    what: >
+      `get_current_user` accepts a JWT without an `auth_version` claim — the form every image
+      before brief 0066 issued — counted as version 1, and only when its `exp` is no later than
+      `site_settings.auth_version_expand_at` + JWT_EXPIRE_HOURS (`_presented_version` in
+      backend/app/dependencies.py).
+    why: >
+      Every user logged in at the moment of the deploy holds such a token. Refusing them on the
+      deploy would log everybody out at once; the window lets them run out naturally. It cannot
+      weaken revocation: a versionless token counts as version 1, so the first password change
+      after the deploy ends it like any other (finding REV-001, ADR 0044).
+    removal: >
+      The contract step of brief 0066, its own change: delete the versionless branch and the
+      `auth_version_expand_at` row once one JWT_EXPIRE_HOURS has passed since this image first
+      booted in production. From that moment the branch already accepts nothing — no token
+      issued before the boot can still be unexpired — so removal changes no behaviour.
+    evidence: >
+      `SELECT value FROM site_settings WHERE key='auth_version_expand_at'` on the deploy host, plus
+      JWT_EXPIRE_HOURS, is in the past. That is a query on the host, not something this
+      repository can see; the unit tests show the branch refuses everything after the window.
+    owner: maintainer
+    # Written by the implementing agent on the owner's order of 2026-11-24 to carry out M2.1;
+    # the owner has not yet reviewed this entry itself (RISK-GOV-001: no independent review).
+    # Explicit owner sign-off before merge is a deferred step of brief 0066.
+    approved_on: 2026-11-24
+    expires: 2027-01-31
+    re_open_trigger: "the expiry passes, JWT_EXPIRE_HOURS is raised in production, or a rollback to an image before brief 0066 happens"
+    decision_record: docs/adr/0044-credential-lifecycle-jwt-password-and-api-key.md
+
+  - id: SHIM-SEC-009
+    what: >
+      `auth.check_password` verifies a passlib-era bcrypt hash (`$2a$`/`$2b$`/`$2y$`), and every
+      login runs a dummy bcrypt check at cost 12 so a bcrypt account costs what any other does;
+      during the first 7 days after this image first boots (`site_settings.password_kdf_expand_at`)
+      new passwords are still written as bcrypt; until 67 days after it, a bcrypt match for an
+      input of 72 bytes or more is accepted with `password_change_required` (backend/app/auth.py).
+    why: >
+      Every account created before brief 0067 has a bcrypt hash, and only a successful login can
+      turn one into Argon2id — the hash cannot be converted without the password. Refusing bcrypt
+      on the deploy would lock every existing user out at once; writing Argon2id from the first
+      minute would lock out every changed or rehashed account if the image is rolled back
+      (finding SEC-006, ADR 0044 Decision 5).
+    removal: >
+      The contract step of brief 0067, its own change: delete bcrypt verification, the bcrypt
+      dummy, the soak writer, the `password_kdf_expand_at` row and the `bcrypt` dependency, once
+      no bcrypt hash is left in `users` — the accounts that never logged in during the window are
+      reset by the operator (docs/operations.md) — and the 67-day window has passed in production.
+    evidence: >
+      `SELECT COUNT(*) FROM users WHERE hashed_password LIKE '$2%'` on the deploy host is zero, and
+      the audit log's `auth.password.rehashed` rows show the migration ran. Both are queries on the
+      host, not something this repository can see; the unit tests show each phase's behaviour.
+    owner: maintainer
+    # Written by the implementing agent on the owner's order of 2026-11-24 to carry out M2.2;
+    # the owner has not yet reviewed this entry itself (RISK-GOV-001: no independent review).
+    # Explicit owner sign-off before merge is a deferred step of brief 0067.
+    approved_on: 2026-11-24
+    expires: 2027-04-30
+    re_open_trigger: "the expiry passes, a rollback to an image before brief 0067 happens after its soak, or the bcrypt pin blocks a fix"
+    decision_record: docs/adr/0044-credential-lifecycle-jwt-password-and-api-key.md
+
+  - id: SHIM-SEC-010
+    what: >
+      `Settings.jwt_algorithm` (JWT_ALGORITHM) is still read, by `startup_checks.assert_jwt_algorithm_is_fixed`
+      only, which refuses to start on any value but "HS256". Tokens are signed and verified with
+      `config.JWT_SIGNING_ALGORITHM` and never with the setting (backend/app/config.py, auth.py).
+    why: >
+      README documented JWT_ALGORITHM=HS256 as a setting, so a .env may still carry it. pydantic-settings
+      refuses an unknown key in a dotenv file, so deleting the field in the same change would make every
+      such checkout fail at import with a validation error instead of starting (finding SEC-002, brief
+      0072). The shipped compose files do not pass it, and docs/operations.md records that the host .env
+      declares JWT_SECRET only, so production is not expected to depend on it.
+    removal: >
+      The contract step of brief 0072, its own change: delete the field, its README line and
+      `assert_jwt_algorithm_is_fixed`, after README has said for one release that the variable goes, and
+      after the operator has confirmed the host .env does not set it.
+    evidence: >
+      `grep -c '^JWT_ALGORITHM=' .env` beside the host's compose file is 0 — a check on the host, not
+      something this repository can see. Locally, `make bootstrap` writes a .env without it.
+    owner: maintainer
+    # Written by the implementing agent on the owner's order of 2026-11-24 to carry out M7.1;
+    # the owner has not yet reviewed this entry itself (RISK-GOV-001: no independent review).
+    # Explicit owner sign-off before merge is a deferred step of brief 0072.
+    approved_on: 2026-11-25
+    expires: 2027-05-31
+    re_open_trigger: "the expiry passes, or a deployment is found that sets JWT_ALGORITHM to anything"
+    decision_record: docs/adr/0046-the-jwt-library-and-the-signing-key.md

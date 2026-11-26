@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import 'vue'
 
 // What an explicit logout leaves in a shared browser profile (REV-006, RISK-SEC-001; brief 0075,
-// ADR 0047). A synthetic profile — a Map behind a fake `localStorage` — and a fake API stand in for
+// ADR 0050). A synthetic profile — a Map behind a fake `localStorage` — and a fake API stand in for
 // the browser and the server, so the real auth store, the real outbox and the real capture draft run
 // together in node. Nothing is rendered (ADR 0007): the confirm dialog is `window.confirm`, stubbed.
 

@@ -1,6 +1,6 @@
 /**
  * Every key this app keeps in the browser, and the only code that touches `localStorage`
- * (brief 0075, ADR 0047; finding REV-006, RISK-SEC-001).
+ * (brief 0075, ADR 0050; finding REV-006, RISK-SEC-001).
  *
  * WHY THIS EXISTS. A browser profile can be shared — a family laptop, a workstation — and before
  * this module a logout removed the token and the profile, but left the offline queue (task text)
@@ -243,7 +243,7 @@ export function bindAccount({ accountId, username, createdAt, token }, storage, 
  * came between) is this account's only when it is younger than the account (`created`, ms);
  * older, it is provably an earlier account's of the same name and is removed; with no creation
  * time to compare, it stays where it is, unread. Clock skew between browser and server shifts
- * the line by that much (ADR 0047).
+ * the line by that much (ADR 0050).
  */
 function migrateLegacy(id, username, created, storage) {
   const legacyQueue = readKey(LEGACY.outbox, storage)

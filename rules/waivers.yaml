@@ -94,6 +94,19 @@ waivers:
       keep users.db untracked and git-ignored, the deploy host publishes no ports and the
       database is not reachable from outside the compose network, and keys are
       secrets.token_urlsafe(32), so guessing one is not the threat.
+
+      Progress, 2026-11-25 (brief 0070, ADR 0044 Decision 6) — expand and migrate, NOT the
+      close. New keys are `rwk_<id>_<secret>`, stored only as a SHA-256 in `api_keys`, shown once
+      by POST /auth/apikeys, with expiry, revocation and last use; key management needs a session.
+      Every cleartext value is hashed into a `legacy` row at boot and only the hash authenticates
+      from the first request; registration writes no cleartext. Revoking or regenerating an
+      account's key empties its `users.api_key`. Legacy keys are refused from the cutoff
+      (API_KEY_LEGACY_CUTOFF, default and latest 2027-01-15) without a deploy, and the first boot
+      after it revokes every legacy row and empties the column in every row — which also empties a
+      pre-migration backup restored later. What keeps this entry open until the contract step:
+      until the cutoff, `users.api_key` still holds the cleartext of every account that has not
+      moved (the rollback target reads it), GET /auth/apikey still returns it (deprecated), and
+      every backup taken before the cutoff holds working keys until that day.
     owner: maintainer
     approver: maintainer
     approved_on: 2026-08-28
@@ -225,11 +238,11 @@ justified_suppressions:
 
   - rule: "ruff S105 — hardcoded password assigned to jwt_secret"
     scope: >
-      backend/app/config.py, tools/surfaces.py
+      backend/app/config.py
     reason: >
-      In tools/surfaces.py the assignment is a throwaway value that lets startup_checks
-      allow the capture to boot; capturing a public surface must not depend on an operator's
-      environment. In config.py the default is kept so that `import app.main` succeeds with
+      (tools/surfaces.py left this scope on 2026-11-25, brief 0072: it now generates its throwaway
+      capture key per run, because startup_checks refuses every value published in this repository.)
+      In config.py the default is kept so that `import app.main` succeeds with
       no environment — the
       import check (RULE-DEP-001), the unit tier and any tooling that reads the app object
       would otherwise all need a secret provisioned first. It is inert: startup_checks

@@ -29,6 +29,10 @@ export default {
   'login.refused': 'Benutzername oder Passwort stimmt nicht.', 'login.tooMany': 'Zu viele Versuche. Bitte in ein paar Minuten noch einmal.',
   'login.taken': 'Diesen Benutzernamen gibt es schon.', 'login.closed': 'Registrieren ist auf diesem Server abgeschaltet.',
   'login.failed': 'Das hat nicht geklappt. Bitte noch einmal.',
+  'login.pw.tooShort': 'Das Passwort braucht mindestens 8 Bytes (ein Umlaut zählt zwei).',
+  'login.pw.tooLong': 'Ein Passwort darf höchstens 1024 Bytes lang sein (ein Umlaut zählt zwei).',
+  'login.pw.givenTooLong': 'Ein Passwort kann höchstens 4096 Bytes lang sein (ein Umlaut zählt zwei).',
+  'login.pw.rule': 'Der Server nimmt dieses Passwort nicht an: 8 bis 1024 Bytes, ohne Nullzeichen (ein Umlaut zählt zwei). In der ersten Woche nach einem Server-Update höchstens 71 Bytes.',
   // headings: [before, accent word, after]; exactly one Fraunces word each
   'h.inbox': ['Was ist ', 'das', '?'], 'h.inboxEmpty': ['Inbox ist ', 'leer', '.'], 'h.next': ['Was jetzt ', 'zählt', ''],
   'h.waiting': ['Worauf du ', 'wartest', ''], 'h.projects': ['Was du ', 'bewegst', ''], 'h.someday': ['Später, ', 'vielleicht', ''],
@@ -130,7 +134,7 @@ export default {
   'waiting.sorted': 'nach Nachhak-Datum', 'someday.sub': 'im Rückblick durchsehen',
   'all.open': '{n} offen', 'all.doneN': '{n} erledigt in 7 Tagen', 'all.showDone': 'Erledigte zeigen',
   'set.look': 'Darstellung', 'set.system': 'System', 'set.light': 'Hell', 'set.dark': 'Dunkel', 'set.signout': 'Abmelden',
-  // An explicit logout with unsent changes (decision D6, ADR 0047): OK discards them, Abbrechen keeps them.
+  // An explicit logout with unsent changes (decision D6, ADR 0050): OK discards them, Abbrechen keeps them.
   'signout.discardQ': '{n} lokale Änderung(en) sind noch nicht beim Server angekommen. Abmelden und diese lokalen Änderungen verwerfen? (Abbrechen: angemeldet bleiben und später senden.)',
   // command palette (graft from 04)
   'pal.title': 'Befehle', 'pal.ph': 'Befehl, Todo oder Projekt suchen', 'pal.goto': 'Gehe zu {v}', 'pal.check': 'Abhaken: {d}',

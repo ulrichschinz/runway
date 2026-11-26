@@ -158,10 +158,9 @@ class TestCredentialsReachTheEndpoint:
     def test_an_unauthenticated_session_is_refused_at_the_tool(self, api_key):
         """The connection is deliberately open; the endpoint behind it is not.
 
-        Nothing guards the MCP endpoint itself — a client may connect and list tools without
-        a credential. That is recorded as RISK-MCP-002 rather than fixed here, because the
-        tool list is already public in the README. What must not happen is a *call*
-        succeeding without one.
+        Nothing authenticates the MCP endpoint itself — a client may connect and list tools without
+        a credential. That is recorded as RISK-MCP-002 (since brief 0071 the transport is stateless,
+        so it costs no session). What must not happen is a *call* succeeding without one.
         """
         _, result = _run({})
         assert result.isError

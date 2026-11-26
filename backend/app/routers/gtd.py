@@ -9,9 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 # function keeps its own name behind an alias rather than the route giving up a good one.
 from app.database import get_db, get_project_statuses, get_reviews
 from app.database import record_review as store_review
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_task_store
 from app.models import GtdSummary, LastReview, ProjectOverview, Review, ReviewCreate, Task
 from app.services import task_service
+from app.task_storage import TaskStore
 
 router = APIRouter(prefix="/gtd", tags=["gtd"])
 
@@ -49,9 +50,10 @@ def _mapped[T](fn: Callable[..., T], *args: Any) -> T:
 )
 def inbox(
     username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
     tag: list[str] | None = TAG_FILTER,
 ):
-    return _mapped(task_service.gtd_list, username, "inbox", tag)
+    return _mapped(task_service.gtd_list, store, "inbox", tag)
 
 
 @router.get(
@@ -62,9 +64,10 @@ def inbox(
 )
 def next_actions(
     username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
     tag: list[str] | None = TAG_FILTER,
 ):
-    return _mapped(task_service.gtd_list, username, "next", tag)
+    return _mapped(task_service.gtd_list, store, "next", tag)
 
 
 @router.get(
@@ -75,9 +78,10 @@ def next_actions(
 )
 def waiting(
     username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
     tag: list[str] | None = TAG_FILTER,
 ):
-    return _mapped(task_service.gtd_list, username, "waiting", tag)
+    return _mapped(task_service.gtd_list, store, "waiting", tag)
 
 
 @router.get(
@@ -88,9 +92,10 @@ def waiting(
 )
 def someday(
     username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
     tag: list[str] | None = TAG_FILTER,
 ):
-    return _mapped(task_service.gtd_list, username, "someday", tag)
+    return _mapped(task_service.gtd_list, store, "someday", tag)
 
 
 @router.get(
@@ -102,9 +107,10 @@ def someday(
 )
 def tickler(
     username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
     tag: list[str] | None = TAG_FILTER,
 ):
-    return _mapped(task_service.gtd_list, username, "tickler", tag)
+    return _mapped(task_service.gtd_list, store, "tickler", tag)
 
 
 @router.get(
@@ -119,6 +125,7 @@ def tickler(
 )
 async def summary(
     username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
     db=Depends(get_db),
     # Not TAG_FILTER: the filter is the same, but the sentence about the inbox is the
     # opposite one here. A list narrowed by a tag is empty; the inbox *counter* is never
@@ -152,7 +159,7 @@ async def summary(
     rows = await get_reviews(db, username)
     at = {row["kind"]: row["reviewed_at"] for row in rows if row["scope"] == key}
     last_review = LastReview(daily=at.get("daily"), weekly=at.get("weekly"))
-    return _mapped(task_service.summarize, username, tag, explicit, statuses, last_review)
+    return _mapped(task_service.summarize, store, tag, explicit, statuses, last_review)
 
 
 @router.get(
@@ -196,8 +203,12 @@ async def record_review(
     summary="List projects",
     description="Return all project names — both those inferred from tasks and those created explicitly.",
 )
-async def projects(username: str = Depends(get_current_user), db=Depends(get_db)):
-    seen: dict[str, None] = dict.fromkeys(_mapped(task_service.project_names, username))
+async def projects(
+    username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
+    db=Depends(get_db),
+):
+    seen: dict[str, None] = dict.fromkeys(_mapped(task_service.project_names, store))
     async with db.execute(
         "SELECT name FROM projects WHERE username=? ORDER BY created_at",
         (username,),
@@ -236,6 +247,7 @@ def _has_plan(row) -> bool:
 )
 async def projects_overview(
     username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
     db=Depends(get_db),
 ):
     async with db.execute(
@@ -245,7 +257,7 @@ async def projects_overview(
         rows = await cur.fetchall()
     explicit = {row["name"]: _has_plan(row) for row in rows}
     statuses = await get_project_statuses(db, username)
-    return _mapped(task_service.project_overview, username, explicit, statuses)
+    return _mapped(task_service.project_overview, store, explicit, statuses)
 
 
 @router.get(
@@ -257,6 +269,7 @@ async def projects_overview(
 def project_tasks(
     name: str,
     username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
     tag: list[str] | None = TAG_FILTER,
 ):
-    return _mapped(task_service.project_tasks, username, name, tag)
+    return _mapped(task_service.project_tasks, store, name, tag)

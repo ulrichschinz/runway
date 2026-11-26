@@ -24,20 +24,55 @@ tasks and does not get one by being an admin.
 Two credentials reach the same principal, checked in this order by `get_current_user` in
 [`backend/app/dependencies.py`](../backend/app/dependencies.py):
 
-1. **`X-Api-Key`** — matched against the `api_key` column. Checked **first**, before any
-   token work, which is why rotating `JWT_SECRET` does not disturb agents, MCP clients or
-   automations, and why an account locked out of password login can still be used by them.
-2. **`Authorization: Bearer <jwt>`** — signed with `JWT_SECRET`, `HS256`, 24h. A valid
+1. **`X-Api-Key`** — looked up as a **hash** in the `api_keys` table (ADR 0044 Decision 6, brief
+   0070, `WAIVER-SEC-003`): a key `rwk_<key id>_<secret>` by its public id, its SHA-256 compared in
+   constant time; a key from before 2026-11 (43 characters) by its SHA-256, and only until the legacy
+   cutoff (`API_KEY_LEGACY_CUTOFF`, at the latest 2027-01-15). The `users.api_key` column is never
+   compared. Unknown, malformed, expired, revoked and post-cutoff legacy keys get one answer, `401
+   Invalid API key`. Checked **first**, before any token work, which is why rotating `JWT_SECRET`
+   does not disturb agents, MCP clients or automations, and why an account locked out of password
+   login can still be used by them. A key is shown once, by `POST /auth/apikeys`; creating,
+   revoking and the deprecated `regenerate` need a signed-in session (a key gets 403), so a stolen
+   key cannot mint its own successor — and a legacy key from a backup cannot be swapped for one that
+   outlives the cutoff. The deprecated `GET /auth/apikey` returns the legacy key only to a session or
+   to that legacy key itself (any other key gets `""`), so a stolen `rwk_` key cannot read back a
+   second credential that would survive its revocation. `GET /auth/apikeys` lists metadata only.
+2. **`Authorization: Bearer <jwt>`** — signed with `JWT_SECRET`, `HS256`, 24h. `HS256` is a constant
+   in the code, not a setting (ADR 0046, finding SEC-002): a token whose header names any other
+   algorithm — `none`, `HS512`, `RS256` — or carries its own key (`jwk`, `jku`, `kid`) is refused, and
+   PyJWT, not python-jose, verifies it. `JWT_SECRET` itself is refused at startup when it is published,
+   a public key, degenerate or short (see `docs/threat-model.md` §3). A valid
    signature is not enough: the account the token names must still exist, or the request
    gets the same **401** as no credential at all, on every route. A token outlives the row
    it was issued for; until 2026-11-10 it kept working everywhere except `GET /auth/me`,
    which answered 500 (`WAIVER-TYPE-001`, [brief 0056](briefs/0056-a-vanished-user-gets-401.md)).
+   **And the token must carry the account's current `auth_version`** (ADR 0044, finding
+   REV-001). Every token holds `sub`, `iat`, `exp`, a random `jti` and `auth_version`;
+   `PUT /auth/password` raises the version in the same statement that writes the new hash, so
+   every token issued before the change — other browsers, other devices, a stolen one — gets
+   401 on its next REST request and its next MCP tool call. The session that made the change
+   receives a new token in the response. A token without `exp` or `sub`, or with a malformed
+   version, is refused. The operator ends one account's sessions, or everyone's, with one
+   `UPDATE` ([`docs/operations.md`](operations.md#ending-sessions)). For one JWT lifetime after
+   the deploy, a token from the previous image (no `auth_version`) still counts as version 1:
+   `SHIM-SEC-008`. **API keys are not revoked by a password change** — they are revoked separately
+   (`DELETE /auth/apikeys/{key_id}`, or the deprecated `POST /auth/apikey/regenerate`, which ends
+   every key of the account); both settings pages say so before the change and point to it after.
 3. **`Authorization: Bearer <api_key>`** — an API key in the Bearer slot, tried last, only
    after a JWT decode fails. This is `SHIM-SEC-006`, not a design: it is the shape `/inbox`
    used before it was unified onto `get_current_user` (finding SEC-6), kept because every
    agent and MCP client sends it today. Recorded in
    [`rules/shims.yaml`](../rules/shims.yaml) with a removal step and an expiry, enforced by
    `RULE-SEC-002`.
+
+**What is stored, and where a key may appear** (brief 0070). The secret of a key exists in exactly
+one response — the `201` of `POST /auth/apikeys` (or of the deprecated `regenerate`) — and in the
+caller's hands; the server keeps its SHA-256, and no response, audit row or log line carries either.
+`RULE-DEP-003` refuses a committed `rwk_` key anywhere in the tree, `RULE-OPS-002` a key or its hash
+at a logging call, and the redaction filter removes the `rwk_` shape from every emitted line; each has
+a negative fixture arm that commits or logs one. Until the legacy cutoff the deprecated
+`GET /auth/apikey` is the one remaining place a (legacy) cleartext key leaves the server; it is
+`WAIVER-SEC-003`'s open part.
 
 `get_current_admin` builds on `get_current_user` and additionally requires `role = 'admin'`,
 returning **403** when the principal is authenticated but not an admin — distinct from the
@@ -47,7 +82,7 @@ returning **403** when the principal is authenticated but not an admin — disti
 
 What the SPA keeps in the browser, by data class, is declared in one place,
 [`frontend/src/shared/browserStorage.js`](../frontend/src/shared/browserStorage.js), the only file
-that touches `localStorage` ([ADR 0047](adr/0047-local-browser-data-on-logout.md)):
+that touches `localStorage` ([ADR 0050](adr/0050-local-browser-data-on-logout.md)):
 
 | Class | Keys | Account-bound | Removed by an explicit logout |
 |---|---|---|---|
@@ -74,17 +109,23 @@ that touches `localStorage` ([ADR 0047](adr/0047-local-browser-data-on-logout.md
 
 ## The route guard declaration
 
-[`rules/route-guards.toml`](../rules/route-guards.toml) names every HTTP route and the guard
-it requires. It is normative: **`RULE-SEC-001`** fails the gate when the file and the code
-disagree in either direction, and `tools/checks/route_guards.py` reads the guard out of the
-handler's parameter defaults — where FastAPI actually enforces a dependency — rather than by
-searching the function text.
+[`rules/route-guards.toml`](../rules/route-guards.toml) names every HTTP route the application
+serves and the guard it requires. It is normative: **`RULE-SEC-001`** fails the gate when the file
+and the running application disagree in either direction. Since brief 0073 (`RISK-SEC-005`,
+ADR 0047) `tools/checks/route_guards.py` boots the application and takes its inventory from
+`fastapi.routing.iter_route_contexts(app.routes)` — every route FastAPI dispatches to, wherever it
+was declared, with included routers' prefixes and dependencies applied — and reads each route's
+guard from its **resolved dependency tree**, which is what FastAPI runs, router-level dependencies
+included. The served OpenAPI operations must all be in that inventory, and a mounted
+sub-application is declared as `MOUNT <path>` and a WebSocket route as `WS <path>` — it has no HTTP method and no OpenAPI entry, so until the second review of brief 0073 the inventory dropped it silently; a route kind with no methods that the checker does not know fails the gate. Before, it parsed `backend/app/routers/*.py` only, and
+six served routes — `GET /health`, the three methods of `/mcp` and the framework's documentation
+routes — were declared nowhere.
 
 | Guard | Meaning |
 |---|---|
-| `admin` | `Depends(get_current_admin)` — authenticated, and `role = 'admin'` |
-| `user` | `Depends(get_current_user)` — any authenticated principal |
-| `open` | reachable unauthenticated, or authenticating by some other means |
+| `admin` | `get_current_admin` in the dependency tree — authenticated, and `role = 'admin'` |
+| `user` | `get_current_user` in the tree (and not the admin guard) — any authenticated principal |
+| `open` | neither: reachable unauthenticated, or authenticating by some other means |
 
 **Adding a route means adding a line to that file.** That is the point of it. A forgotten
 guard fails silently — the route works, it just works for everybody — which is not something
@@ -92,7 +133,11 @@ a passing test suite notices, and not something a reviewer reliably notices eith
 the evidence is one missing parameter default among thirty handlers.
 
 An `open` route must record a `reason`. A route anyone can reach is a decision, and a
-decision with no recorded reason cannot be told apart from an oversight. Five are open today:
+decision with no recorded reason cannot be told apart from an oversight. Thirteen are open today —
+the five below, and eight infrastructure routes outside the routers package whose reasons are in the
+declaration file: `GET /health` (the healthcheck and post-deploy probe), `POST`/`GET`/`DELETE /mcp`
+(the transport; each tool call is a request to its own route and meets that route's guard, ADR 0045),
+and `GET /openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc` (the public schema of a public API):
 
 - `POST /auth/register` and `POST /auth/login` — the routes that create and exchange
   credentials cannot require them. Registration is additionally gated at runtime by the
@@ -138,6 +183,22 @@ requires an admin, so there is no route back through the API, and recovery means
 The check is on the admin *count*, not on self-demotion — demoting someone else is just as
 final when they are the only one left.
 
+**It holds under concurrency** (REV-002, [brief 0068](briefs/0068-the-last-admin-survives-concurrent-writes.md)).
+Until November 2026 the count was read in autocommit and the role written by a separate statement, so
+two admins demoting each other at the same moment both read "two admins" and both succeeded — zero
+admins, the state the guard exists to prevent. Every write that can remove an admin now runs inside
+`database.admin_preserving_write`: one transaction on the request's own connection, opened with
+`BEGIN IMMEDIATE` so SQLite's write lock is held **before** anything is read, and the invariant is
+checked **after** the write — if the instance had an admin when the transaction began and has none at
+its end, the whole transaction is rolled back and the route answers 409. A second writer waits for the
+lock (up to SQLite's 5 s busy timeout; past it the request fails with 500, never with a silent wrong
+answer). The paths held to it: `PUT /admin/users/{target}/role`, account deletion (`delete_account`,
+today only the rollback of a registration whose store could not be provisioned), and
+`./run grant-admin --role user`. A future bulk operation gets the same guarantee by running inside the
+same guard; the post-write check does not need to know what the statements were. An instance with no
+admin at all is not blocked — there is nothing to protect until the bootstrap or the escape hatch
+creates one.
+
 The two mechanisms compose: the guard makes zero admins unreachable through the API, and the
 bootstrap recovers an instance that reaches zero some other way.
 
@@ -147,9 +208,15 @@ bootstrap recovers an instance that reaches zero some other way.
 ./run grant-admin --db /path/to/users.db <username>
 ```
 
-Promotes an account directly, bypassing the API and its last-admin guard. `--db` has no
+Promotes an account directly, bypassing the API. `--db` has no
 default on purpose: this writes to a live database, and the path should be a deliberate
-keystroke rather than an inherited one.
+keystroke rather than an inherited one. It does **not** bypass the last-admin invariant:
+`--role user` on the only admin is refused (exit 1) in the same serialised transaction the API
+uses, so it cannot race a request either: a test holds a request's guard open mid-demotion while
+the CLI demotes the other admin, and the CLI waits for the lock and refuses
+(`test_last_admin_concurrency.py::TestTheOperatorCli::test_it_cannot_race_a_request`). Exit 1
+means only that refusal; a database error — a write lock held past the CLI's 5 s busy timeout, a
+file without a `users` table — exits 3 and changes nothing.
 
 Use it when an instance has no admin and restarting with `BOOTSTRAP_ADMIN` set is not
 practical.
@@ -189,23 +256,172 @@ cannot read the key back, rotate it, or reach an admin route through MCP, whatev
 role. The list fails closed — a router with a new tag is not a tool until it is added — and
 `backend/tests/unit/test_mcp_session.py` pins it as a client receives it. ADR 0037.
 
+**A tool call runs only its own handler** (finding REV-005, brief 0071, ADR 0045). The allowlist used to
+check the tool's *name* only, and `fastapi-mcp` substitutes a path argument into the URL unencoded, so
+`get_task(uuid="../auth/apikey")` reached `GET /auth/apikey` and `modify_task(uuid="../auth/me", …)`
+changed the profile — with an admin's key, `../admin/settings` changed site settings. Now every path
+argument is sent as one percent-encoded segment, and `mcp_gate.bind_mcp_target` — the first
+dependency of every route — refuses with 400 a tool call whose selected route is not the tool's own,
+before the credential is looked up. `backend/tests/unit/test_mcp_target_binding.py` asserts the final
+handler for every path-parameter tool against traversal, encoded, double-encoded, query, fragment and
+Unicode look-alike values, not the status code. Encoding stops dot segments and query or fragment
+splitting only; an encoded `/` is decoded before routing, and a plain value like `plans` in
+`set_project_status(name="plans")` would select the sibling `upsert_plan` route. Those cases are
+stopped by the binding alone, and `TestOnlyTheBindingStopsASiblingRoute` fails when it is removed.
+
+**The transport holds no session and has a budget** (finding REV-004). Stateless Streamable HTTP: no
+`Mcp-Session-Id`, a fresh transport per request torn down when it ends; `GET`/`DELETE` are 405. Every
+request reserves a slot before any work — 32 in total, 8 per source, a quarter of the total for requests
+without a credential header (`MCP_MAX_INFLIGHT`, `MCP_SOURCE_MAX_INFLIGHT`) — and is cancelled after 30
+seconds, which is also what frees the slot of a client that disconnects. The anonymous share counts the
+*presence* of a credential header, not its validity: a made-up `X-Api-Key` escapes the share but not the
+total and per-source ceilings, and with `TRUSTED_PROXIES` unset behind nginx the total is the only
+ceiling, so unauthenticated traffic can still crowd out real users up to it. Closing that needs the
+deferred handshake authentication (`RISK-MCP-002`). `backend/tests/unit/test_mcp_budget.py`.
+
+**The handshake is not authenticated yet** (`RISK-MCP-002`): anyone who can reach the endpoint may
+list the tools; every call is authenticated by its route. The dated switch to 401 is designed and
+deferred (ADR 0045).
+
+## Passwords
+
+Since brief 0067 (finding SEC-006, ADR 0044 Decision 5):
+
+- **Hash: Argon2id** (argon2-cffi; t=3, 64 MiB, one lane — measured against a 250 ms / 64 MiB
+  budget per verification and 500 ms per login, bcrypt check included). Hashes from before are passlib-era bcrypt and are still verified (`SHIM-SEC-009`).
+- **Limits, in UTF-8 bytes:** a password being set (register, change) **8 to 1024** and without a
+  NUL character; a password being given (login, the current password) at most **4096** — the bound
+  the previous image enforced (passlib), so an account with a long bcrypt-era password still reaches
+  the flagged or audited path instead of a silent 422 (brief 0067, R7). Outside the rule is **422**,
+  before any hash or query. A login has no minimum, so a password set before the rule still works.
+- **Body limit:** **16 KiB** on `/auth/*`, **1 MiB** elsewhere, **413** before routing — in the
+  backend itself and, for `/api/auth/`, at nginx.
+- **Migration:** an exact bcrypt login (input of 71 bytes or fewer) is rehashed to Argon2id by a
+  compare-and-swap on the old hash; no session ends. A bcrypt match for 72 bytes or more is never
+  rehashed from what was typed — bcrypt saw only the first 72 — so the login answers
+  `password_change_required: true`, both UIs send the person to Einstellungen — where a new
+  password sharing the current one's first 72 bytes (the same value retyped, or a guessed prefix
+  plus anything) is refused with 422, so the prefix-accepted value never becomes the hash on this
+  route either (brief 0067, R6) — and after the window
+  such a login is refused and needs the operator reset (`docs/operations.md`).
+- **No oracle:** every login costs one Argon2id and one bcrypt operation whatever the account, and
+  every failure is the same 401 `Invalid credentials`. A NUL byte is a 401, no longer a 500.
+- **Timeline**, from the image's first boot (`site_settings.password_kdf_expand_at`): 7 days of
+  bcrypt writes (so a rollback can still verify — and in that week a new password must be shorter
+  than 72 bytes, so bcrypt stores it whole), then Argon2id writes and rehash-on-login, and from
+  day 67 the ambiguous case refused. No deploy and no setting moves a step; a missing row fails
+  closed.
+
 ## Login throttling
 
-`POST /auth/login` allows `LOGIN_RATE_LIMIT` failed attempts per username per
-`LOGIN_RATE_WINDOW_SECONDS`, then answers **429** with `Retry-After` (finding SEC-8). Only
-failures count, a success clears the budget, and the check runs *before* the password is
-verified so a locked-out username buys an attacker no bcrypt work.
+Every password verification — `POST /auth/login`, and the current-password check of
+`PUT /auth/password` whatever credential authenticated it — reserves a slot in three budgets
+**before** it looks the account up or runs the KDF (findings SEC-8 and REV-003, brief 0069), and
+answers **429** with `Retry-After` when any of them is full:
 
-Keyed on username rather than IP, because rotating source addresses is cheap. The trade is
-real and accepted: someone who knows a username can deny it password login for the window.
-API keys are unaffected, so agents keep working through a lockout. Unknown usernames are
-throttled identically — exempting them would make the limiter a user-enumeration oracle.
+| Tier | Key | Default per `LOGIN_RATE_WINDOW_SECONDS` (300) | Stops |
+|---|---|---|---|
+| account | the username, NFKC-normalised and casefolded — `Alice`, `ALICE` and `ａlice` are one | `LOGIN_RATE_LIMIT` = 10 | guessing one account's password |
+| source | the network source (below); IPv6 by /64 | `LOGIN_SOURCE_RATE_LIMIT` = 30 | a spray across many names from one place |
+| global | one key | `LOGIN_GLOBAL_RATE_LIMIT` = 300 | a spray from everywhere; caps the KDF work failed verifications cause |
+
+- **Reserved, then closed.** A tier counts its failures *and the attempts in flight*, under one
+  lock, so parallel requests cannot all pass a check that only counts finished failures. A refused
+  attempt costs no lookup and no KDF work. Every reservation is closed once: a success releases it
+  and clears the **account** tier only (so a valid account cannot refill the budget of the place a
+  spray comes from), and there only the failures recorded under its **exact** name — `Alice` and
+  `alice` can be two accounts sharing one budget, and a success on one must not wipe the guesses
+  against the other (brief 0069, R10); a failure is counted; an exception or a cancelled request
+  counts as a failure.
+- **Bounded memory.** Failures expire after the window; a sweep on a clock drops every expired key,
+  not only the one being tried. The account and source tiers hold at most `LOGIN_RATE_MAX_KEYS`
+  keys; a new key beyond that is **refused**, never made room for by forgetting an old one — that
+  would let a flood of random names reset a victim's counter. Account keys are 16-byte digests.
+- **The source.** The socket peer — unless the peer is listed in `TRUSTED_PROXIES`; then
+  `X-Forwarded-For` is read from the right, past every trusted proxy, to the first address that is
+  not one. What a client wrote to the left of that is never read. A malformed entry or `0.0.0.0/0`
+  is ignored and reported at boot. uvicorn's own proxy-header handling is off (`--no-proxy-headers`),
+  so this is the only place a forwarded address is believed, and nginx appends to the header rather
+  than passing a client's through. With `TRUSTED_PROXIES` empty — the default — a public peer is
+  counted as itself, but a loopback, RFC 1918, link-local or IPv6 ULA peer gets **no** source key:
+  it is a proxy nobody declared, and counting its address would make every client behind it one
+  budget that any one of them could exhaust for everyone. In the shipped topology that means the
+  source tier is off until the operator sets `TRUSTED_PROXIES` (a boot `WARNING` says so), and a
+  spray is bounded by the global tier alone (`docs/operations.md`). With `TRUSTED_PROXIES` set, a
+  proxy-shaped peer that is not listed but sends `X-Forwarded-For` gets no source key either: it is
+  a declared proxy that came back at another address after a recreate, and counting it would be the
+  same one-budget-for-everybody failure. The backend logs a `WARNING` (`login request from an
+  undeclared proxy`) at most once per window, without the address (brief 0069, R9).
+- **The global brake's size.** One failed verification (Argon2id + bcrypt) measured 0.26 s on the
+  development machine, and it runs on the event loop. 300 failures per 300 s window is therefore
+  about a quarter of the loop — enough to stop a spray before it degrades the service, high enough
+  that it is not the first thing an attacker trips.
+- **Audit and log.** Every failure inside the budget is an `auth.login.failed` row, as before — at
+  most `LOGIN_GLOBAL_RATE_LIMIT` per window; a wrong current password in a password change is an
+  `auth.password.changed` failure row, under the same budget. A refusal writes an `auth.login.throttled` row only for
+  the first refusal of a key in a window; later ones are counted and carried by the next row, or by a
+  summary when the key is swept. Every throttled row says `(refusals: N)`. Account rows name the
+  attempted username, as before; source and global rows name nothing — no address is recorded
+  (ADR 0026). The `login throttled` log line follows the same rule.
+
+**The balance against lockout.** Keyed on the username because rotating source addresses is cheap.
+The trade is real and accepted, and it lasts **as long as the attack**, not one window — an attacker
+simply repeats the spray each window:
+
+- someone who knows a username can deny it password login with 10 wrong guesses per 5 minutes;
+- with `TRUSTED_PROXIES` set, one address can deny nobody but the names it guesses (30 per window);
+- anyone who can send 300 failures per 5 minutes (1 per second; from 10 IPv4 addresses at the
+  source budget, or from one IPv6 /60 or larger, which holds 16 /64 keys) denies *every* account
+  password login — the admin's too — for as long as they keep it up. That is the emergency brake
+  doing its job without costing KDF work; it is not free for the attacker, and it is recorded:
+  the throttled rows carry the counts. The recovery path is an API key or the `grant-admin` CLI on
+  the host, neither of which goes through the budget.
+
+Unknown usernames are throttled identically — exempting them would make the limiter a
+user-enumeration oracle. **Requests authenticated by an API key are not throttled**, so agents, MCP
+clients and the webhook keep working through any lockout. What an API key cannot do is guess the
+account's password: `PUT /auth/password` verifies the current password through the same budget, so
+a stolen key gets the account budget's ten guesses per window and nothing while the account is
+locked. The other side remains: a lockout does nothing against what a stolen API key can do with
+the key itself. Recovery after a suspected compromise must deal with **both** credentials — a
+password change ends every JWT session (brief 0066) but not the API keys, which are revoked
+separately (`docs/operations.md`, *Ending API keys*).
 
 ## The Taskwarrior boundary
 
 Per-user isolation rests entirely on three environment variables handed to a subprocess:
 `TASKDATA`, `TASKRC` and `HOME`, each pointing at one user's directory. There is no ownership
-column and no second gate.
+column and no second gate. So two things have to hold: the argument list must not redirect the
+store (SEC-3, below), and the directory itself must be the account's and no one else's.
+
+**Which directory (finding SEC-001, [ADR 0043](adr/0043-account-identity-and-taskwarrior-storage.md)).**
+Until brief 0065 the directory was `DATA_ROOT/<username>`, built from the registered name in
+two modules, so `alice/../alice` opened alice's store and `../x` created directories outside
+the data root. Now:
+
+1. Every account has a **`storage_id`** — 32 hex characters from the OS CSPRNG, unique by
+   index, shaped by a `CHECK`, and immutable by trigger. The store is `DATA_ROOT/<storage_id>/`.
+2. [`backend/app/task_storage.py`](../backend/app/task_storage.py) `resolve` is the only
+   function that turns an account into a directory. It accepts only the id shape and refuses
+   anything that is not a real directory (not a symlink) directly under the resolved root.
+   `get_task_store` hands the routers a resolved `TaskStore`; `task_runner._run` accepts
+   nothing else, so no code path is left that turns a name into a path.
+3. **`RULE-SEC-003`** fails the gate when any other module of `backend/app/` reads
+   `data_root`, except the audit database's fixed name. Non-waivable.
+4. New accounts are created only in the new layout. The username keeps a hygiene rule at
+   registration (plain, NFC, no control characters or separators, at most 64 characters; 400
+   otherwise) that is explicitly *not* the path control.
+5. **Transition (`SHIM-SEC-007`, `RISK-SEC-006`).** An account created before the change is
+   `storage_layout='legacy'` and, in the default `TASK_STORAGE_MODE=compat`, is served from
+   `DATA_ROOT/<username>/` only when that name is one path component that is, in exactly that
+   spelling, a real directory under the root — an alias name, including a spelling a case- or
+   normalisation-insensitive filesystem folds onto another directory, is refused with 500 and a
+   `storage.refused` audit row. The migration groups accounts by inode, not by spelling. `strict` refuses every legacy account. The operator moves accounts with
+   `python -m app.services.storage_migration`
+   ([runbook](operations.md#moving-task-storage-off-the-username)).
+
+Registration may be opened again once `tests/unit/test_storage_identity.py` and
+`tests/container/test_storage_isolation.py` are green in CI on amd64 at the deployed commit.
 
 Taskwarrior consumes `rc.<key>=<value>` **anywhere in its argument list** as a runtime
 configuration override — including `rc.data.location`, which chooses which store it opens. A
@@ -247,6 +463,15 @@ Three controls, in order of how much they are relied on:
    itself — it is always the tail of `project:` or `project.is:` — so an `rc.`-shaped name is
    inert; the `/` of a real data path is refused anyway, because it would also break an MCP
    path parameter ([ADR 0038](adr/0038-validated-filters-and-exact-project-match.md)).
+   A date **modifier** (`due`, `scheduled`, `wait`, `until`) is one word, `DATE_VALUE_RE`:
+   ASCII letters, digits and `: + - .`, surrounding whitespace stripped, and with no dot next to
+   a letter and no `rc:` at a word start (`DATE_DOM_RE`), so neither a Taskwarrior DOM
+   reference (`rc.data.location`, `system.os`, `tw.version`) nor an override in its colon
+   spelling (`rc.data.location:<dir>`, `rc:<file>`) reaches the binary (brief 0074). That is
+   defence in depth: finding SEC-007 — an `rc.` override inside a date value — is refuted on
+   Taskwarrior 3.5.0 by the container regression `TestDateValuesAreOneArgument`, which also fails
+   on purpose when the binary's major or minor version changes, so the refutation is re-run
+   before an upgrade ships ([runbook](operations.md#upgrading-taskwarrior)).
    Values a client merely resends unchanged — a kept tag, the project a task already has —
    are **not** re-validated, or live users' legacy data would become uneditable.
 4. **`RULE-ARCH-004`** keeps `subprocess` importable only from
@@ -266,7 +491,14 @@ stderr can name the absolute data path, so when the stderr matches `_SYSTEM_FAUL
 it and raises a `RuntimeError` with a generic message: 500, no path. Any other code stays a
 `RuntimeError`, 500. Until this, all of them were 500. The stderr of the input refusals checked
 names the offending value and nothing about the server, no data path (checked on 3.5.0, pinned
-in `tests/container`); the no-path claim covers those refusals only. The
+in `tests/container`) — **except when the value is one the binary evaluates**: a DOM reference
+in a date (`due:rc.data.location`) came back as `'<absolute store path>' is not a valid date`,
+`system.os` as the OS, `tw.version` as the version, and an authenticated caller read them from
+the 400 until the second review of brief 0074. Two controls now: the date grammar refuses every
+DOM reference before the argv, and `_run` replaces any rc-2 stderr that names the data directory
+with a generic refusal (the stderr is logged). The no-path claim covers the refusals checked
+plus that substitution; a refusal that echoes some other evaluated value not under the data
+directory is not covered by it. The
 binary never inherits the server's stdin (`/dev/null`), and `rc.recurrence.confirmation=no`
 is one of `_run`'s own overrides: modifying one instance of a recurring task otherwise asks
 whether to modify all of them and, on a terminal, waited for an answer until the timeout.
@@ -283,17 +515,27 @@ third-party argument parser, and it could change in any release — as the theme
 
 ## What is not enforced here
 
-- **Frontend role checks are display, not a control.** Since ADR 0047 `auth.role` comes from
+- **Frontend role checks are display, not a control.** Since ADR 0050 `auth.role` comes from
   `GET /auth/me` on every page load and storage no longer decides it (`RISK-SEC-001`, resolved).
   Code running in the page can still change the in-memory store and see admin screens; every
   `/admin` route is guarded server-side, so the result is 403s rather than access.
 - **Only an explicit logout clears the browser.** A session that ends by a 401 or a closed browser
   leaves the account's unsent queue and draft in the profile, locked to that account
   (`RISK-FE-001`).
-- **`role` has no database-level constraint.** The column is `TEXT DEFAULT 'user'` and would
-  accept anything written outside the application. Every in-application writer validates
-  against `VALID_ROLES`; a value written by hand would not be an admin, so it fails closed.
-  Recorded as `RISK-SEC-002`.
+- **`role` is constrained only from schema version 1 on.** Version 1 (brief 0073, ADR 0047)
+  rebuilds `users` with `role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin'))`, so a
+  value written outside the application is refused by the database. A database that already holds
+  such a value refuses the rebuild instead (ERROR `schema migration refused`, counted, never named)
+  and stays at version 0, where the column is the old `TEXT DEFAULT 'user'`; every in-application
+  writer validates against `VALID_ROLES` and an unrecognised value is not an admin, so it still fails
+  closed. Recorded as `RISK-SEC-002` until production reports version 1.
 - **The login limiter is in-process and per-worker** (`RISK-SEC-003`). Under one host and
   one worker — decision F1 — that is the whole population; a second worker would multiply the
-  effective limit by the process count.
+  effective limit by the process count. The re-open trigger is executable:
+  `test_login_budget.py` (`TestTheSingleWorkerAssumption`, `TestTheSingleWorkerPinIsWholeFile`)
+  fails when the Dockerfile's CMD stops pinning `--workers 1`, the Dockerfile sets
+  `WEB_CONCURRENCY`, an `ENTRYPOINT` or gunicorn, or a compose file sets `WEB_CONCURRENCY`,
+  `replicas`, `scale` or `--workers`. It reads those files; it does not see a host that runs the
+  image some other way. When it fires, a
+  limiter shared by every worker — at the edge (Traefik) or in a datastore all workers reach — is a
+  precondition of the change, not a follow-up.

@@ -6,9 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const calls = []
 vi.mock('../src/api/client.js', () => {
   const call = (method) => (url, body) => new Promise((resolve, reject) => calls.push({ method, url, body, resolve, reject }))
-  return { default: { get: call('get'), put: call('put'), post: call('post') } }
+  return { default: { get: call('get'), put: call('put'), post: call('post'), delete: call('delete') } }
 })
-vi.mock('../src/stores/auth.js', () => ({ useAuthStore: () => ({ fetchMe: async () => {} }) }))
+const adopted = []
+vi.mock('../src/stores/auth.js', () => ({ useAuthStore: () => ({ fetchMe: async () => {}, adoptToken: (t) => adopted.push(t) }) }))
 const { useAccount } = await import('../src/identity/useAccount.js')
 
 const flush = async () => {
@@ -29,6 +30,7 @@ const sent = (method, url) => calls.filter((c) => c.method === method && c.url =
 let account
 beforeEach(() => {
   calls.length = 0
+  adopted.length = 0
   account = useAccount()
 })
 
@@ -66,15 +68,46 @@ describe('the registration switch', () => {
   })
 })
 
-describe('"Neuen Key erzeugen"', () => {
-  it('a double click rotates the key once, and the key shown is the one the server keeps', async () => {
-    const first = account.regenerateKey()
-    expect(await account.regenerateKey()).toEqual({ busy: true })
-    expect(sent('post', '/auth/apikey/regenerate')).toHaveLength(1)
-    await answer('post', '/auth/apikey/regenerate', { api_key: 'rw_neu' })
+describe('"Neuen Key erzeugen" (brief 0070: shown once)', () => {
+  const META = { key_id: '0123456789abcdef', label: 'agent', kind: 'issued', prefix: 'rwk_0123456789abcdef', state: 'active' }
+
+  it('a double click creates one key, and the key is held only until it is confirmed stored', async () => {
+    const first = account.createKey('agent')
+    expect(await account.createKey('agent')).toEqual({ busy: true })
+    expect(sent('post', '/auth/apikeys').map((c) => c.body)).toEqual([{ label: 'agent' }])
+    await answer('post', '/auth/apikeys', { ...META, api_key: 'rwk_0123456789abcdef_placeholder' })
     expect(await first).toEqual({ ok: true })
-    expect(account.apiKey.value).toBe('rw_neu')
-    expect(account.pending('key')).toBe(false)
+    expect(account.apiKey.value).toBe('rwk_0123456789abcdef_placeholder')
+    // the list keeps the metadata only, never the key
+    expect(account.keys.value).toEqual([META])
+    expect(account.dismissKey(false)).toEqual({ forgotten: false, reason: 'set.key.confirmFirst' })
+    expect(account.apiKey.value).toBe('rwk_0123456789abcdef_placeholder')
+    expect(account.dismissKey(true)).toEqual({ forgotten: true })
+    expect(account.apiKey.value).toBeNull()
+  })
+
+  it('says so at the cap', async () => {
+    const first = account.createKey('')
+    await answer('post', '/auth/apikeys', httpError(409))
+    expect(await first).toEqual({ error: 'set.key.tooMany' })
+    expect(account.apiKey.value).toBeNull()
+  })
+
+  it('never reads a key back: loading asks for metadata only', async () => {
+    const loading = account.loadKeys()
+    expect(sent('get', '/auth/apikey')).toHaveLength(0)
+    await answer('get', '/auth/apikeys', [META])
+    await loading
+    expect(account.keys.value).toEqual([META])
+  })
+
+  it('a revocation is sent once and the list is read again', async () => {
+    const first = account.revokeKey(META.key_id)
+    expect(await account.revokeKey(META.key_id)).toEqual({ busy: true })
+    await answer('delete', `/auth/apikeys/${META.key_id}`, null)
+    await answer('get', '/auth/apikeys', [{ ...META, state: 'revoked' }])
+    expect(await first).toEqual({ ok: true })
+    expect(account.keys.value[0].state).toBe('revoked')
   })
 })
 
@@ -111,7 +144,7 @@ describe('the profile and the password', () => {
     await answer('put', '/auth/me', { full_name: 'Anna', email: 'anna@example.com' })
     expect(await first).toEqual({ ok: true })
 
-    const form = { current: 'alt', next: 'neu', confirm: 'neu' }
+    const form = { current: 'alt', next: 'neu-lang-genug', confirm: 'neu-lang-genug' }
     const pw = account.changePassword(form)
     expect(await account.changePassword(form)).toEqual({ busy: true })
     expect(sent('put', '/auth/password')).toHaveLength(1)
@@ -124,5 +157,27 @@ describe('the profile and the password', () => {
     expect(await account.changePassword({ current: 'alt', next: 'a', confirm: 'b' })).toEqual({ error: 'set.pw.mismatch' })
     expect(account.pending('password')).toBe(false)
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('a password change ends every earlier session (REV-001, ADR 0044)', () => {
+  it('keeps the token the answer carries, so this session survives its own revocation', async () => {
+    const pw = account.changePassword({ current: 'alt', next: 'neu-lang-genug', confirm: 'neu-lang-genug' })
+    await answer('put', '/auth/password', { detail: 'Password updated', access_token: 'eyJ.neu', token_type: 'bearer' })
+    expect(await pw).toEqual({ ok: true })
+    expect(adopted).toEqual(['eyJ.neu'])
+  })
+
+  it('a 422 says the rule, not "wrong password" (SEC-006)', async () => {
+    const pw = account.changePassword({ current: 'alt', next: 'neu-lang-genug', confirm: 'neu-lang-genug' })
+    await answer('put', '/auth/password', httpError(422))
+    expect(await pw).toEqual({ error: 'set.pw.rule' })
+  })
+
+  it('a refused change keeps the session it has', async () => {
+    const pw = account.changePassword({ current: 'falsch', next: 'neu-lang-genug', confirm: 'neu-lang-genug' })
+    await answer('put', '/auth/password', httpError(400))
+    expect(await pw).toEqual({ error: 'set.pw.wrong' })
+    expect(adopted).toEqual([])
   })
 })

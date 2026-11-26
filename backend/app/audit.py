@@ -33,14 +33,20 @@ columns so adding one later is one `ALTER TABLE`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
+import threading
+import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import Request
 
 from app import database
+from app.config import settings
 from app.logging_setup import current_request_id, redact_text
 
 logger = logging.getLogger(__name__)
@@ -61,12 +67,25 @@ REGISTERED = "auth.registered"
 # would make the audit vocabulary lie about what the event is. See rules/waivers.yaml,
 # justified_suppressions.
 PASSWORD_CHANGED = "auth.password.changed"  # noqa: S105
+# SEC-006 (ADR 0044 Decision 5): a login replaced a bcrypt hash, or an Argon2id hash at old
+# parameters, with an Argon2id hash of the same password. No session ends. Same noqa reason.
+PASSWORD_REHASHED = "auth.password.rehashed"  # noqa: S105
 APIKEY_DISCLOSED = "auth.apikey.disclosed"
 APIKEY_REGENERATED = "auth.apikey.regenerated"
+# WAIVER-SEC-003 (ADR 0044 Decision 6): a hashed key was minted, or a key ended. The detail
+# names the public key id — never the secret, never its hash.
+APIKEY_CREATED = "auth.apikey.created"
+APIKEY_REVOKED = "auth.apikey.revoked"
 ROLE_CHANGED = "admin.role.changed"
 REGISTRATION_TOGGLED = "admin.registration.toggled"
 ADMIN_BOOTSTRAP = "admin.bootstrap"
 TASK_DELETED = "task.deleted"
+# SEC-001 (ADR 0043): the storage boundary refused an account, or the operator CLI moved one
+# to its storage-id directory or returned it. Who is still on the legacy layout is a query on
+# users.storage_layout, not an event per request.
+STORAGE_REFUSED = "storage.refused"
+STORAGE_MIGRATED = "storage.migrated"
+STORAGE_ROLLED_BACK = "storage.rolled_back"
 
 EVENTS = frozenset(
     {
@@ -76,12 +95,18 @@ EVENTS = frozenset(
         LOGIN_THROTTLED,
         REGISTERED,
         PASSWORD_CHANGED,
+        PASSWORD_REHASHED,
         APIKEY_DISCLOSED,
         APIKEY_REGENERATED,
+        APIKEY_CREATED,
+        APIKEY_REVOKED,
         ROLE_CHANGED,
         REGISTRATION_TOGGLED,
         ADMIN_BOOTSTRAP,
         TASK_DELETED,
+        STORAGE_REFUSED,
+        STORAGE_MIGRATED,
+        STORAGE_ROLLED_BACK,
     }
 )
 
@@ -166,6 +191,17 @@ CREATE INDEX IF NOT EXISTS audit_events_event_time
 ON audit_events (event, recorded_at)
 """
 
+# One row per key: what the store knows about itself, never about an event (brief 0073). Created by
+# the same statement everywhere, like the table above.
+CREATE_AUDIT_META = """
+CREATE TABLE IF NOT EXISTS audit_meta (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+)
+"""
+
+HIGH_WATER_KEY = "high_water_bytes"
+
 INSERT_EVENT = """
 INSERT INTO audit_events
     (recorded_at, event, actor, subject, outcome, auth_shape, route, request_id, detail)
@@ -186,12 +222,24 @@ def init_store() -> None:
             connection.execute(CREATE_AUDIT_EVENTS)
             connection.execute(CREATE_SHAPE_INDEX)
             connection.execute(CREATE_EVENT_INDEX)
+            connection.execute(CREATE_AUDIT_META)
             connection.commit()
     except (sqlite3.Error, OSError) as failure:
         logger.error(
             "the audit store could not be initialised",
             extra={"audit_db": str(database.audit_db_path()), "audit_error": str(failure)},
         )
+
+
+# An actor or subject is a name: an account, a task uuid, `user:<id>`. The request models bound the
+# names a caller types (256), and this bounds the column whatever a call site passes, so no row can
+# grow to the size of a request body (review of brief 0073, RISK-OPS-006).
+IDENTITY_MAX = 256
+
+
+def _identity(value: Any) -> str | None:
+    cleaned = _clean(value)
+    return None if cleaned is None else cleaned[:IDENTITY_MAX]
 
 
 def _clean(value: Any) -> str | None:
@@ -235,8 +283,8 @@ def record(
                 (
                     now(),
                     event,
-                    _clean(actor),
-                    _clean(subject),
+                    _identity(actor),
+                    _identity(subject),
                     outcome,
                     auth_shape,
                     _clean(route),
@@ -271,3 +319,164 @@ def route_of(request: Request | None) -> str | None:
     methods = sorted(getattr(route, "methods", None) or [])
     method = next((m for m in methods if m not in {"HEAD", "OPTIONS"}), None)
     return f"{method} {template}" if method else str(template)
+
+
+# --- refusals an unauthenticated caller can repeat (RISK-OPS-006, second review of brief 0073) -----
+#
+# `POST /auth/register` needs no credential and has no limiter, and each refusal wrote one row: a
+# client could grow `audit.db` linearly with its request rate. Like the login limiter's reports
+# (brief 0069), the first refusal of a kind in a window is a row; later ones are counted and carried
+# by the next row of that kind — or by a summary row once the window has passed with nothing to carry
+# it. So such rows are bounded per kind and window whatever the request rate, and every row says how
+# many refusals it stands for. A kind is (event, outcome, detail); callers pass a constant detail, so
+# the set of kinds is fixed by the code and the counters cannot grow either. In-process, like the
+# limiter: a count not yet written is lost on a restart (at most one window's worth per kind).
+
+
+@dataclass
+class _Coalesced:
+    written_at: float | None = None
+    unwritten: int = 0
+    route: str | None = None
+
+
+_coalesce_lock = threading.Lock()
+_coalesced: dict[tuple[str, str, str], _Coalesced] = {}
+
+
+def _clock() -> float:
+    return time.monotonic()
+
+
+def record_refusal(
+    event: str, *, outcome: str, actor: str | None, route: str | None, detail: str
+) -> None:
+    """Record a refusal an unauthenticated caller can repeat at will. Never raises.
+
+    The first of its kind in a window is written as `record` would write it; the rest are counted.
+    The next row of the kind, after the window, carries the count in its detail."""
+    key = (event, outcome, detail)
+    now = _clock()
+    with _coalesce_lock:
+        bucket = _coalesced.setdefault(key, _Coalesced())
+        bucket.unwritten += 1
+        bucket.route = route
+        if bucket.written_at is not None and now - bucket.written_at < _coalesce_window():
+            return
+        refusals, bucket.unwritten, bucket.written_at = bucket.unwritten, 0, now
+    text = detail if refusals == 1 else f"{detail} (refusals: {refusals})"
+    record(event, outcome=outcome, actor=actor, route=route, detail=text)
+
+
+def flush_refusals(*, everything: bool = False) -> None:
+    """Write a summary row for every kind whose window has passed with refusals still uncounted
+    (`everything`: regardless of the window, at shutdown). Never raises."""
+    now = _clock()
+    due: list[tuple[tuple[str, str, str], int, str | None]] = []
+    with _coalesce_lock:
+        for key, bucket in _coalesced.items():
+            if not bucket.unwritten:
+                continue
+            if (
+                not everything
+                and bucket.written_at is not None
+                and (now - bucket.written_at < _coalesce_window())
+            ):
+                continue
+            due.append((key, bucket.unwritten, bucket.route))
+            bucket.unwritten, bucket.written_at = 0, now
+    for (event, outcome, detail), refusals, route in due:
+        record(
+            event,
+            outcome=outcome,
+            route=route,
+            detail=f"{detail}: {refusals} further refusals in the last window",
+        )
+
+
+def reset_refusals() -> None:
+    """Test seam, like `rate_limit.reset_all`: the counters are module state."""
+    with _coalesce_lock:
+        _coalesced.clear()
+
+
+def _coalesce_window() -> float:
+    # The login limiter's window: one notion of "a window" for every coalesced audit row.
+    return float(settings.login_rate_window_seconds)
+
+
+# --- the size of the store (RISK-OPS-006, brief 0073, ADR 0047 Decision 1) -------------------------
+#
+# Measured, warned about, remembered at its largest — and never pruned. How long rows must be kept is
+# the operator's decision (gate D7); until it is taken nothing here deletes, archives or vacuums.
+# The measurement stats three files and writes one integer: it never reads an event.
+
+SIZE_INTERVAL_SECONDS = 3600.0
+
+
+@dataclass(frozen=True)
+class StoreSize:
+    bytes: int
+    high_water_bytes: int
+    warn_bytes: int
+
+    @property
+    def over_threshold(self) -> bool:
+        return self.bytes > self.warn_bytes
+
+
+def _files_bytes() -> int:
+    path = database.audit_db_path()
+    return sum(
+        p.stat().st_size for p in (path, Path(f"{path}-wal"), Path(f"{path}-shm")) if p.exists()
+    )
+
+
+def measure() -> StoreSize | None:
+    """Stat the audit store, raise its high-water mark if exceeded, and log one line. Never raises."""
+    try:
+        size = _files_bytes()
+        with database.audit_connection() as connection:
+            connection.execute(CREATE_AUDIT_META)
+            connection.execute(
+                "INSERT INTO audit_meta (key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = MAX(value, excluded.value)",
+                (HIGH_WATER_KEY, size),
+            )
+            row = connection.execute(
+                "SELECT value FROM audit_meta WHERE key = ?", (HIGH_WATER_KEY,)
+            ).fetchone()
+            connection.commit()
+        measured = StoreSize(
+            bytes=size,
+            high_water_bytes=int(row[0]) if row else size,
+            warn_bytes=settings.audit_db_warn_bytes,
+        )
+    except (sqlite3.Error, OSError) as failure:
+        logger.error("the audit store could not be measured", extra={"audit_error": str(failure)})
+        return None
+    fields = {
+        "audit_db_bytes": measured.bytes,
+        "audit_db_high_water_bytes": measured.high_water_bytes,
+        "audit_db_warn_bytes": measured.warn_bytes,
+    }
+    if measured.over_threshold:
+        logger.warning(
+            "audit store size",
+            extra={
+                **fields,
+                "hint": "over AUDIT_DB_WARN_BYTES; nothing prunes it until the retention decision "
+                "(docs/operations.md, The size of the audit log)",
+            },
+        )
+    else:
+        logger.info("audit store size", extra=fields)
+    return measured
+
+
+async def watch_size(interval: float | None = None) -> None:
+    """Measure every `interval` seconds until cancelled (the lifespan cancels it at shutdown)."""
+    while True:
+        await asyncio.sleep(SIZE_INTERVAL_SECONDS if interval is None else interval)
+        await asyncio.to_thread(flush_refusals)
+        await asyncio.to_thread(measure)

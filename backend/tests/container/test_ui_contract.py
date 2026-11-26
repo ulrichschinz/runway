@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.services import task_runner
+from tests.container.conftest import store_of
 
 pytestmark = pytest.mark.container
 
@@ -37,8 +38,9 @@ def _in(client: TestClient, headers: dict[str, str], view: str) -> list[str]:
 
 def _legacy(tag: str, description: str) -> str:
     """A task with a comma tag, as an older client wrote it (the API refuses to)."""
-    task_runner.add_task("alice", [f"+{tag}"], [description])
-    return task_runner.export_latest("alice")[0]["uuid"]
+    store = store_of("alice")
+    task_runner.add_task(store, [f"+{tag}"], [description])
+    return task_runner.export_latest(store)[0]["uuid"]
 
 
 class TestTheFollowUpDay:

@@ -16,12 +16,16 @@ What is captured, and why that source:
   whole point: the tool names are *not* the handler function names, they are FastAPI's
   generated operation ids, and believing otherwise is what `BLIND-MCP-001` warned about.
 * **S4 DB schema** — dumped from a database that `init_db()` has actually migrated, so the
-  snapshot reflects the migrations rather than the CREATE statements.
+  snapshot reflects the migrations rather than the CREATE statements, with the schema version it
+  reached. `RULE-SURF-005` (brief 0073, ADR 0047) then builds a database from every historical
+  baseline in `backend/tests/fixtures/schema_history/`, runs `init_db()` on it, and requires the
+  result to mean the same as the fresh one: a snapshot of the fresh path alone is how
+  `RISK-SURF-001` stayed invisible, because both sides of the comparison were generated the same way.
 * **S5 taskrc template** — verbatim. The urgency coefficients are a behavioural contract:
   changing one re-orders every user's list, and existing `.taskrc` files are never updated.
 * **S8 SPA** — routes and localStorage keys, parsed from source. Bookmarks depend on the
   first; the second is where a logged-in session lives. Keys are read from two forms: the
-  `declareKey('…')` inventory in `frontend/src/shared/browserStorage.js`, which since ADR 0047
+  `declareKey('…')` inventory in `frontend/src/shared/browserStorage.js`, which since ADR 0050
   is the only file that touches storage and whose per-account keys (`outbox:{account}`) are
   built at run time, and any literal `localStorage.getItem('…')` call — so a direct call that
   bypassed the inventory would still show up in the snapshot.
@@ -37,6 +41,7 @@ import ast
 import importlib.util
 import json
 import re
+import secrets
 import sqlite3
 import sys
 import tempfile
@@ -61,7 +66,9 @@ def _booted_app():
     sys.path.insert(0, str(ROOT / "backend"))
     from app.config import settings
 
-    settings.jwt_secret = "surface-capture-secret-long-enough-to-boot"  # noqa: S105  # secret-scan: allow — throwaway, lets startup_checks pass
+    # Generated per capture: a value written here would be published, and startup_checks refuses
+    # every published value (brief 0072).
+    settings.jwt_secret = secrets.token_urlsafe(48)
     from app.main import app, mcp
 
     return app, mcp
@@ -102,32 +109,78 @@ def capture_mcp_tools() -> dict:
     }
 
 
-def capture_db_schema() -> str:
-    """The schema after `init_db()` has run, migrations included."""
+SCHEMA_HISTORY = ROOT / "backend" / "tests" / "fixtures" / "schema_history"
+
+
+def _migrated(db_path: Path, baseline: Path | None = None) -> None:
+    """Run `init_db()` on `db_path`, first built from `baseline` when one is given."""
     import asyncio
 
     sys.path.insert(0, str(ROOT / "backend"))
     from app.config import settings
     from app.database import init_db
 
+    if baseline is not None:
+        con = sqlite3.connect(db_path)
+        con.executescript(baseline.read_text(encoding="utf-8"))
+        con.commit()
+        con.close()
+    original_db, original_root = settings.db_path, settings.data_root
+    settings.db_path = str(db_path)
+    settings.data_root = db_path.parent / f"{db_path.stem}-data"
+    settings.data_root.mkdir(exist_ok=True)
+    try:
+        asyncio.run(init_db())
+    finally:
+        settings.db_path, settings.data_root = original_db, original_root
+
+
+def capture_db_schema() -> str:
+    """The schema after `init_db()` has run, migrations included, and the version it reached."""
+    sys.path.insert(0, str(ROOT / "backend"))
+    from app.database import schema_fingerprint
+
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "surface.db"
-        original_db, original_root = settings.db_path, settings.data_root
-        settings.db_path = str(db_path)
-        settings.data_root = Path(tmp) / "data"
-        settings.data_root.mkdir()
-        try:
-            asyncio.run(init_db())
-            con = sqlite3.connect(db_path)
-            rows = con.execute(
-                "SELECT type, name, sql FROM sqlite_master "
-                "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
-            ).fetchall()
-            con.close()
-        finally:
-            settings.db_path, settings.data_root = original_db, original_root
+        _migrated(db_path)
+        con = sqlite3.connect(db_path)
+        rows = con.execute(
+            "SELECT type, name, sql FROM sqlite_master "
+            "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+        ).fetchall()
+        con.close()
+        version = schema_fingerprint(db_path)["schema_version"]
 
-    return "\n".join(f"-- {kind} {name}\n{sql};\n" for kind, name, sql in rows)
+    dump = "\n".join(f"-- {kind} {name}\n{sql};\n" for kind, name, sql in rows)
+    return f"{dump}\n-- schema_version {version}\n"
+
+
+def check_schema_history() -> list[str]:
+    """RULE-SURF-005: every historical baseline, migrated, means what a fresh database means."""
+    sys.path.insert(0, str(ROOT / "backend"))
+    from app.database import schema_differences, schema_fingerprint
+
+    baselines = sorted(SCHEMA_HISTORY.glob("*.sql"))
+    if not baselines:
+        return [
+            "RULE-SURF-005|backend/tests/fixtures/schema_history/ holds no baseline — the upgrade "
+            "path is compared against nothing"
+        ]
+    problems: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        fresh = Path(tmp) / "fresh.db"
+        _migrated(fresh)
+        expected = schema_fingerprint(fresh)
+        for baseline in baselines:
+            upgraded = Path(tmp) / f"{baseline.stem}.db"
+            _migrated(upgraded, baseline)
+            for difference in schema_differences(expected, schema_fingerprint(upgraded)):
+                problems.append(
+                    f"RULE-SURF-005|a database upgraded from {baseline.name} differs from a fresh "
+                    f"one: {difference[:300]}. A schema change goes into VERSIONED_MIGRATIONS "
+                    "(backend/app/database.py), never into a CREATE statement alone"
+                )
+    return problems
 
 
 def capture_taskrc() -> str:
@@ -253,6 +306,7 @@ def check() -> int:
             )
 
     problems += check_env_vars()
+    problems += check_schema_history()
 
     for line in problems:
         print(line)

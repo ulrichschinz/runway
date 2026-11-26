@@ -15,8 +15,8 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (endsSession(err)) {
-      // A lock, not a wipe (decision D6, ADR 0047): only the token goes. The account's queue and
+    if (endsSession(err, readToken())) {
+      // A lock, not a wipe (decision D6, ADR 0050): only the token goes. The account's queue and
       // draft wait under its namespace for the same account to sign in again.
       lockSession()
       // Keep where the visit was going (a Custom Tab's /next?task=…), as the router guard does.

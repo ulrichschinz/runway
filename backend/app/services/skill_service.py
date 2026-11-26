@@ -94,6 +94,41 @@ def _root() -> Path:
     )
 
 
+# The deploy compose as the image carries it (backend/Dockerfile) and as the host applied it: the
+# deploy compose mounts its own file there read-only (ops/deploy/docker-compose.yml, brief 0073).
+BAKED_COMPOSE = Path("/opt/stack/docker-compose.yml")
+APPLIED_COMPOSE = Path("/etc/runway/applied-compose.yml")
+
+
+# The schema version the lifespan's init_db() left the database at (ADR 0047). Handed in by
+# `app.main` rather than read from app.database, so this unit adds no importer to that hub.
+_schema_version: int | None = None
+
+
+def record_schema_version(version: int | None) -> None:
+    global _schema_version
+    _schema_version = version
+
+
+def _build_id_file() -> Path:
+    """`/app/BUILD_ID`, written beside BUILD_COMMIT from `ARG RUNWAY_BUILD` (the workflow run id)."""
+    return _APP_ROOT / "BUILD_ID"
+
+
+def _sha256_of(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _build_id() -> str:
+    stamp = _build_id_file()
+    if not stamp.is_file():
+        return "dev"
+    return stamp.read_text(encoding="utf-8").strip() or "dev"
+
+
 def _build_commit_file() -> Path:
     """`/app/BUILD_COMMIT`, written as the image's last layer from `ARG RUNWAY_COMMIT`.
 
@@ -172,7 +207,13 @@ def skill_info() -> SkillInfo:
             version=_version(plugin),
             sha256=_content_hash(plugin),
         ),
-        server=ServerBuild(commit=_commit()),
+        server=ServerBuild(
+            commit=_commit(),
+            build=_build_id(),
+            compose_sha256=_sha256_of(BAKED_COMPOSE),
+            applied_compose_sha256=_sha256_of(APPLIED_COMPOSE),
+            schema_version=_schema_version,
+        ),
         # Absolute and prefixed, because the SPA and every external client reach this
         # application under /api; nginx strips the prefix before it arrives here, so the
         # path this process sees is never the path a client can use.

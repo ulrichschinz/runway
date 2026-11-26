@@ -1,5 +1,5 @@
 /**
- * The session, as both UIs see it (brief 0075, ADR 0047).
+ * The session, as both UIs see it (brief 0075, ADR 0050).
  *
  * Storage holds only what a reload needs to stay signed in — the token, the username and the
  * account id `/auth/me` names (`shared/browserStorage.js`). The role, the name and the e-mail are
@@ -12,7 +12,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import client from '../api/client.js'
 import {
-  ACCOUNT_BOUND, KEY, accountOf, bindAccount, readToken, readUsername, signOut, startSession,
+  ACCOUNT_BOUND, KEY, accountOf, bindAccount, readToken, readUsername, signOut, startSession, writeKey,
 } from '../shared/browserStorage.js'
 import { t } from '../shared/i18n.js'
 
@@ -65,11 +65,23 @@ export const useAuthStore = defineStore('auth', () => {
     startSession({ token: data.access_token, username: user, accountId: data.account_id })
     boundId = accountOf()
     await fetchMe()
+    // The answer, for the page to decide where to go (`landingAfterLogin`, SEC-006).
+    return data
+  }
+
+  /**
+   * Keep the token a password change returned (REV-001, ADR 0044). The change ends every session
+   * issued before it, this one included; the server hands this session a token at the new version
+   * so it carries on while every other browser and device is logged out.
+   */
+  function adoptToken(fresh) {
+    token.value = fresh
+    writeKey(KEY.token, fresh)
   }
 
   async function register(user, pass) {
     await client.post('/auth/register', { username: user, password: pass })
-    await login(user, pass)
+    return login(user, pass)
   }
 
   /**
@@ -125,5 +137,5 @@ export const useAuthStore = defineStore('auth', () => {
     })
   }
 
-  return { username, token, role, fullName, email, login, register, logout, fetchMe }
+  return { username, token, role, fullName, email, login, register, logout, fetchMe, adoptToken }
 })

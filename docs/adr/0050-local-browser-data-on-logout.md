@@ -1,4 +1,4 @@
-# ADR 0047 — Local browser data on logout (Lokale Browserdaten beim Logout)
+# ADR 0050 — Local browser data on logout (Lokale Browserdaten beim Logout)
 
 - **Date:** 2026-11-24
 - **Status:** Accepted

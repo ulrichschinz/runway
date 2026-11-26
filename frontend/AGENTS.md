@@ -49,7 +49,7 @@ Rendering, routing and gestures are untested and recorded as `RISK-TEST-004`.
 
 ## Things that will surprise you
 
-- **No file but `src/shared/browserStorage.js` touches `localStorage`** (ADR 0047; a source scan in
+- **No file but `src/shared/browserStorage.js` touches `localStorage`** (ADR 0050; a source scan in
   `tests/browserStorage.test.js` fails otherwise). Declare a new key there with its data class:
   account data goes under `…:{account}` and is purged by logout; only UI preferences are shared.
   The declaration is what `tools/surfaces.py` snapshots into `ops/surfaces/spa.json`.

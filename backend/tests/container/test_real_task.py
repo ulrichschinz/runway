@@ -26,21 +26,30 @@ import pytest
 from app.config import settings
 from app.models import TaskCreate
 from app.services import task_service, user_service
+from app.task_storage import LAYOUT_STORAGE_ID, Account, TaskStore, new_storage_id
+from tests.container.conftest import store_of
 
 pytestmark = pytest.mark.container
+
+
+# The two synthetic accounts' stores, provisioned per test by `real_data_root`. Since brief
+# 0065 (SEC-001) the service takes a resolved store, never a username.
+S: dict[str, TaskStore] = {}
 
 
 @pytest.fixture(autouse=True)
 def real_data_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the service at a throwaway data root and provision users in it."""
     monkeypatch.setattr(settings, "data_root", tmp_path)
-    for name in ("alice", "bob"):
-        user_service.init_user_data(name)
+    S.clear()
+    for number, name in enumerate(("alice", "bob"), start=1):
+        account = Account(number, name, new_storage_id(), LAYOUT_STORAGE_ID)
+        S[name] = user_service.provision_store(account)
     return tmp_path
 
 
 def _task_dirs(root: Path) -> dict[str, Path]:
-    return {name: root / name for name in ("alice", "bob")}
+    return {name: store.path for name, store in S.items()}
 
 
 class TestTheBinaryItself:
@@ -66,25 +75,25 @@ class TestTheBinaryItself:
 
 class TestRoundTrip:
     def test_a_created_task_can_be_read_back(self):
-        created = task_service.create_task("alice", TaskCreate(description="real task"))
-        fetched = task_service.get_task("alice", created.uuid)
+        created = task_service.create_task(S["alice"], TaskCreate(description="real task"))
+        fetched = task_service.get_task(S["alice"], created.uuid)
         assert fetched.description == "real task"
         assert fetched.status == "pending"
 
     def test_attributes_survive_the_binary(self):
         created = task_service.create_task(
-            "alice",
+            S["alice"],
             TaskCreate(description="attributed", project="runway", tags=["next"], priority="H"),
         )
-        fetched = task_service.get_task("alice", created.uuid)
+        fetched = task_service.get_task(S["alice"], created.uuid)
         assert fetched.project == "runway"
         assert "next" in fetched.tags
         assert fetched.priority == "H"
 
     def test_completing_removes_a_task_from_the_pending_list(self):
-        created = task_service.create_task("alice", TaskCreate(description="finish me"))
-        task_service.complete_task("alice", created.uuid)
-        pending = task_service.list_tasks("alice", ["status:pending"])
+        created = task_service.create_task(S["alice"], TaskCreate(description="finish me"))
+        task_service.complete_task(S["alice"], created.uuid)
+        pending = task_service.list_tasks(S["alice"], ["status:pending"])
         assert created.uuid not in [t.uuid for t in pending]
 
 
@@ -92,20 +101,20 @@ class TestUrgency:
     """Urgency is Taskwarrior's, computed from the checked-in coefficients."""
 
     def test_the_next_tag_outranks_the_someday_tag(self):
-        task_service.create_task("alice", TaskCreate(description="soon", tags=["next"]))
-        task_service.create_task("alice", TaskCreate(description="later", tags=["someday"]))
-        by_description = {t.description: t.urgency for t in task_service.list_tasks("alice")}
+        task_service.create_task(S["alice"], TaskCreate(description="soon", tags=["next"]))
+        task_service.create_task(S["alice"], TaskCreate(description="later", tags=["someday"]))
+        by_description = {t.description: t.urgency for t in task_service.list_tasks(S["alice"])}
         assert by_description["soon"] > by_description["later"]
 
     def test_the_list_is_returned_in_descending_urgency_order(self):
         for description, tags in [("c", ["someday"]), ("a", ["next"]), ("b", [])]:
-            task_service.create_task("alice", TaskCreate(description=description, tags=tags))
-        urgencies = [t.urgency for t in task_service.list_tasks("alice")]
+            task_service.create_task(S["alice"], TaskCreate(description=description, tags=tags))
+        urgencies = [t.urgency for t in task_service.list_tasks(S["alice"])]
         assert urgencies == sorted(urgencies, reverse=True)
 
     def test_urgency_is_non_zero_so_the_coefficients_are_actually_loaded(self):
-        created = task_service.create_task("alice", TaskCreate(description="u", tags=["next"]))
-        assert task_service.get_task("alice", created.uuid).urgency > 10
+        created = task_service.create_task(S["alice"], TaskCreate(description="u", tags=["next"]))
+        assert task_service.get_task(S["alice"], created.uuid).urgency > 10
 
 
 class TestCrossTenantIsolation:
@@ -116,17 +125,17 @@ class TestCrossTenantIsolation:
     """
 
     def test_a_users_tasks_are_invisible_to_another_user(self):
-        task_service.create_task("alice", TaskCreate(description="alice private"))
-        bob_tasks = [t.description for t in task_service.list_tasks("bob")]
+        task_service.create_task(S["alice"], TaskCreate(description="alice private"))
+        bob_tasks = [t.description for t in task_service.list_tasks(S["bob"])]
         assert "alice private" not in bob_tasks
 
     def test_a_task_uuid_from_one_user_cannot_be_read_by_another(self):
-        created = task_service.create_task("alice", TaskCreate(description="alice private"))
+        created = task_service.create_task(S["alice"], TaskCreate(description="alice private"))
         with pytest.raises(ValueError, match="Task not found"):
-            task_service.get_task("bob", created.uuid)
+            task_service.get_task(S["bob"], created.uuid)
 
     def test_each_user_gets_a_separate_store_on_disk(self, real_data_root):
-        task_service.create_task("alice", TaskCreate(description="hers"))
+        task_service.create_task(S["alice"], TaskCreate(description="hers"))
         dirs = _task_dirs(real_data_root)
         assert any(dirs["alice"].rglob("*.sqlite3"))
 
@@ -143,52 +152,52 @@ class TestCrossTenantIsolation:
         Now the description travels after `--`, where Taskwarrior stops interpreting
         options. The payload is data.
         """
-        task_service.create_task("bob", TaskCreate(description="bob private note"))
-        payload = f"rc.data.location={settings.data_root / 'bob'}"
+        task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
+        payload = f"rc.data.location={S['bob'].path}"
 
-        created = task_service.create_task("alice", TaskCreate(description=payload))
+        created = task_service.create_task(S["alice"], TaskCreate(description=payload))
         assert created.description == payload, "the override should be stored verbatim"
 
-        alice = [t.description for t in task_service.list_tasks("alice")]
+        alice = [t.description for t in task_service.list_tasks(S["alice"])]
         assert payload in alice
         assert "bob private note" not in alice, "the store was redirected"
 
     def test_the_redirect_no_longer_reaches_another_users_store(self, real_data_root):
         """The decisive test, inverted. Alice writes an override naming Bob's directory and
         Bob's store must be untouched — no new file, no new task, nothing."""
-        task_service.create_task("bob", TaskCreate(description="bob private note"))
-        bob_dir = real_data_root / "bob"
+        task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
+        bob_dir = S["bob"].path
         before = sorted(f.name for f in bob_dir.rglob("*") if f.is_file())
 
         payload = f"rc.data.location={bob_dir}"
         # Both paths that carry free text: add, and the annotate path that used to be the
         # sharp edge because it applied the override and still returned success.
-        alice_task = task_service.create_task("alice", TaskCreate(description=payload))
-        task_service.annotate_task("alice", alice_task.uuid, payload)
+        alice_task = task_service.create_task(S["alice"], TaskCreate(description=payload))
+        task_service.annotate_task(S["alice"], alice_task.uuid, payload)
 
         after_files = sorted(f.name for f in bob_dir.rglob("*") if f.is_file())
         assert after_files == before, "alice's command touched bob's data directory"
 
-        bob_tasks = [t.description for t in task_service.list_tasks("bob")]
+        bob_tasks = [t.description for t in task_service.list_tasks(S["bob"])]
         assert bob_tasks == ["bob private note"]
 
     def test_an_rc_shaped_annotation_is_stored_as_annotation_text(self):
         """The annotate path was the sharp edge: it returned success while applying the
         override, so a user could run Taskwarrior against another store and get a 200.
         Now the text is text."""
-        payload = f"rc.data.location={settings.data_root / 'bob'}"
-        created = task_service.create_task("alice", TaskCreate(description="host"))
-        task = task_service.annotate_task("alice", created.uuid, payload)
+        payload = f"rc.data.location={S['bob'].path}"
+        created = task_service.create_task(S["alice"], TaskCreate(description="host"))
+        task = task_service.annotate_task(S["alice"], created.uuid, payload)
         assert [a.description for a in task.annotations] == [payload]
 
     def test_annotating_another_users_task_still_fails(self):
         """The uuid is a filter, not free text, so the isolation that always held must
         still hold: alice cannot reach bob's task at all."""
-        bob_task = task_service.create_task("bob", TaskCreate(description="bob private note"))
+        bob_task = task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
         with pytest.raises((ValueError, RuntimeError)):
-            task_service.annotate_task("alice", bob_task.uuid, "sneaky")
+            task_service.annotate_task(S["alice"], bob_task.uuid, "sneaky")
 
-        after = task_service.get_task("bob", bob_task.uuid)
+        after = task_service.get_task(S["bob"], bob_task.uuid)
         assert after.annotations == []
         assert after.description == "bob private note"
 
@@ -197,8 +206,8 @@ class TestCrossTenantIsolation:
         whole string became the override's value. That argument is gone — the string is
         text now, whatever its shape — and this asserts the outcome rather than the
         accident."""
-        payload = f"rc.data.location={settings.data_root / 'bob'} buy milk"
-        created = task_service.create_task("alice", TaskCreate(description=payload))
+        payload = f"rc.data.location={S['bob'].path} buy milk"
+        created = task_service.create_task(S["alice"], TaskCreate(description=payload))
         assert created.description == payload
 
     def test_the_choke_point_refuses_an_override_in_a_structural_position(self):
@@ -207,7 +216,287 @@ class TestCrossTenantIsolation:
         from app.services import task_runner
 
         with pytest.raises(task_runner.UnsafeArgument):
-            task_runner.export_tasks("alice", [f"rc.data.location={settings.data_root / 'bob'}"])
+            task_runner.export_tasks(S["alice"], [f"rc.data.location={S['bob'].path}"])
+
+
+# The Taskwarrior major.minor the SEC-007 evidence was taken on (brief 0074). An archive-snapshot
+# bump that brings another one fails `test_the_binary_is_the_version_the_date_evidence_covers`
+# until someone re-runs the date regression below, and the audit's probe, against the new binary.
+DATE_EVIDENCE_VERSION = "3.5"
+
+DATE_FIELDS = ("due", "scheduled", "wait", "until")
+
+
+def _files(directory: Path) -> list[str]:
+    return sorted(str(f.relative_to(directory)) for f in directory.rglob("*") if f.is_file())
+
+
+class TestDateValuesAreOneArgument:
+    """Finding SEC-007, rejected — kept as a regression for every date field (brief 0074, plan M9).
+
+    The hypothesis: `_build_args` emits a date as `due:<value>` *before* `--`, and
+    `reject_structural_tokens` only refuses a token that starts with `rc.`, so a value such as
+    `2026-01-01 rc.data.location=<victim>` would redirect the store if Taskwarrior re-lexed the
+    element. Taskwarrior 3.5.0 does lex a date value (`now + 1d` evaluates) but drops an embedded
+    override. These tests call `task_runner` directly, past the service's date grammar, so they
+    hold the *binary's* behaviour; the grammar is defence in depth on top.
+
+    If one of them goes red after an upgrade, that is a **new** finding with its own attack path —
+    not SEC-007 reinterpreted (plan M9). Do not loosen the assertion; open the finding.
+    """
+
+    @pytest.fixture
+    def victim(self, real_data_root: Path) -> Path:
+        """An empty directory: any store Taskwarrior opens here leaves a file behind."""
+        directory = real_data_root / "victim"
+        directory.mkdir()
+        return directory
+
+    @pytest.fixture
+    def rc_loaded(self, real_data_root: Path) -> Path:
+        """The file `evil_rc`'s launch hook creates: it exists only if the rc file was loaded."""
+        return real_data_root / "rc-loaded"
+
+    @pytest.fixture
+    def evil_rc(self, real_data_root: Path, victim: Path, rc_loaded: Path) -> Path:
+        """An rc file whose load is observable on add *and* modify.
+
+        `data.location` alone proves nothing: TASKDATA, which `_run` always sets, outranks it, so
+        a loaded file would leave `victim` empty (third review of brief 0074). Hence two signals
+        TASKDATA does not override: an `on-launch` hook that creates `rc_loaded` on every command,
+        and `default.project=PWNED` on every add. Both are shown to fire by the controls below.
+        """
+        hooks = real_data_root / "evilhooks"
+        hooks.mkdir()
+        hook = hooks / "on-launch.rc-loaded"
+        hook.write_text(f"#!/bin/sh\ntouch '{rc_loaded}'\n")
+        hook.chmod(0o755)
+        rc = real_data_root / "evilrc"
+        rc.write_text(
+            f"data.location={victim}\ndefault.project=PWNED\nhooks=on\nhooks.location={hooks}\n"
+        )
+        return rc
+
+    @staticmethod
+    def _payloads(victim: Path, evil_rc: Path, marker: Path) -> list[str]:
+        return [
+            f"2026-01-01 rc.data.location={victim}",
+            f"2026-01-01\trc.data.location={victim}",
+            f"2026-01-01\nrc.data.location={victim}",
+            f"rc.data.location={victim}",
+            f"now + rc.data.location={victim}",
+            f"2026-01-01 rc:{evil_rc}",
+            # The colon spelling of an override, which Taskwarrior honours standalone
+            # (`test_the_harness_can_see_a_colon_redirect`), as the whole value and embedded;
+            # and the rc-file form as the whole value (second review of brief 0074).
+            f"rc.data.location:{victim}",
+            f"2026-01-01 rc.data.location:{victim}",
+            f"now+rc.data.location:{victim}",
+            "rc.data.location:..",
+            f"rc:{evil_rc}",
+            f"$(touch {marker})",
+            f"`touch {marker}`",
+            f"2026-01-01;touch {marker}",
+        ]
+
+    def test_the_binary_is_the_version_the_date_evidence_covers(self):
+        """The upgrade re-open trigger, made executable (plan M9).
+
+        On a failure: run this class, and the probe recorded in brief 0074, against the new
+        binary; if nothing redirects, set DATE_EVIDENCE_VERSION in the same change and say so in
+        its brief. If anything redirects, open a new finding (docs/operations.md, "Upgrading
+        Taskwarrior").
+        """
+        task_bin = shutil.which("task")
+        assert task_bin
+        version = subprocess.run(  # noqa: S603  # absolute path resolved above
+            [task_bin, "--version"], capture_output=True, text=True, timeout=10
+        ).stdout.strip()
+        major_minor = ".".join(version.split(".")[:2])
+        assert major_minor == DATE_EVIDENCE_VERSION, (
+            f"Taskwarrior {version} is not the {DATE_EVIDENCE_VERSION}.x the SEC-007 date evidence "
+            "covers: re-run the date regression and the grammar probe against it (brief 0074)"
+        )
+
+    @staticmethod
+    def _raw_task(args: list[str]) -> subprocess.CompletedProcess[str]:
+        """The binary on alice's store, past `_run` and its token check — for the controls."""
+        store = S["alice"]
+        task_bin = shutil.which("task")
+        assert task_bin
+        return subprocess.run(  # noqa: S603  # the binary, a synthetic store, no user input
+            [task_bin, "rc.confirmation=off", "rc.verbose=nothing", *args],
+            env={
+                **os.environ,
+                "TASKDATA": str(store.path),
+                "TASKRC": str(store.taskrc),
+                "HOME": str(store.path),
+            },
+            capture_output=True,
+            text=True,
+            timeout=10,
+            stdin=subprocess.DEVNULL,
+        )
+
+    @pytest.mark.parametrize("operator", ["=", ":"])
+    def test_the_harness_can_see_a_redirect(self, victim, operator):
+        """Positive control: a *standalone* override, in either spelling, does create a store in
+        `victim`, so the negative tests below would see one. (An rc file's `data.location` is no
+        control: TASKDATA, which `_run` always sets, outranks it — observed on 3.5.0, brief 0074;
+        the rc-file controls below watch its hook and default project instead.)"""
+        self._raw_task([f"rc.data.location{operator}{victim}", "add", "--", "control"])
+        assert "taskchampion.sqlite3" in _files(victim), "a standalone override did not redirect"
+
+    def test_the_harness_can_see_a_redirect_on_modify(self, victim):
+        """The same control on the modify path the negative modify test exercises."""
+        task = task_service.create_task(S["alice"], TaskCreate(description="host"))
+        self._raw_task([f"rc.data.location={victim}", task.uuid, "modify", "due:2030-01-01"])
+        assert "taskchampion.sqlite3" in _files(victim), "a standalone override did not redirect"
+
+    def test_the_harness_can_see_an_rc_file_load_on_add(self, evil_rc, rc_loaded):
+        """Positive control for the `rc:<file>` payloads: a standalone `rc:` loads the file, which
+        both runs its hook and sets the project, so the negative tests below would see a load."""
+        result = self._raw_task([f"rc:{evil_rc}", "add", "--", "control"])
+        assert result.returncode == 0, result.stderr
+        assert rc_loaded.exists(), "a standalone rc: did not run the rc file's hook"
+        projects = {t.description: t.project for t in task_service.list_tasks(S["alice"])}
+        assert projects == {"control": "PWNED"}, "a standalone rc: did not set the project"
+
+    def test_the_harness_can_see_an_rc_file_load_on_modify(self, evil_rc, rc_loaded):
+        task = task_service.create_task(S["alice"], TaskCreate(description="host"))
+        rc_loaded.unlink(missing_ok=True)
+        result = self._raw_task([f"rc:{evil_rc}", task.uuid, "modify", "due:2030-01-01"])
+        assert result.returncode == 0, result.stderr
+        assert rc_loaded.exists(), "a standalone rc: did not run the rc file's hook on modify"
+
+    @pytest.mark.parametrize("field", DATE_FIELDS)
+    def test_an_override_in_a_date_on_add_reaches_no_other_store(
+        self, real_data_root, victim, evil_rc, rc_loaded, field
+    ):
+        """Every payload, through `task_runner` past the service grammar: no store opened in
+        `victim` or touched in bob's directory, no rc file loaded, no shell command run."""
+        from app.services import task_runner
+
+        task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
+        bob_before = _files(S["bob"].path)
+        marker = real_data_root / "marker"
+        for payload in self._payloads(victim, evil_rc, marker):
+            token = f"{field}:{payload}"
+            try:
+                task_runner.add_task(S["alice"], [token], ["probe"])
+            except task_runner.TaskwarriorRejected:
+                pass  # refused by the binary: also no redirect
+            assert _files(victim) == [], f"{token!r} opened a store in the victim directory"
+            assert not rc_loaded.exists(), f"{token!r} loaded the rc file (its hook ran)"
+            assert "PWNED" not in {t.project for t in task_service.list_tasks(S["alice"])}, (
+                f"{token!r} loaded the rc file (its default.project applied)"
+            )
+            assert not marker.exists(), f"{token!r} ran a shell command"
+        assert _files(S["bob"].path) == bob_before, "bob's directory changed"
+        assert [t.description for t in task_service.list_tasks(S["bob"])] == ["bob private note"]
+        assert "probe" in [t.description for t in task_service.list_tasks(S["alice"])], (
+            "no payload was accepted, so the redirect was never really attempted"
+        )
+
+    @pytest.mark.parametrize("field", DATE_FIELDS)
+    def test_an_override_in_a_date_on_modify_reaches_no_other_store(
+        self, real_data_root, victim, evil_rc, rc_loaded, field
+    ):
+        from app.services import task_runner
+
+        task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
+        bob_before = _files(S["bob"].path)
+        task = task_service.create_task(S["alice"], TaskCreate(description="host"))
+        marker = real_data_root / "marker"
+        accepted = []
+        for payload in self._payloads(victim, evil_rc, marker):
+            token = f"{field}:{payload}"
+            try:
+                task_runner.modify_task(S["alice"], task.uuid, [token])
+                accepted.append(token)
+            except task_runner.TaskwarriorRejected:
+                pass  # refused by the binary: also no redirect
+            assert _files(victim) == [], f"{token!r} opened a store in the victim directory"
+            assert not rc_loaded.exists(), f"{token!r} loaded the rc file (its hook ran)"
+            assert not marker.exists(), f"{token!r} ran a shell command"
+        assert _files(S["bob"].path) == bob_before, "bob's directory changed"
+        assert [t.description for t in task_service.list_tasks(S["bob"])] == ["bob private note"]
+        assert accepted, "no payload was accepted, so the redirect was never really attempted"
+        assert task_service.get_task(S["alice"], task.uuid).uuid == task.uuid
+
+    @pytest.mark.parametrize("reference", ["rc.data.location", "rc.dateformat", "system.os"])
+    def test_a_dom_reference_in_a_date_is_evaluated_by_the_binary(self, reference):
+        """Characterisation, the reason for the grammar's dot rule (second review of brief 0074):
+        3.5.0 evaluates a DOM reference inside a date and echoes the result in its rc-2 stderr —
+        for `rc.data.location`, the store's absolute path. No redirect; a disclosure."""
+        result = self._raw_task(["add", f"due:{reference}", "--", "probe"])
+        assert result.returncode == 2
+        assert "is not a valid date" in result.stderr
+        if reference == "rc.data.location":
+            assert str(S["alice"].path) in result.stderr
+
+    def test_past_the_grammar_the_store_path_still_never_reaches_the_caller(self):
+        """`_run`'s own control, held with the grammar bypassed: the refusal that would carry the
+        data path is answered generically."""
+        from app.services import task_runner
+
+        for token in ("due:rc.data.location", "scheduled:rc.data.location"):
+            with pytest.raises(task_runner.TaskwarriorRejected) as refused:
+                task_runner.add_task(S["alice"], [token], ["probe"])
+            assert str(settings.data_root) not in str(refused.value)
+            assert S["alice"].path.name not in str(refused.value)
+
+    @pytest.mark.parametrize(
+        "value",
+        ["rc.data.location", "system.os", "tw.version", "now+rc.data.location", "rc:rc"],
+    )
+    def test_over_http_a_dom_reference_is_refused_and_names_nothing(self, real_client, value):
+        """Through the ASGI app against the real binary, REST and therefore MCP: 400 from the
+        grammar, no path, no OS, no version; and `now+rc.data.location` is not stored as `now`."""
+        client, headers = real_client
+        r = client.post("/tasks", json={"description": "t", "due": value}, headers=headers)
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert "not a valid date" in detail
+        assert str(settings.data_root) not in detail
+        assert "Darwin" not in detail and "Linux" not in detail and "3.5" not in detail
+        assert client.get("/tasks", headers=headers).json() == []
+
+    def test_a_newline_turns_the_token_into_description_text(self):
+        """Characterisation, not a redirect: on 3.5.0 an element with a newline is not read as
+        an attribute at all — `add` stores it as description text and sets no date, `modify`
+        replaces the description with it. One reason the service grammar refuses control
+        characters (brief 0074): the value was never the date it looked like."""
+        from app.services import task_runner
+
+        task_runner.add_task(S["alice"], ["due:2026-01-01\nx"], ["probe"])
+        latest = task_service._raw_to_task(task_runner.export_latest(S["alice"])[0])
+        assert latest.due is None
+        assert latest.description.startswith("due:2026-01-01\nx")
+
+    @pytest.mark.parametrize("field", DATE_FIELDS)
+    def test_the_documented_forms_are_stored_as_dates(self, field):
+        """UTC in this tier (`conftest._utc`): a bare day is midnight, a time is kept."""
+        day = task_service.create_task(
+            S["alice"], TaskCreate(description="day", **{field: "2031-03-04"})
+        )
+        timed = task_service.create_task(
+            S["alice"], TaskCreate(description="timed", **{field: "2031-03-04T10:30"})
+        )
+        assert getattr(day, field) == "20310304T000000Z"
+        assert getattr(timed, field) == "20310304T103000Z"
+
+    @pytest.mark.parametrize("field", DATE_FIELDS)
+    def test_the_service_refuses_the_payload_before_the_binary(self, field):
+        """The grammar on top: the shape SEC-007 needs never becomes an argument at all. (A short
+        path: the request models bound a date at 64 characters, brief 0073.)"""
+        before = _files(S["alice"].path)
+        with pytest.raises(ValueError, match="not a valid date"):
+            task_service.create_task(
+                S["alice"],
+                TaskCreate(description="t", **{field: "2026-01-01 rc.data.location=/v"}),
+            )
+        assert _files(S["alice"].path) == before, "the refused create wrote to the store"
 
 
 class TestTagsAreAFullSet:
@@ -262,11 +551,11 @@ class TestTagsAreAFullSet:
         from app.models import TaskModify
         from app.services import task_runner
 
-        task_runner.add_task("alice", ["+@home,@office"], ["legacy"])
-        uuid = task_runner.export_latest("alice")[0]["uuid"]
-        assert task_service.get_task("alice", uuid).tags == ["@home,@office"]
+        task_runner.add_task(S["alice"], ["+@home,@office"], ["legacy"])
+        uuid = task_runner.export_latest(S["alice"])[0]["uuid"]
+        assert task_service.get_task(S["alice"], uuid).tags == ["@home,@office"]
 
-        task = task_service.modify_task("alice", uuid, TaskModify(tags=["@home", "@office"]))
+        task = task_service.modify_task(S["alice"], uuid, TaskModify(tags=["@home", "@office"]))
         assert sorted(task.tags) == ["@home", "@office"]
         assert task.description == "legacy"
 
@@ -276,10 +565,10 @@ class TestTagsAreAFullSet:
         the description and keeps the tag. The fake refuses the token for the same reason."""
         from app.services import task_runner
 
-        task_runner.add_task("alice", [f"tags:{tag}"], ["legacy"])
-        uuid = task_runner.export_latest("alice")[0]["uuid"]
-        task_runner.modify_task("alice", uuid, [f"-{tag}"])
-        raw = task_runner.export_tasks("alice", [uuid])[0]
+        task_runner.add_task(S["alice"], [f"tags:{tag}"], ["legacy"])
+        uuid = task_runner.export_latest(S["alice"])[0]["uuid"]
+        task_runner.modify_task(S["alice"], uuid, [f"-{tag}"])
+        raw = task_runner.export_tasks(S["alice"], [uuid])[0]
         assert raw["tags"] == [tag]
         assert raw["description"] == f"-{tag}"
 
@@ -288,40 +577,40 @@ class TestTagsAreAFullSet:
         from app.services import task_runner
 
         client, headers = real_client
-        task_runner.add_task("alice", ["tags:1abc,next"], ["Pay rent"])
-        uuid = task_runner.export_latest("alice")[0]["uuid"]
+        task_runner.add_task(store_of("alice"), ["tags:1abc,next"], ["Pay rent"])
+        uuid = task_runner.export_latest(store_of("alice"))[0]["uuid"]
         r = client.put(f"/tasks/{uuid}", json=body, headers=headers)
         assert r.status_code == 400, r.text
         assert "cannot remove tag" in r.text
-        task = task_service.get_task("alice", uuid)
+        task = task_service.get_task(store_of("alice"), uuid)
         assert task.description == "Pay rent"
         assert sorted(task.tags) == ["1abc", "next"]
 
     def test_a_dropped_dependency_is_removed_and_the_rest_kept(self):
         from app.models import TaskModify
 
-        a = task_service.create_task("alice", TaskCreate(description="a")).uuid
-        b = task_service.create_task("alice", TaskCreate(description="b")).uuid
-        c = task_service.create_task("alice", TaskCreate(description="c")).uuid
-        task = task_service.create_task("alice", TaskCreate(description="t", depends=[a]))
+        a = task_service.create_task(S["alice"], TaskCreate(description="a")).uuid
+        b = task_service.create_task(S["alice"], TaskCreate(description="b")).uuid
+        c = task_service.create_task(S["alice"], TaskCreate(description="c")).uuid
+        task = task_service.create_task(S["alice"], TaskCreate(description="t", depends=[a]))
 
-        task = task_service.modify_task("alice", task.uuid, TaskModify(depends=[a, b]))
+        task = task_service.modify_task(S["alice"], task.uuid, TaskModify(depends=[a, b]))
         assert sorted(task.depends) == sorted([a, b]), "depends:X must add, not replace"
 
-        task = task_service.modify_task("alice", task.uuid, TaskModify(depends=[b, c]))
+        task = task_service.modify_task(S["alice"], task.uuid, TaskModify(depends=[b, c]))
         assert sorted(task.depends) == sorted([b, c])
 
-        task = task_service.modify_task("alice", task.uuid, TaskModify(depends=[]))
+        task = task_service.modify_task(S["alice"], task.uuid, TaskModify(depends=[]))
         assert task.depends == []
 
     def test_a_future_wait_task_can_be_retagged(self):
         from app.models import TaskModify
 
         task = task_service.create_task(
-            "alice", TaskCreate(description="later", tags=["someday"], wait="2030-01-01")
+            S["alice"], TaskCreate(description="later", tags=["someday"], wait="2030-01-01")
         )
         task = task_service.modify_task(
-            "alice", task.uuid, TaskModify(tags_remove=["someday"], tags_add=["next"])
+            S["alice"], task.uuid, TaskModify(tags_remove=["someday"], tags_add=["next"])
         )
         assert task.tags == ["next"]
 
@@ -376,18 +665,18 @@ class TestEmptyStringClears:
         from app.models import TaskModify
 
         task_service.create_task(
-            "alice", TaskCreate(description="rent", recur="monthly", due="2030-01-01")
+            S["alice"], TaskCreate(description="rent", recur="monthly", due="2030-01-01")
         )
-        instance = task_service.list_tasks("alice", ["status:pending"])[0]
+        instance = task_service.list_tasks(S["alice"], ["status:pending"])[0]
         assert instance.recur == "monthly"
         with pytest.raises(ValueError, match="recurring task"):
-            task_service.modify_task("alice", instance.uuid, TaskModify(**{field: ""}))
+            task_service.modify_task(S["alice"], instance.uuid, TaskModify(**{field: ""}))
 
     def test_an_unparseable_date_is_a_rejection_that_names_no_path(self, real_data_root):
         from app.services import task_runner
 
         with pytest.raises(task_runner.TaskwarriorRejected) as exc:
-            task_service.create_task("alice", TaskCreate(description="t", due="notadate"))
+            task_service.create_task(S["alice"], TaskCreate(description="t", due="notadate"))
         assert "notadate" in str(exc.value)
         assert str(real_data_root) not in str(exc.value)
         assert "/" not in str(exc.value)
@@ -419,10 +708,12 @@ class TestRecurringInstances:
         assert r.status_code == 201, r.text
         # Any report generates the instances; the pending export is one.
         instances = [
-            t for t in task_service.list_tasks("alice", ["status:pending"]) if t.recur == "weekly"
+            t
+            for t in task_service.list_tasks(store_of("alice"), ["status:pending"])
+            if t.recur == "weekly"
         ]
         assert len(instances) >= 2, "expected several generated instances"
-        parent_before = task_runner.export_tasks("alice", ["status:recurring"])
+        parent_before = task_runner.export_tasks(store_of("alice"), ["status:recurring"])
         assert len(parent_before) == 1
 
         target = instances[0].uuid
@@ -433,11 +724,11 @@ class TestRecurringInstances:
         assert elapsed < 2, f"modify took {elapsed:.1f}s: a confirmation prompt waited"
         assert r.json()["tags"] == ["next"]
 
-        parent_after = task_runner.export_tasks("alice", ["status:recurring"])
+        parent_after = task_runner.export_tasks(store_of("alice"), ["status:recurring"])
         assert parent_after[0].get("tags", []) == parent_before[0].get("tags", [])
         others = [
             t
-            for t in task_service.list_tasks("alice", ["status:pending"])
+            for t in task_service.list_tasks(store_of("alice"), ["status:pending"])
             if t.recur == "weekly" and t.uuid != target
         ]
         assert others and all("next" not in t.tags for t in others)
@@ -534,7 +825,7 @@ class TestListSemantics:
     def test_a_recurring_task_without_a_due_date_is_refused(self, real_client):
         client, headers = real_client
         with pytest.raises(ValueError, match="due"):
-            task_service.create_task("alice", TaskCreate(description="r", recur="weekly"))
+            task_service.create_task(S["alice"], TaskCreate(description="r", recur="weekly"))
         r = client.post("/tasks", json={"description": "r", "recur": "weekly"}, headers=headers)
         assert r.status_code == 400, r.text
 
@@ -927,14 +1218,14 @@ class TestWhatTheFakeClaims:
     def _add(mods, text="t"):
         from app.services import task_runner
 
-        task_runner.add_task("alice", mods, [text])
-        return task_runner.export_latest("alice")[0]
+        task_runner.add_task(S["alice"], mods, [text])
+        return task_runner.export_latest(S["alice"])[0]
 
     @staticmethod
     def _descriptions(filters):
         from app.services import task_runner
 
-        return sorted(t["description"] for t in task_runner.export_tasks("alice", filters))
+        return sorted(t["description"] for t in task_runner.export_tasks(S["alice"], filters))
 
     def test_hidden_is_status_waiting_and_plus_waiting_yet_exports_pending(self):
         hidden = self._add(["wait:2030-01-01"], "hidden")
@@ -967,8 +1258,8 @@ class TestWhatTheFakeClaims:
         done = self._add([], "done")
         gone = self._add([], "gone")
         self._add(["wait:2030-01-01"], "hidden")
-        task_runner.done_task("alice", done["uuid"])
-        task_runner.delete_task("alice", gone["uuid"])
+        task_runner.done_task(S["alice"], done["uuid"])
+        task_runner.delete_task(S["alice"], gone["uuid"])
         assert self._descriptions(["status:completed"]) == ["done"]
         all_group = ["(", "status:pending", "or", "status:waiting", "or", "status:completed", ")"]
         assert self._descriptions(all_group) == ["done", "hidden"]
@@ -978,10 +1269,10 @@ class TestWhatTheFakeClaims:
 
         done = self._add([], "done")
         gone = self._add([], "gone")
-        task_runner.done_task("alice", done["uuid"])
-        task_runner.delete_task("alice", gone["uuid"])
+        task_runner.done_task(S["alice"], done["uuid"])
+        task_runner.delete_task(S["alice"], gone["uuid"])
         for uuid in (done["uuid"], gone["uuid"]):
-            assert task_runner.export_tasks("alice", [uuid])[0]["end"]
+            assert task_runner.export_tasks(S["alice"], [uuid])[0]["end"]
 
     @pytest.mark.parametrize(
         "value,stored",
@@ -1005,7 +1296,7 @@ class TestWhatTheFakeClaims:
         from app.services import task_runner
 
         with pytest.raises(task_runner.TaskwarriorRejected, match="priority"):
-            task_runner.add_task("alice", ["priority:X"], ["t"])
+            task_runner.add_task(S["alice"], ["priority:X"], ["t"])
 
     def test_a_tag_with_a_leading_digit_becomes_text(self):
         """Why the fake refuses `+1abc` rather than storing it as a tag."""
@@ -1022,10 +1313,12 @@ class TestWhatTheFakeClaims:
         from app.services import task_runner
 
         task = self._add([], "hello world")
-        task_runner.modify_task("alice", task["uuid"], [], [""])
-        assert task_runner.export_tasks("alice", [task["uuid"]])[0]["description"] == "hello world"
+        task_runner.modify_task(S["alice"], task["uuid"], [], [""])
+        assert (
+            task_runner.export_tasks(S["alice"], [task["uuid"]])[0]["description"] == "hello world"
+        )
 
-        task_runner.modify_task("alice", task["uuid"], ["priority:H"], [""])
-        after = task_runner.export_tasks("alice", [task["uuid"]])[0]
+        task_runner.modify_task(S["alice"], task["uuid"], ["priority:H"], [""])
+        after = task_runner.export_tasks(S["alice"], [task["uuid"]])[0]
         assert after["description"] == "hello world"
         assert after["priority"] == "H"

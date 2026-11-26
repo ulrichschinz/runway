@@ -1,5 +1,5 @@
 /**
- * The browser storage rules (brief 0075, ADR 0047): one inventory, one access path, account data
+ * The browser storage rules (brief 0075, ADR 0050): one inventory, one access path, account data
  * namespaced by a stable account id, an explicit logout that purges it, a 401 that only locks.
  * Pure: every function takes the storage as an argument, so a Map stands in for the profile.
  */

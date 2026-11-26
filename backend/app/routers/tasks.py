@@ -1,11 +1,13 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 
 from app import audit
-from app.dependencies import get_current_user
-from app.models import AnnotationCreate, Task, TaskCreate, TaskModify
+from app.dependencies import get_current_user, get_task_store
+from app.models import AnnotationCreate, LimitExceeded, Task, TaskCreate, TaskModify
 from app.services import task_service
+from app.task_storage import TaskStore
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -13,6 +15,11 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 def _handle(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
+    except LimitExceeded as e:
+        # A changed value over its bound (brief 0073): the 422 pydantic gives for a new task.
+        raise RequestValidationError(
+            [{"type": "too_long", "loc": ("body", e.field), "msg": str(e)}]
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
@@ -29,6 +36,7 @@ def _handle(fn, *args, **kwargs):
 )
 def list_tasks(
     username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
     status: Literal["pending", "waiting", "completed", "all"] | None = Query(
         None,
         description="`pending` (the default) is every visible task; `waiting` is only the "
@@ -85,7 +93,7 @@ def list_tasks(
 ):
     return _handle(
         task_service.search_tasks,
-        username,
+        store,
         status=status,
         include_done=include_done,
         project=project,
@@ -107,8 +115,12 @@ def list_tasks(
     description="Create a new task. Only the description is required; project, tags, priority "
     "(H/M/L), dates and a recurrence are optional, and an empty string counts as not given.",
 )
-def create_task(body: TaskCreate, username: str = Depends(get_current_user)):
-    return _handle(task_service.create_task, username, body)
+def create_task(
+    body: TaskCreate,
+    username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
+):
+    return _handle(task_service.create_task, store, body)
 
 
 @router.get(
@@ -117,8 +129,10 @@ def create_task(body: TaskCreate, username: str = Depends(get_current_user)):
     summary="Get a task",
     description="Fetch a single task by its UUID, including all fields and annotations.",
 )
-def get_task(uuid: str, username: str = Depends(get_current_user)):
-    return _handle(task_service.get_task, username, uuid)
+def get_task(
+    uuid: str, username: str = Depends(get_current_user), store: TaskStore = Depends(get_task_store)
+):
+    return _handle(task_service.get_task, store, uuid)
 
 
 @router.put(
@@ -131,8 +145,13 @@ def get_task(uuid: str, username: str = Depends(get_current_user)):
     "cleared, and an empty one leaves it as it was. `tags` replaces the whole tag set, so use "
     "`tags_add` / `tags_remove` to change single tags without reading the task first.",
 )
-def modify_task(uuid: str, body: TaskModify, username: str = Depends(get_current_user)):
-    return _handle(task_service.modify_task, username, uuid, body)
+def modify_task(
+    uuid: str,
+    body: TaskModify,
+    username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
+):
+    return _handle(task_service.modify_task, store, uuid, body)
 
 
 @router.post(
@@ -141,8 +160,10 @@ def modify_task(uuid: str, body: TaskModify, username: str = Depends(get_current
     summary="Complete a task",
     description="Mark a task as done. It will no longer appear in pending task lists.",
 )
-def complete_task(uuid: str, username: str = Depends(get_current_user)):
-    _handle(task_service.complete_task, username, uuid)
+def complete_task(
+    uuid: str, username: str = Depends(get_current_user), store: TaskStore = Depends(get_task_store)
+):
+    _handle(task_service.complete_task, store, uuid)
 
 
 @router.delete(
@@ -151,11 +172,16 @@ def complete_task(uuid: str, username: str = Depends(get_current_user)):
     summary="Delete a task",
     description="Permanently delete a task. Use complete instead if you want to keep history.",
 )
-def delete_task(request: Request, uuid: str, username: str = Depends(get_current_user)):
+def delete_task(
+    request: Request,
+    uuid: str,
+    username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
+):
     # Recorded AFTER the delete, so the row means "this task is gone" rather than "someone
     # asked". Taskwarrior's own `delete` is the only destructive operation this API exposes
     # that leaves nothing behind to inspect — completing a task keeps it.
-    _handle(task_service.remove_task, username, uuid)
+    _handle(task_service.remove_task, store, uuid)
     audit.record(
         audit.TASK_DELETED,
         outcome=audit.SUCCESS,
@@ -171,8 +197,10 @@ def delete_task(request: Request, uuid: str, username: str = Depends(get_current
     summary="Start a task",
     description="Mark a task as in-progress. The task will show a start timestamp and be visually highlighted.",
 )
-def start_task(uuid: str, username: str = Depends(get_current_user)):
-    return _handle(task_service.start_task, username, uuid)
+def start_task(
+    uuid: str, username: str = Depends(get_current_user), store: TaskStore = Depends(get_task_store)
+):
+    return _handle(task_service.start_task, store, uuid)
 
 
 @router.post(
@@ -181,8 +209,10 @@ def start_task(uuid: str, username: str = Depends(get_current_user)):
     summary="Pause a task",
     description="Remove the in-progress marker from a task without completing it.",
 )
-def stop_task(uuid: str, username: str = Depends(get_current_user)):
-    return _handle(task_service.stop_task, username, uuid)
+def stop_task(
+    uuid: str, username: str = Depends(get_current_user), store: TaskStore = Depends(get_task_store)
+):
+    return _handle(task_service.stop_task, store, uuid)
 
 
 @router.post(
@@ -191,5 +221,10 @@ def stop_task(uuid: str, username: str = Depends(get_current_user)):
     summary="Annotate a task",
     description="Add a timestamped note or annotation to a task (e.g. progress update, context, link).",
 )
-def annotate_task(uuid: str, body: AnnotationCreate, username: str = Depends(get_current_user)):
-    return _handle(task_service.annotate_task, username, uuid, body.text)
+def annotate_task(
+    uuid: str,
+    body: AnnotationCreate,
+    username: str = Depends(get_current_user),
+    store: TaskStore = Depends(get_task_store),
+):
+    return _handle(task_service.annotate_task, store, uuid, body.text)

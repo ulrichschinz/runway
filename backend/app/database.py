@@ -1,12 +1,20 @@
+import hashlib
+import hmac
 import logging
+import re
+import secrets
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
+import time
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
 
 from app.config import settings
+from app.task_storage import LAYOUT_STORAGE_ID, Account, new_storage_id
 
 logger = logging.getLogger(__name__)
 
@@ -105,16 +113,520 @@ CREATE TABLE IF NOT EXISTS project_status (
 )
 """
 
-# The additive schema migrations, applied on every start. There is no migrations/ directory
-# and no version table: with four statements against two shapes of database, re-running an
-# idempotent list is cheaper than a framework, and the point at which that stops being true
-# is written down in docs/adr/0025-narrowing-the-migration-except.md.
+# The additive schema migrations, applied on every start (ADR 0025). FROZEN since brief 0073
+# (ADR 0047): this loop is how every historical database reaches the common baseline, schema
+# version 0, and nothing new is appended to it. A schema change from now on is a step in
+# VERSIONED_MIGRATIONS below, which knows whether it already ran and is applied whole or not at all.
 MIGRATIONS = (
     "ALTER TABLE users ADD COLUMN api_key TEXT",
     "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
     "ALTER TABLE users ADD COLUMN full_name TEXT DEFAULT ''",
     "ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''",
+    # SEC-001, ADR 0043 — expand. The Taskwarrior directory is named by this id, never by the
+    # username. NULL only between this ALTER and the backfill below, and for a row an older
+    # image inserts after a rollback; the backfill fills both on the next start. UNIQUE cannot
+    # be declared by ALTER TABLE, so the index after it carries it.
+    "ALTER TABLE users ADD COLUMN storage_id TEXT"
+    " CHECK (storage_id IS NULL OR (length(storage_id) = 32"
+    " AND storage_id NOT GLOB '*[^0-9a-f]*'))",
+    # 'legacy' is the default so a row written by the previous image — which knows nothing of
+    # this column and still creates DATA_ROOT/<username>/ — is described truthfully.
+    "ALTER TABLE users ADD COLUMN storage_layout TEXT NOT NULL DEFAULT 'legacy'"
+    " CHECK (storage_layout IN ('legacy', 'storage_id'))",
+    "CREATE UNIQUE INDEX IF NOT EXISTS users_storage_id ON users (storage_id)",
+    # Immutable once set: an id that could be rewritten would be a path that could be chosen.
+    """CREATE TRIGGER IF NOT EXISTS users_storage_id_immutable
+    BEFORE UPDATE OF storage_id ON users
+    WHEN OLD.storage_id IS NOT NULL AND NEW.storage_id IS NOT OLD.storage_id
+    BEGIN SELECT RAISE(ABORT, 'storage_id is immutable'); END""",
+    # REV-001, ADR 0044 — expand. Every token carries the account's version; a password change
+    # raises it, and a token with any other version is refused. 1 is the default so every
+    # existing row, and a row the previous image inserts after a rollback, starts where the
+    # versionless tokens of that image are counted (dependencies.get_current_user).
+    "ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 1"
+    " CHECK (auth_version >= 1)",
+    # Monotone: a version that went down would make revoked tokens valid again.
+    """CREATE TRIGGER IF NOT EXISTS users_auth_version_monotone
+    BEFORE UPDATE OF auth_version ON users
+    WHEN NEW.auth_version < OLD.auth_version
+    BEGIN SELECT RAISE(ABORT, 'auth_version may only increase'); END""",
+    # WAIVER-SEC-003, brief 0070 (review round 1) — expand. The moment this image took the account
+    # off the cleartext column for good: registered here, its legacy key revoked or rotated, or the
+    # cutoff passed. From then on a value in `users.api_key` is never imported as a key again — the
+    # previous image fills one into every NULL row at its boot, so without this a rollback before
+    # the cutoff would hand every moved account a working cleartext key. NULL for every row the
+    # previous image wrote, which is what keeps an account it registered during a rollback working.
+    "ALTER TABLE users ADD COLUMN api_key_closed_at INTEGER",
 )
+
+# The `site_settings` key holding the moment (UTC epoch seconds) this image first booted on this
+# database. A token without `auth_version` was issued by the previous image; it is accepted only
+# if it expires within one JWT lifetime of this moment (SHIM-SEC-008, ADR 0044). Written once.
+AUTH_VERSION_EXPAND_KEY = "auth_version_expand_at"
+
+# The moment (UTC epoch seconds) this image first booted on this database, for the password-hash
+# timeline of ADR 0044 Decision 5 (`auth.kdf_phase`): bcrypt writes for KDF_SOAK, then Argon2id;
+# the ambiguous >=72-byte bcrypt login accepted until KDF_SOAK + LONG_BCRYPT_WINDOW. Written
+# once (SEC-006, brief 0067). Missing means Argon2id and no ambiguous login: fail closed.
+KDF_EXPAND_KEY = "password_kdf_expand_at"
+
+# The migration's protocol (SEC-001, M1.2): one row per decision the operator CLI took about
+# one account. Ids, a path relative to DATA_ROOT, counts and a manifest digest — never a task's
+# text and never a credential. `manifest` is a SHA-256 over the sorted (path, size, SHA-256)
+# list of the copied files; rollback compares against it to know whether the new store has
+# been written to since.
+CREATE_STORAGE_MIGRATIONS = """
+CREATE TABLE IF NOT EXISTS storage_migrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    storage_id TEXT NOT NULL,
+    legacy_path TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('migrated', 'provisioned', 'blocked', 'rolled_back')),
+    reason TEXT NOT NULL DEFAULT '',
+    files INTEGER NOT NULL DEFAULT 0,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    manifest TEXT NOT NULL DEFAULT '',
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+# --- the API-key format (WAIVER-SEC-003, ADR 0044 Decision 6, brief 0070) ----------------------
+#
+# Here, beside the table, rather than in app/auth.py: what a key is and how it is stored are one
+# decision, and keeping it in this unit adds no dependency on be/leaves' hub (RULE-ARCH-003).
+#
+# `rwk_<key id>_<secret>`: a literal prefix a scanner and the redaction filter recognise, a public
+# id of 16 hex characters (64 random bits) that the lookup is an index read on, and a secret of 43
+# URL-safe characters (256 random bits). What is stored is the SHA-256 of the whole string, never
+# the string: with 256 bits of entropy an offline search is not a threat, so no salt and no pepper
+# (a pepper would be a new root secret beside the database it is meant to protect — decision D4).
+
+API_KEY_PREFIX = "rwk_"
+API_KEY_ID_HEX = 16
+API_KEY_SECRET_BYTES = 32
+_API_KEY_SHAPE = re.compile(r"rwk_([0-9a-f]{16})_[A-Za-z0-9_-]{43}")
+# Anything longer is no key of ours and not worth hashing (a header can be tens of kilobytes).
+API_KEY_MAX_LENGTH = 256
+
+# The legacy cutoff (`API_KEY_LEGACY_CUTOFF`): the default is also the latest date the setting
+# may name, because the setting may bring the cutoff forward and never push it back.
+LEGACY_CUTOFF_DEFAULT = "2027-01-15"
+
+
+@dataclass(frozen=True)
+class IssuedKey:
+    key_id: str
+    api_key: str  # shown to the caller exactly once, then forgotten
+    secret_hash: str
+
+
+def api_key_clock() -> int:
+    """Now, in UTC epoch seconds. One function so the tests can move it."""
+    return int(datetime.now(UTC).timestamp())
+
+
+def api_key_hash(api_key: str) -> str:
+    """SHA-256 of the whole presented string, as 64 hex characters."""
+    return hashlib.sha256(api_key.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+def new_api_key() -> IssuedKey:
+    key_id = secrets.token_hex(API_KEY_ID_HEX // 2)
+    api_key = f"{API_KEY_PREFIX}{key_id}_{secrets.token_urlsafe(API_KEY_SECRET_BYTES)}"
+    return IssuedKey(key_id=key_id, api_key=api_key, secret_hash=api_key_hash(api_key))
+
+
+def parse_api_key(api_key: str) -> str | None:
+    """The key id of a key in the issued shape, or None for anything else (a legacy key too)."""
+    match = _API_KEY_SHAPE.fullmatch(api_key or "")
+    return match.group(1) if match else None
+
+
+def _cutoff_date(value: str) -> datetime | None:
+    try:
+        day = datetime.strptime(value.strip(), "%Y-%m-%d")
+    except (AttributeError, ValueError):
+        return None
+    return day.replace(tzinfo=UTC)
+
+
+_LEGACY_CUTOFF_LATEST = datetime(2027, 1, 15, tzinfo=UTC)  # LEGACY_CUTOFF_DEFAULT, parsed
+
+
+def legacy_cutoff_problem() -> str | None:
+    """Why the configured `API_KEY_LEGACY_CUTOFF` is not applied, or None when it is."""
+    configured = _cutoff_date(settings.api_key_legacy_cutoff)
+    if configured is None:
+        return f"not a YYYY-MM-DD date; {LEGACY_CUTOFF_DEFAULT} applies"
+    if configured > _LEGACY_CUTOFF_LATEST:
+        return f"later than {LEGACY_CUTOFF_DEFAULT}, which it may not be; the default applies"
+    return None
+
+
+def legacy_cutoff() -> int:
+    """The moment (UTC epoch seconds) from which a legacy key is refused: the configured date at
+    00:00 UTC if it is a valid date no later than the default, else the default."""
+    configured = _cutoff_date(settings.api_key_legacy_cutoff)
+    if configured is None or configured > _LEGACY_CUTOFF_LATEST:
+        configured = _LEGACY_CUTOFF_LATEST
+    return int(configured.timestamp())
+
+
+# API keys (WAIVER-SEC-003, ADR 0044 Decision 6, brief 0070). The secret is never stored: a row
+# holds the SHA-256 of the whole key string. `key_id` is public (it is part of the key and of its
+# display prefix) and is what an issued key is looked up by; a `legacy` row is a value the previous
+# image kept in cleartext in `users.api_key`, hashed at boot and valid only until the legacy cutoff.
+# Times are UTC epoch seconds; `expires_at` NULL would mean "never" and is written by nothing.
+#
+# A new table, not columns on `users`, and created by the same statement on a fresh and on a
+# migrated database — so the drift RISK-SURF-001 records for `users.api_key` cannot recur here
+# (test_api_keys.py compares the two).
+CREATE_API_KEYS = """
+CREATE TABLE IF NOT EXISTS api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_id TEXT NOT NULL UNIQUE
+        CHECK (length(key_id) = 16 AND key_id NOT GLOB '*[^0-9a-f]*'),
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('issued', 'legacy')),
+    secret_hash TEXT NOT NULL
+        CHECK (length(secret_hash) = 64 AND secret_hash NOT GLOB '*[^0-9a-f]*'),
+    label TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    revoked_at INTEGER,
+    last_used_at INTEGER
+)
+"""
+
+API_KEY_SCHEMA = (
+    CREATE_API_KEYS,
+    "CREATE INDEX IF NOT EXISTS api_keys_secret_hash ON api_keys (secret_hash)",
+    "CREATE INDEX IF NOT EXISTS api_keys_user ON api_keys (user_id)",
+    # A revoked key stays revoked: un-revoking would make a key valid that its owner ended.
+    """CREATE TRIGGER IF NOT EXISTS api_keys_revocation_is_final
+    BEFORE UPDATE OF revoked_at ON api_keys
+    WHEN OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS NOT OLD.revoked_at
+    BEGIN SELECT RAISE(ABORT, 'a revoked api key stays revoked'); END""",
+    # What a key is and whose it is never changes: re-pointing a row would hand a key to someone.
+    """CREATE TRIGGER IF NOT EXISTS api_keys_identity_is_immutable
+    BEFORE UPDATE OF key_id, user_id, kind, secret_hash ON api_keys
+    WHEN NEW.key_id IS NOT OLD.key_id OR NEW.user_id IS NOT OLD.user_id
+      OR NEW.kind IS NOT OLD.kind OR NEW.secret_hash IS NOT OLD.secret_hash
+    BEGIN SELECT RAISE(ABORT, 'an api key''s identity is immutable'); END""",
+)
+
+# The most active issued keys one account may hold, and the most inactive ones kept for the
+# settings page; older inactive rows are deleted when a key is created, so a create/revoke loop
+# cannot grow the table without bound.
+API_KEY_MAX_ACTIVE = 10
+API_KEY_KEEP_INACTIVE = 40
+# `last_used_at` is written at most this often per key, so an agent's stream of requests does not
+# turn every read into a write.
+API_KEY_LAST_USED_RESOLUTION = 60
+
+
+# --- versioned migrations (ADR 0047, brief 0073) ---------------------------------------------
+#
+# After the additive baseline, every schema change is a numbered step. `apply_versioned_migrations`
+# runs the pending ones in order, each in ONE `BEGIN IMMEDIATE` transaction that also records it in
+# `schema_migrations` — SQLite DDL is transactional, so a step is applied whole or not at all. A step
+# that fails is rolled back, logged at ERROR, and stops the chain; the boot continues at the last
+# version applied (the judgement of ADR 0025: a retryable failure must not become an outage). A step
+# must leave a database the previous image can still boot and serve.
+
+CREATE_SCHEMA_MIGRATIONS = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY CHECK (version >= 1),
+    name TEXT NOT NULL,
+    applied_at INTEGER NOT NULL
+)
+"""
+
+# Version 1: `users` in one declared shape. The same columns, types and defaults the additive loop
+# leaves on every database, in the order a fresh one had them, plus the role constraint
+# (RISK-SEC-002). `api_key` is plain TEXT, as every migrated database — production — has it: the
+# UNIQUE only fresh databases had is relied on by nothing (the legacy lookup refuses a hash two rows
+# share), and the column goes with the API-key contract (version 2, after the legacy cutoff).
+CREATE_USERS_V1 = """
+CREATE TABLE users_v1 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    hashed_password TEXT NOT NULL,
+    api_key TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+    full_name TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    storage_id TEXT CHECK (storage_id IS NULL OR (length(storage_id) = 32
+        AND storage_id NOT GLOB '*[^0-9a-f]*')),
+    storage_layout TEXT NOT NULL DEFAULT 'legacy'
+        CHECK (storage_layout IN ('legacy', 'storage_id')),
+    auth_version INTEGER NOT NULL DEFAULT 1 CHECK (auth_version >= 1),
+    api_key_closed_at INTEGER
+)
+"""
+
+USERS_V1_COLUMNS = (
+    "id",
+    "username",
+    "hashed_password",
+    "api_key",
+    "created_at",
+    "role",
+    "full_name",
+    "email",
+    "storage_id",
+    "storage_layout",
+    "auth_version",
+    "api_key_closed_at",
+)
+
+
+# Written out rather than built from USERS_V1_COLUMNS, so no SQL is assembled at run time;
+# test_schema_versions.py holds the two together. NULL and '' become 'user' — the one normalisation.
+COPY_USERS_V1 = """
+INSERT INTO users_v1 (id, username, hashed_password, api_key, created_at, role, full_name, email,
+    storage_id, storage_layout, auth_version, api_key_closed_at)
+SELECT id, username, hashed_password, api_key, created_at,
+    CASE WHEN role IS NULL OR role = '' THEN 'user' ELSE role END, full_name, email,
+    storage_id, storage_layout, auth_version, api_key_closed_at
+FROM users
+"""
+
+
+class MigrationRefused(Exception):
+    """A versioned step found data it cannot carry over unchanged. Nothing was written. The message
+    holds counts and column names only — never a row's contents or an account name."""
+
+
+async def _users_v1(db) -> None:
+    """Rebuild `users` into `CREATE_USERS_V1`. Runs inside the caller's transaction."""
+    async with db.execute("PRAGMA table_info(users)") as cur:
+        present = [row[1] for row in await cur.fetchall()]
+    unknown = sorted(set(present) - set(USERS_V1_COLUMNS))
+    missing = sorted(set(USERS_V1_COLUMNS) - set(present))
+    if unknown or missing:
+        raise MigrationRefused(
+            f"users has columns this step does not carry ({unknown}) or lacks ones it needs "
+            f"({missing}); nothing was rebuilt"
+        )
+    # NULL and '' are what every reader already treats as `user` (set_role, the guards); any other
+    # value outside the two roles was written by hand on the host, and what it meant is not ours to
+    # decide. Counted, never named.
+    async with db.execute(
+        "SELECT COUNT(*) FROM users WHERE role IS NOT NULL AND role != ''"
+        " AND role NOT IN ('user', 'admin')"
+    ) as cur:
+        row = await cur.fetchone()
+    invalid = int(row[0]) if row else 0
+    if invalid:
+        raise MigrationRefused(
+            f"{invalid} account(s) carry a role that is neither 'user' nor 'admin'; set each to one "
+            "of the two (docs/operations.md, Schema migrations) and restart"
+        )
+    async with db.execute("SELECT COUNT(*) FROM users") as cur:
+        row = await cur.fetchone()
+    before = int(row[0]) if row else 0
+    # The AUTOINCREMENT high-water mark: DROP TABLE forgets it, and an id that came back would make
+    # a new account the owner of rows in api_keys or storage_migrations that name the old one.
+    async with db.execute("SELECT name FROM sqlite_master WHERE name='sqlite_sequence'") as cur:
+        has_sequence = await cur.fetchone() is not None
+    sequence = 0
+    if has_sequence:
+        async with db.execute("SELECT seq FROM sqlite_sequence WHERE name='users'") as cur:
+            row = await cur.fetchone()
+        sequence = int(row[0]) if row and row[0] is not None else 0
+    # Every index and trigger on the old table, from its own stored SQL, so one this code does not
+    # know about survives too. Autoindexes (sql IS NULL) belong to the constraints and come back
+    # with the new table.
+    async with db.execute(
+        "SELECT sql FROM sqlite_master WHERE tbl_name='users' AND type IN ('index', 'trigger')"
+        " AND sql IS NOT NULL ORDER BY type, name"
+    ) as cur:
+        dependents = [row[0] for row in await cur.fetchall()]
+
+    await db.execute(CREATE_USERS_V1)
+    await db.execute(COPY_USERS_V1)
+    await db.execute("DROP TABLE users")
+    await db.execute("ALTER TABLE users_v1 RENAME TO users")
+    for statement in dependents:
+        await db.execute(statement)
+
+    async with db.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM users") as cur:
+        row = await cur.fetchone()
+    after, highest = (int(row[0]), int(row[1])) if row else (0, 0)
+    if after != before:
+        raise MigrationRefused(f"the rebuild carried {after} of {before} rows")
+    target = max(sequence, highest)
+    if target:
+        cur = await db.execute("UPDATE sqlite_sequence SET seq=? WHERE name='users'", (target,))
+        if cur.rowcount == 0:
+            await db.execute(
+                "INSERT INTO sqlite_sequence (name, seq) VALUES ('users', ?)", (target,)
+            )
+
+
+# (version, name, step). Append only; never renumber, never edit a step that has shipped.
+# Version 2 — the API-key contract (drop users.api_key, api_key_closed_at) — is deferred until after
+# API_KEY_LEGACY_CUTOFF and its soak (ADR 0044, ADR 0047).
+VERSIONED_MIGRATIONS = ((1, "users_declared_shape", _users_v1),)
+
+# The version this code brings a database to. `ops/surfaces/db-schema.sql` records it, and the
+# post-deploy check compares what production reports against it.
+SCHEMA_VERSION = max(version for version, _, _ in VERSIONED_MIGRATIONS)
+
+# What the last `init_db()` of this process left the database at, for `GET /skill` and the boot
+# line. None until it has run.
+applied_schema_version: int | None = None
+
+
+async def schema_version(db) -> int:
+    async with db.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations") as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+async def apply_versioned_migrations(db, now: int) -> int:
+    """Apply every pending step in order; return the version the database is at afterwards."""
+    await db.execute(CREATE_SCHEMA_MIGRATIONS)
+    await db.commit()
+    current = await schema_version(db)
+    for version, name, step in VERSIONED_MIGRATIONS:
+        if version <= current:
+            continue
+        if db.in_transaction:
+            await db.commit()
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            await step(db)
+            await db.execute(
+                "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+                (version, name, now),
+            )
+        except (sqlite3.Error, MigrationRefused) as failure:
+            await db.rollback()
+            logger.error(
+                "schema migration refused",
+                extra={
+                    "schema_version": current,
+                    "migration_version": version,
+                    "migration": name,
+                    "migration_error": str(failure),
+                },
+            )
+            return current
+        await db.commit()
+        current = version
+        logger.info(
+            "schema migration applied",
+            extra={"schema_version": current, "migration": name},
+        )
+    return current
+
+
+# --- the schema, as a comparable value (RULE-SURF-005, ADR 0047) -------------------------------
+
+
+def _normalised(sql: str | None) -> str:
+    return " ".join((sql or "").replace('"', "").split())
+
+
+def _check_clauses(sql: str) -> list[str]:
+    """Every `CHECK (...)` in a CREATE TABLE statement, whitespace-normalised, sorted."""
+    found: list[str] = []
+    text = _normalised(sql)
+    upper = text.upper()
+    start = upper.find("CHECK")
+    while start != -1:
+        open_at = text.find("(", start)
+        depth, end = 0, open_at
+        for end in range(open_at, len(text)):
+            if text[end] == "(":
+                depth += 1
+            elif text[end] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+        found.append(text[open_at + 1 : end].strip())
+        start = upper.find("CHECK", end)
+    return sorted(found)
+
+
+def schema_fingerprint(path: str | Path) -> dict:
+    """What a database's schema means, independent of how it got there: per table its columns in
+    order (type, NOT NULL, default, key), CHECK clauses, AUTOINCREMENT, indexes by their columns,
+    uniqueness and predicate, foreign keys; every trigger; and the applied schema version. Statement
+    text is compared only where it is the meaning (CHECK clauses, triggers, partial indexes)."""
+    connection = sqlite3.connect(str(path))
+    try:
+        tables = [
+            (name, sql)
+            for name, sql in connection.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type='table'"
+                " AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        ]
+        result: dict = {"tables": {}, "triggers": {}, "schema_version": 0}
+        for name, sql in tables:
+            columns = [
+                (row[1], (row[2] or "").upper(), bool(row[3]), _normalised(row[4]), row[5])
+                for row in connection.execute(f"PRAGMA table_xinfo('{name}')")
+            ]
+            indexes = []
+            for _, index_name, unique, origin, partial in connection.execute(
+                f"PRAGMA index_list('{name}')"
+            ):
+                cols = [row[2] for row in connection.execute(f"PRAGMA index_info('{index_name}')")]
+                where = ""
+                if partial:
+                    stored = connection.execute(
+                        "SELECT sql FROM sqlite_master WHERE name=?", (index_name,)
+                    ).fetchone()
+                    where = _normalised(stored[0] if stored else "").partition(" WHERE ")[2]
+                key = index_name if origin == "c" else f"<{origin}>"
+                indexes.append((key, tuple(cols), bool(unique), where))
+            foreign = sorted(
+                tuple(row[2:5]) for row in connection.execute(f"PRAGMA foreign_key_list('{name}')")
+            )
+            result["tables"][name] = {
+                "columns": columns,
+                "checks": _check_clauses(sql or ""),
+                "autoincrement": "AUTOINCREMENT" in (sql or "").upper(),
+                "indexes": sorted(indexes),
+                "foreign_keys": foreign,
+            }
+        for name, sql in connection.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='trigger' ORDER BY name"
+        ):
+            result["triggers"][name] = _normalised(sql)
+        if "schema_migrations" in result["tables"]:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+            ).fetchone()
+            result["schema_version"] = int(row[0]) if row else 0
+        return result
+    finally:
+        connection.close()
+
+
+def schema_differences(expected: dict, actual: dict) -> list[str]:
+    """Human-readable differences between two fingerprints, for a gate message."""
+    out: list[str] = []
+    for name in sorted(set(expected["tables"]) | set(actual["tables"])):
+        a, b = expected["tables"].get(name), actual["tables"].get(name)
+        if a is None or b is None:
+            out.append(f"table {name}: {'missing' if b is None else 'unexpected'}")
+            continue
+        for part in ("columns", "checks", "autoincrement", "indexes", "foreign_keys"):
+            if a[part] != b[part]:
+                out.append(f"table {name}: {part} differ: {a[part]!r} vs {b[part]!r}")
+    for name in sorted(set(expected["triggers"]) | set(actual["triggers"])):
+        if expected["triggers"].get(name) != actual["triggers"].get(name):
+            out.append(f"trigger {name} differs")
+    if expected["schema_version"] != actual["schema_version"]:
+        out.append(f"schema_version {expected['schema_version']} vs {actual['schema_version']}")
+    return out
+
 
 # SQLite's own words for "this column is already there", observed rather than guessed: on
 # sqlite3 3.53.4 through aiosqlite 0.20.0, re-adding a column raises
@@ -137,6 +649,285 @@ async def get_db():
     async with aiosqlite.connect(settings.db_path) as db:
         db.row_factory = aiosqlite.Row
         yield db
+
+
+@asynccontextmanager
+async def users_connection() -> AsyncIterator[aiosqlite.Connection]:
+    """The users database outside a request — for the storage migration CLI."""
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        yield db
+
+
+# --- accounts and their storage (SEC-001, ADR 0043) ----------------------------------------
+
+
+def _account(row) -> Account:
+    return Account(
+        id=row["id"],
+        username=row["username"],
+        storage_id=row["storage_id"] or "",
+        storage_layout=row["storage_layout"],
+    )
+
+
+async def get_account(db, username: str) -> Account | None:
+    """The typed identity of one account, or None. What `get_task_store` resolves."""
+    async with db.execute(
+        "SELECT id, username, storage_id, storage_layout FROM users WHERE username=?",
+        (username,),
+    ) as cur:
+        row = await cur.fetchone()
+    return _account(row) if row else None
+
+
+async def list_accounts(db) -> list[Account]:
+    async with db.execute(
+        "SELECT id, username, storage_id, storage_layout FROM users ORDER BY id"
+    ) as cur:
+        return [_account(row) for row in await cur.fetchall()]
+
+
+async def create_account(db, username: str, hashed_password: str) -> Account:
+    """Insert a new account in the storage-id layout. Raises sqlite3.IntegrityError when the
+    username is taken. Never the legacy layout: that is created by nothing any more. And no API
+    key: a cleartext one is written by nothing any more either (WAIVER-SEC-003) — the account
+    creates its first key, shown once, through `POST /auth/apikeys`."""
+    storage_id = new_storage_id()
+    cur = await db.execute(
+        "INSERT INTO users (username, hashed_password, storage_id, storage_layout,"
+        " api_key_closed_at) VALUES (?, ?, ?, ?, ?)",
+        (username, hashed_password, storage_id, LAYOUT_STORAGE_ID, api_key_clock()),
+    )
+    await db.commit()
+    return Account(
+        id=cur.lastrowid or 0,
+        username=username,
+        storage_id=storage_id,
+        storage_layout=LAYOUT_STORAGE_ID,
+    )
+
+
+async def delete_account(db, account_id: int) -> None:
+    """Undo `create_account` when its store could not be provisioned.
+
+    Today that is the only caller, and a new account is a `user` — but nothing about the
+    function said so, so it is held to the last-admin invariant like every other write that
+    can remove an admin. Raises `LastAdminError` (and deletes nothing) if the row is the
+    instance's only admin.
+    """
+    async with admin_preserving_write(db):
+        await db.execute("DELETE FROM users WHERE id=?", (account_id,))
+        await db.execute("DELETE FROM api_keys WHERE user_id=?", (account_id,))
+
+
+# --- the last-admin invariant (REV-002, brief 0068) -----------------------------------------
+#
+# An instance that has an administrator must keep one: every /admin route requires an admin,
+# so with none there is no route back through the API (ADR 0017). The guard used to be a count
+# read in autocommit followed by a separate UPDATE, so two overlapping demotions could both
+# read "two admins" and both write. It is now ONE write transaction per change, taken with
+# BEGIN IMMEDIATE before anything is read, and checked AFTER the write.
+
+
+class LastAdminError(Exception):
+    """A write would have left an instance that had an admin with none. Nothing was written."""
+
+
+async def count_admins(db) -> int:
+    async with db.execute("SELECT COUNT(*) FROM users WHERE role='admin'") as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+@asynccontextmanager
+async def admin_preserving_write(db) -> AsyncIterator[None]:
+    """Run the enclosed statements as one serialised transaction that cannot remove the last admin.
+
+    `BEGIN IMMEDIATE` takes SQLite's write lock before the first read, so any other writer of
+    the same file — another request, the operator CLI, a second worker — waits (up to the
+    connection's busy timeout, 5 s by default; past it the write fails, it is never silently
+    lost) until this one commits or rolls back. The invariant is checked after the enclosed
+    writes, so it holds for whatever they were, including a bulk statement nobody foresaw:
+    if the instance had at least one admin when the transaction began and has none at its
+    end, everything is rolled back and `LastAdminError` raised. An instance with no admin at
+    all (before `BOOTSTRAP_ADMIN`, or during recovery) is not blocked.
+
+    Commits on a normal exit, including a `return` from inside the block.
+    """
+    if db.in_transaction:
+        # BEGIN would fail, and committing at the end would commit someone else's half-done
+        # work under this guard's name. A caller that gets here has a bug; say so loudly.
+        raise RuntimeError("admin_preserving_write needs a connection with no open transaction")
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        had_admin = await count_admins(db) > 0
+        yield
+        if had_admin and await count_admins(db) == 0:
+            raise LastAdminError("this write would remove the last admin")
+    except BaseException:
+        await db.rollback()
+        raise
+    await db.commit()
+
+
+async def set_role(db, username: str, role: str) -> str | None:
+    """Set an account's role under the last-admin invariant. Returns the PREVIOUS role (`user`
+    when the column is empty), or None when there is no such account — nothing written.
+    Raises `LastAdminError` when the change would remove the last admin; nothing written."""
+    async with admin_preserving_write(db):
+        async with db.execute("SELECT role FROM users WHERE username=?", (username,)) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        await db.execute("UPDATE users SET role=? WHERE username=?", (role, username))
+    return row[0] or "user"
+
+
+async def backfill_storage_ids(db) -> int:
+    """Give every account without one a storage id. Idempotent; returns how many it set.
+
+    Runs at every boot. It never changes the layout: an account backfilled here is still
+    served from its legacy directory until the migration has copied it.
+    """
+    async with db.execute("SELECT id FROM users WHERE storage_id IS NULL OR storage_id=''") as cur:
+        rows = await cur.fetchall()
+    for row in rows:
+        await db.execute(
+            "UPDATE users SET storage_id=? WHERE id=? AND (storage_id IS NULL OR storage_id='')",
+            (new_storage_id(), row["id"]),
+        )
+    await db.commit()
+    return len(rows)
+
+
+# --- sessions (REV-001, ADR 0044) -------------------------------------------------------------
+
+
+async def get_auth_version(db, username: str) -> int | None:
+    """The account's current `auth_version`, or None when there is no such account."""
+    async with db.execute("SELECT auth_version FROM users WHERE username=?", (username,)) as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else None
+
+
+async def get_auth_version_expand_at(db) -> int | None:
+    """When this image first booted here, or None — which refuses every versionless token."""
+    async with db.execute(
+        "SELECT value FROM site_settings WHERE key=?", (AUTH_VERSION_EXPAND_KEY,)
+    ) as cur:
+        row = await cur.fetchone()
+    try:
+        return int(row[0]) if row else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def get_password_kdf_expand_at(db) -> int | None:
+    """When this image first booted here, for `auth.kdf_phase`; None fails closed."""
+    async with db.execute("SELECT value FROM site_settings WHERE key=?", (KDF_EXPAND_KEY,)) as cur:
+        row = await cur.fetchone()
+    try:
+        return int(row[0]) if row else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def rehash_password(db, username: str, expected_hash: str, new_hash: str) -> bool:
+    """Replace a hash with a stronger hash OF THE SAME PASSWORD (rehash-on-login, SEC-006).
+
+    Unlike `replace_password` the version is untouched: the password did not change, so no
+    session ends. A compare-and-swap on the hash that was verified: if a password change (or
+    another login's rehash) replaced it meanwhile, nothing is written and False is returned —
+    the login that verified the old hash must never put the old password back.
+    """
+    cur = await db.execute(
+        "UPDATE users SET hashed_password=? WHERE username=? AND hashed_password=?",
+        (new_hash, username, expected_hash),
+    )
+    await db.commit()
+    return cur.rowcount == 1
+
+
+async def reset_password(db, username: str, new_hash: str) -> int | None:
+    """The operator reset (`app.services.password_reset`, docs/operations.md): set the hash and end
+    every session, in one statement, whatever the stored hash is. Returns the new version, or None
+    when there is no such account. Unlike `replace_password` there is no compare-and-swap — the
+    operator's decision, made after out-of-band confirmation, is the authority here."""
+    async with db.execute(
+        "UPDATE users SET hashed_password=?, auth_version=auth_version+1"
+        " WHERE username=? RETURNING auth_version",
+        (new_hash, username),
+    ) as cur:
+        row = await cur.fetchone()
+    await db.commit()
+    return int(row[0]) if row else None
+
+
+async def replace_password(db, username: str, expected_hash: str, new_hash: str) -> int | None:
+    """Replace the hash and end every session, in ONE statement. Returns the new version, or
+    None when the stored hash is no longer `expected_hash` (another change won).
+
+    One statement is one transaction: there is no state with the new hash and the old version,
+    or the reverse. The `hashed_password=?` condition makes it a compare-and-swap, so of two
+    changes that both verified the old password exactly one writes.
+    """
+    async with db.execute(
+        "UPDATE users SET hashed_password=?, auth_version=auth_version+1"
+        " WHERE username=? AND hashed_password=? RETURNING auth_version",
+        (new_hash, username, expected_hash),
+    ) as cur:
+        row = await cur.fetchone()
+    await db.commit()
+    return int(row[0]) if row else None
+
+
+async def set_storage_layout(db, account_id: int, layout: str) -> None:
+    await db.execute("UPDATE users SET storage_layout=? WHERE id=?", (layout, account_id))
+    await db.commit()
+
+
+async def record_storage_migration(
+    db,
+    account: Account,
+    *,
+    legacy_path: str,
+    action: str,
+    reason: str = "",
+    files: int = 0,
+    size: int = 0,
+    manifest: str = "",
+) -> None:
+    await db.execute(
+        "INSERT INTO storage_migrations"
+        " (user_id, storage_id, legacy_path, action, reason, files, bytes, manifest)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (account.id, account.storage_id, legacy_path, action, reason, files, size, manifest),
+    )
+    await db.commit()
+
+
+async def last_migration_manifest(db, account_id: int) -> str | None:
+    """The manifest the most recent successful migration of this account recorded."""
+    async with db.execute(
+        "SELECT manifest FROM storage_migrations WHERE user_id=? AND action='migrated'"
+        " ORDER BY id DESC LIMIT 1",
+        (account_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    return row["manifest"] if row else None
+
+
+async def last_storage_action(db, account_id: int) -> str | None:
+    """The latest action that changed this account's layout — `migrated`, `provisioned` or
+    `rolled_back` — ignoring `blocked` rows, which change nothing."""
+    async with db.execute(
+        "SELECT action FROM storage_migrations WHERE user_id=?"
+        " AND action IN ('migrated', 'provisioned', 'rolled_back') ORDER BY id DESC LIMIT 1",
+        (account_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    return row["action"] if row else None
 
 
 # --- the audit database -------------------------------------------------------------------
@@ -182,16 +973,295 @@ def audit_connection() -> Iterator[sqlite3.Connection]:
         connection.close()
 
 
-def generate_api_key() -> str:
-    """Public: routers issue keys at registration and on rotation.
+# --- API keys (WAIVER-SEC-003, ADR 0044 Decision 6, brief 0070) -----------------------------
+#
+# Nothing below receives, returns or writes a secret except `create_api_key` and
+# `rotate_api_keys`, which return the freshly minted key to the router that shows it once; and
+# `legacy_api_key`, which reads the cleartext column for the deprecated GET until the cutoff.
 
-    Renamed from _generate_api_key. The leading underscore claimed it was module-private
-    while two routers imported it, which made the name actively misleading rather than
-    merely untidy.
+
+class TooManyApiKeys(Exception):
+    """The account already holds API_KEY_MAX_ACTIVE active issued keys. Nothing was written."""
+
+
+def _as_dict(row) -> dict:
+    return {k: row[k] for k in row.keys()}
+
+
+async def migrate_legacy_api_keys(db, now: int, cutoff: int) -> tuple[int, int]:
+    """Hash the cleartext keys the previous image kept, or, once the cutoff has passed, end them.
+
+    Runs at every boot. Before the cutoff, every non-empty `users.api_key` of an account this image
+    has not closed (`api_key_closed_at` NULL) that has no `legacy` row with its hash gets one
+    (expiring at the cutoff); an account whose earlier legacy row has a different hash was rotated
+    by the previous image (a rollback) and that row is revoked — the previous image's rotation
+    ended it there too. The cleartext column of an open account is left as it is: the previous
+    image authenticates by it, and this one never compares it.
+
+    A closed account's column is emptied instead, and nothing is imported from it: a value there
+    was written by the previous image after this one closed the account — its boot backfill,
+    which mints a key for every NULL row — and must not become a credential (brief 0070, review
+    round 1). And a live legacy row never expires later than the cutoff now in force, so moving
+    `API_KEY_LEGACY_CUTOFF` earlier moves the expiry the settings page announces with it.
+
+    From the cutoff on, every legacy row is revoked and `users.api_key` is emptied in every row, so
+    the database holds no cleartext key — including a pre-migration backup restored later, which
+    this boot empties before it can serve a request.
+
+    Returns (imported, ended). Never prints a value.
     """
-    import secrets
+    if now >= cutoff:
+        cur = await db.execute(
+            "UPDATE api_keys SET revoked_at=? WHERE kind='legacy' AND revoked_at IS NULL", (now,)
+        )
+        ended = cur.rowcount
+        await db.execute("UPDATE users SET api_key=NULL WHERE api_key IS NOT NULL")
+        await db.execute(
+            "UPDATE users SET api_key_closed_at=? WHERE api_key_closed_at IS NULL", (now,)
+        )
+        await db.commit()
+        return 0, ended
+    await db.execute(
+        "UPDATE users SET api_key=NULL WHERE api_key IS NOT NULL AND api_key_closed_at IS NOT NULL"
+    )
+    await db.execute(
+        "UPDATE api_keys SET expires_at=? WHERE kind='legacy' AND revoked_at IS NULL"
+        " AND (expires_at IS NULL OR expires_at > ?)",
+        (cutoff, cutoff),
+    )
+    async with db.execute(
+        "SELECT id, api_key FROM users WHERE api_key IS NOT NULL AND api_key != ''"
+        " AND api_key_closed_at IS NULL"
+    ) as cur:
+        rows = await cur.fetchall()
+    imported = ended = 0
+    for row in rows:
+        secret_hash = api_key_hash(row["api_key"])
+        async with db.execute(
+            "SELECT 1 FROM api_keys WHERE user_id=? AND kind='legacy' AND secret_hash=?",
+            (row["id"], secret_hash),
+        ) as cur:
+            if await cur.fetchone():
+                continue
+        cur = await db.execute(
+            "UPDATE api_keys SET revoked_at=? WHERE user_id=? AND kind='legacy'"
+            " AND revoked_at IS NULL",
+            (now, row["id"]),
+        )
+        ended += cur.rowcount
+        await db.execute(
+            "INSERT INTO api_keys (key_id, user_id, kind, secret_hash, label, created_at,"
+            " expires_at) VALUES (?, ?, 'legacy', ?, '', ?, ?)",
+            (new_api_key().key_id, row["id"], secret_hash, now, cutoff),
+        )
+        imported += 1
+    await db.commit()
+    return imported, ended
 
-    return secrets.token_urlsafe(32)
+
+async def authenticate_api_key(db, api_key: str, now: int, cutoff: int) -> str | None:
+    """The username a secret_hash key belongs to, or None — one answer for unknown, malformed,
+    expired and revoked keys, and for a legacy key from the cutoff on.
+
+    Only the hash is compared; `users.api_key` is never read here. An issued key is looked up by
+    its public id and its hash compared in constant time. A legacy key has no id, so it is looked
+    up by its hash (a lookup on a SHA-256 of a high-entropy value leaks nothing about it); a hash
+    that more than one row carries is refused rather than guessed between (RISK-SURF-001: a
+    migrated database never enforced uniqueness of the old column).
+    """
+    if not api_key or len(api_key) > API_KEY_MAX_LENGTH:
+        return None
+    secret_hash = api_key_hash(api_key)
+    key_id = parse_api_key(api_key)
+    sql = (
+        "SELECT k.id, k.secret_hash, k.expires_at, k.revoked_at, k.last_used_at, u.username"
+        " FROM api_keys k JOIN users u ON u.id = k.user_id"
+    )
+    if key_id is not None:
+        async with db.execute(sql + " WHERE k.key_id=? AND k.kind='issued'", (key_id,)) as cur:
+            rows = await cur.fetchall()
+    else:
+        if now >= cutoff:
+            return None
+        async with db.execute(
+            sql + " WHERE k.secret_hash=? AND k.kind='legacy' LIMIT 2", (secret_hash,)
+        ) as cur:
+            rows = await cur.fetchall()
+    if len(rows) != 1:
+        return None
+    (row,) = rows
+    if not hmac.compare_digest(row["secret_hash"], secret_hash):
+        return None
+    if row["revoked_at"] is not None:
+        return None
+    if row["expires_at"] is not None and now >= row["expires_at"]:
+        return None
+    last = row["last_used_at"]
+    if last is None or now - last >= API_KEY_LAST_USED_RESOLUTION:
+        await db.execute("UPDATE api_keys SET last_used_at=? WHERE id=?", (now, row["id"]))
+        await db.commit()
+    return str(row["username"])
+
+
+async def _account_id(db, username: str) -> int | None:
+    async with db.execute("SELECT id FROM users WHERE username=?", (username,)) as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else None
+
+
+async def _insert_issued(db, user_id: int, label: str, now: int, expires_at: int) -> IssuedKey:
+    issued = new_api_key()
+    await db.execute(
+        "INSERT INTO api_keys (key_id, user_id, kind, secret_hash, label, created_at, expires_at)"
+        " VALUES (?, ?, 'issued', ?, ?, ?, ?)",
+        (issued.key_id, user_id, issued.secret_hash, label, now, expires_at),
+    )
+    # Keep the inactive history bounded: the newest API_KEY_KEEP_INACTIVE ended issued keys stay
+    # for the settings page, older ones go. Legacy rows stay — they are the cutoff's evidence.
+    await db.execute(
+        "DELETE FROM api_keys WHERE user_id=? AND kind='issued'"
+        " AND (revoked_at IS NOT NULL OR expires_at <= ?)"
+        " AND id NOT IN (SELECT id FROM api_keys WHERE user_id=? AND kind='issued'"
+        " AND (revoked_at IS NOT NULL OR expires_at <= ?) ORDER BY id DESC LIMIT ?)",
+        (user_id, now, user_id, now, API_KEY_KEEP_INACTIVE),
+    )
+    return issued
+
+
+@asynccontextmanager
+async def _write(db) -> AsyncIterator[None]:
+    """One serialised write transaction (BEGIN IMMEDIATE), committed on a normal exit."""
+    if db.in_transaction:
+        # As in `admin_preserving_write`: committing someone else's half-done work here would be
+        # a bug wearing this function's name.
+        raise RuntimeError("an api key write needs a connection with no open transaction")
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        await db.rollback()
+        raise
+    await db.commit()
+
+
+async def create_api_key(
+    db, username: str, *, label: str, now: int, expires_at: int
+) -> tuple[IssuedKey, dict] | None:
+    """Mint a key for an account. Returns the key (to be shown once) and its metadata row, or
+    None when there is no such account. Raises `TooManyApiKeys` at the cap; nothing written. The
+    count and the insert are one transaction, so two parallel creations cannot both pass it."""
+    async with _write(db):
+        user_id = await _account_id(db, username)
+        if user_id is None:
+            return None
+        async with db.execute(
+            "SELECT COUNT(*) FROM api_keys WHERE user_id=? AND kind='issued'"
+            " AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+            (user_id, now),
+        ) as cur:
+            row = await cur.fetchone()
+        if row and int(row[0]) >= API_KEY_MAX_ACTIVE:
+            raise TooManyApiKeys
+        issued = await _insert_issued(db, user_id, label, now, expires_at)
+    meta = await _key_row(db, issued.key_id)
+    if meta is None:  # written in the transaction above; absent only if the file changed under us
+        raise RuntimeError("the api key just written cannot be read back")
+    return issued, meta
+
+
+async def rotate_api_keys(
+    db, username: str, *, label: str, now: int, expires_at: int
+) -> tuple[IssuedKey, dict] | None:
+    """The deprecated `POST /auth/apikey/regenerate`: end EVERY key of the account — issued and
+    legacy — empty and close its cleartext column, and mint one new key, in one transaction. The
+    router lets only a signed-in session call it: a key that could rotate would mint its own
+    successor, and a legacy one would outlive the cutoff that way (brief 0070, review round 1)."""
+    async with _write(db):
+        user_id = await _account_id(db, username)
+        if user_id is None:
+            return None
+        await db.execute(
+            "UPDATE api_keys SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+            (now, user_id),
+        )
+        await db.execute(
+            "UPDATE users SET api_key=NULL, api_key_closed_at=COALESCE(api_key_closed_at, ?)"
+            " WHERE id=?",
+            (now, user_id),
+        )
+        issued = await _insert_issued(db, user_id, label, now, expires_at)
+    meta = await _key_row(db, issued.key_id)
+    if meta is None:  # written in the transaction above; absent only if the file changed under us
+        raise RuntimeError("the api key just written cannot be read back")
+    return issued, meta
+
+
+async def _key_row(db, key_id: str) -> dict | None:
+    async with db.execute(
+        "SELECT key_id, kind, label, created_at, expires_at, revoked_at, last_used_at"
+        " FROM api_keys WHERE key_id=?",
+        (key_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    return _as_dict(row) if row else None
+
+
+async def list_api_keys(db, username: str) -> list[dict]:
+    """Every key row of the account, newest first — metadata only: no column holding a secret or
+    a hash is selected."""
+    async with db.execute(
+        "SELECT key_id, kind, label, created_at, expires_at, revoked_at, last_used_at"
+        " FROM api_keys WHERE user_id=(SELECT id FROM users WHERE username=?) ORDER BY id DESC",
+        (username,),
+    ) as cur:
+        return [_as_dict(r) for r in await cur.fetchall()]
+
+
+async def revoke_api_key(db, username: str, key_id: str, now: int) -> str | None:
+    """End one key of the account. Returns its kind, or None when the account holds no key with
+    this id (another account's key is "no such key"). Idempotent: an ended key stays as it was.
+    Revoking the legacy key also empties and closes the account's cleartext column, in the same
+    transaction: an account that has moved holds no cleartext from that moment on, and the next
+    boot imports nothing a rollback writes there."""
+    async with _write(db):
+        user_id = await _account_id(db, username)
+        if user_id is None:
+            return None
+        async with db.execute(
+            "SELECT kind FROM api_keys WHERE user_id=? AND key_id=?", (user_id, key_id)
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        await db.execute(
+            "UPDATE api_keys SET revoked_at=? WHERE user_id=? AND key_id=? AND revoked_at IS NULL",
+            (now, user_id, key_id),
+        )
+        if row["kind"] == "legacy":
+            await db.execute(
+                "UPDATE users SET api_key=NULL, api_key_closed_at=COALESCE(api_key_closed_at, ?)"
+                " WHERE id=?",
+                (now, user_id),
+            )
+    return str(row["kind"])
+
+
+async def legacy_api_key(db, username: str) -> str:
+    """The cleartext value the previous image issued, for the deprecated `GET /auth/apikey` only,
+    or '' — when there is none, or its legacy row has been revoked. The caller checks the cutoff."""
+    async with db.execute(
+        "SELECT id, api_key FROM users WHERE username=? AND api_key IS NOT NULL", (username,)
+    ) as cur:
+        row = await cur.fetchone()
+    if not row or not row["api_key"]:
+        return ""
+    async with db.execute(
+        "SELECT 1 FROM api_keys WHERE user_id=? AND kind='legacy' AND secret_hash=?"
+        " AND revoked_at IS NULL",
+        (row["id"], api_key_hash(row["api_key"])),
+    ) as cur:
+        live = await cur.fetchone()
+    return str(row["api_key"]) if live else ""
 
 
 async def get_allow_registration(db) -> bool:
@@ -344,20 +1414,40 @@ async def init_db() -> str:
                     "schema migration failed",
                     extra={"statement": statement, "sqlite_error": str(failure)},
                 )
-        # generate api_key for users that don't have one
-        async with db.execute("SELECT username FROM users WHERE api_key IS NULL") as cur:
-            rows = await cur.fetchall()
-        for row in rows:
-            await db.execute(
-                "UPDATE users SET api_key=? WHERE username=?",
-                (generate_api_key(), row["username"]),
-            )
+        # SEC-001: every account gets its storage id before anything can resolve it.
+        await backfill_storage_ids(db)
+        # WAIVER-SEC-003: no cleartext API key is minted here any more. This loop used to give
+        # every row without one a key, in cleartext; an account now creates its keys itself and
+        # they are stored as hashes (`api_keys`, below).
         bootstrap_reason = await bootstrap_admin(db)
         await db.execute(CREATE_PROJECT_PLANS)
         await db.execute(CREATE_PROJECTS)
         await db.execute(CREATE_SITE_SETTINGS)
+        # REV-001: the start of the versionless-token window, once and never moved.
+        await db.execute(
+            "INSERT OR IGNORE INTO site_settings (key, value) VALUES (?, ?)",
+            (AUTH_VERSION_EXPAND_KEY, str(int(time.time()))),
+        )
+        # SEC-006: the start of the password-hash timeline, once and never moved.
+        await db.execute(
+            "INSERT OR IGNORE INTO site_settings (key, value) VALUES (?, ?)",
+            (KDF_EXPAND_KEY, str(int(time.time()))),
+        )
         await db.execute(CREATE_REVIEWS)
         await db.execute(CREATE_PROJECT_STATUS)
+        await db.execute(CREATE_STORAGE_MIGRATIONS)
+        # WAIVER-SEC-003 (ADR 0044 Decision 6): the hashed keys, and the previous image's
+        # cleartext ones hashed into them — or, from the cutoff on, ended and wiped.
+        for statement in API_KEY_SCHEMA:
+            await db.execute(statement)
+        await db.commit()
+        imported, ended = await migrate_legacy_api_keys(db, api_key_clock(), legacy_cutoff())
+        if imported or ended:
+            # Counts only: never a value, a hash or an account name.
+            logger.info(
+                "legacy api keys migrated",
+                extra={"legacy_keys_imported": imported, "legacy_keys_ended": ended},
+            )
         # seed allow_registration from env if not set
         await db.execute(
             "INSERT OR IGNORE INTO site_settings (key, value) VALUES ('allow_registration', ?)",
@@ -369,4 +1459,7 @@ async def init_db() -> str:
             FROM project_plans
         """)
         await db.commit()
+        # Last, so every step sees every table (ADR 0047).
+        global applied_schema_version
+        applied_schema_version = await apply_versioned_migrations(db, int(time.time()))
     return bootstrap_reason

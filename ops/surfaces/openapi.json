@@ -4,6 +4,8 @@
       "AnnotationCreate": {
         "properties": {
           "text": {
+            "description": "At most 32768 bytes in UTF-8 (the capture clients' rule).",
+            "maxLength": 32768,
             "title": "Text",
             "type": "string"
           }
@@ -14,7 +16,125 @@
         "title": "AnnotationCreate",
         "type": "object"
       },
+      "ApiKeyCreate": {
+        "properties": {
+          "expires_in_days": {
+            "default": 365,
+            "description": "Days until the key stops working, 1 to 365.",
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Expires In Days",
+            "type": "integer"
+          },
+          "label": {
+            "default": "",
+            "description": "A name for the key, to tell several apart (for example `laptop agent`).",
+            "maxLength": 64,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "title": "ApiKeyCreate",
+        "type": "object"
+      },
+      "ApiKeyCreated": {
+        "properties": {
+          "api_key": {
+            "description": "The key. Shown in this response only: it is stored as a hash and cannot be retrieved again.",
+            "title": "Api Key",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "ISO 8601, UTC.",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC.",
+            "title": "Expires At"
+          },
+          "key_id": {
+            "description": "The key's public id; part of the key itself.",
+            "title": "Key Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`legacy`: a key issued before keys were hashed, valid until the cutoff.",
+            "enum": [
+              "issued",
+              "legacy"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC, to the minute; null if never used.",
+            "title": "Last Used At"
+          },
+          "prefix": {
+            "description": "The key's public beginning, `rwk_<key_id>`, to recognise it; empty for a legacy key, which has no public part.",
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC; null while not revoked.",
+            "title": "Revoked At"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_id",
+          "label",
+          "kind",
+          "prefix",
+          "created_at",
+          "expires_at",
+          "revoked_at",
+          "last_used_at",
+          "state",
+          "api_key"
+        ],
+        "title": "ApiKeyCreated",
+        "type": "object"
+      },
       "ApiKeyInfo": {
+        "description": "The deprecated shape of `GET /auth/apikey` and `POST /auth/apikey/regenerate`.",
         "properties": {
           "api_key": {
             "title": "Api Key",
@@ -27,15 +147,109 @@
         "title": "ApiKeyInfo",
         "type": "object"
       },
+      "ApiKeyMetadata": {
+        "description": "What can be known about a key without holding it: never the secret, never its hash.",
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601, UTC.",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC.",
+            "title": "Expires At"
+          },
+          "key_id": {
+            "description": "The key's public id; part of the key itself.",
+            "title": "Key Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`legacy`: a key issued before keys were hashed, valid until the cutoff.",
+            "enum": [
+              "issued",
+              "legacy"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC, to the minute; null if never used.",
+            "title": "Last Used At"
+          },
+          "prefix": {
+            "description": "The key's public beginning, `rwk_<key_id>`, to recognise it; empty for a legacy key, which has no public part.",
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601, UTC; null while not revoked.",
+            "title": "Revoked At"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_id",
+          "label",
+          "kind",
+          "prefix",
+          "created_at",
+          "expires_at",
+          "revoked_at",
+          "last_used_at",
+          "state"
+        ],
+        "title": "ApiKeyMetadata",
+        "type": "object"
+      },
       "BrainstormItem": {
+        "description": "One item of a plan being written. A new item is bounded; an item the stored plan already\nholds is kept as it is.",
         "properties": {
           "id": {
-            "description": "Identifier of the item, unique within the list. Any string.",
+            "description": "Identifier of the item, unique within the list. Any string; a new one is at most 200 characters.",
+            "maxLength": 1048576,
             "title": "Id",
             "type": "string"
           },
           "text": {
-            "description": "One idea, or one organized step, as free text.",
+            "description": "One idea, or one organized step, as free text; a new one is at most 4000 characters.",
+            "maxLength": 1048576,
             "title": "Text",
             "type": "string"
           }
@@ -169,12 +383,15 @@
       "InboxItem": {
         "properties": {
           "description": {
+            "maxLength": 2000,
             "title": "Description",
             "type": "string"
           },
           "note": {
             "anyOf": [
               {
+                "description": "At most 32768 bytes in UTF-8 (the capture clients' rule).",
+                "maxLength": 32768,
                 "type": "string"
               },
               {
@@ -186,6 +403,7 @@
           "priority": {
             "anyOf": [
               {
+                "maxLength": 16,
                 "type": "string"
               },
               {
@@ -234,10 +452,14 @@
       "PasswordChange": {
         "properties": {
           "current_password": {
+            "description": "At most 4096 bytes in UTF-8. No minimum: a password set before the rule still works.",
+            "maxLength": 4096,
             "title": "Current Password",
             "type": "string"
           },
           "new_password": {
+            "description": "The password to set: 8 to 1024 bytes in UTF-8 (counted in bytes, not characters), no NUL character. For up to 7 days after the server's password-hashing upgrade, shorter than 72 bytes.",
+            "maxLength": 1024,
             "title": "New Password",
             "type": "string"
           }
@@ -330,7 +552,7 @@
           "brainstorm": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/BrainstormItem"
+              "$ref": "#/components/schemas/StoredBrainstormItem"
             },
             "title": "Brainstorm",
             "type": "array"
@@ -338,7 +560,7 @@
           "organized": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/BrainstormItem"
+              "$ref": "#/components/schemas/StoredBrainstormItem"
             },
             "title": "Organized",
             "type": "array"
@@ -394,7 +616,7 @@
                 "type": "null"
               }
             ],
-            "description": "Unsorted ideas, in no particular order. The complete list: what you send replaces the stored one. Omitted or null keeps it.",
+            "description": "Unsorted ideas, in no particular order. The complete list: what you send replaces the stored one. Omitted or null keeps it. A list may not grow past 500 items (422); items the plan already holds, in either list, are kept whatever their size.",
             "title": "Brainstorm"
           },
           "organized": {
@@ -409,43 +631,46 @@
                 "type": "null"
               }
             ],
-            "description": "The ideas worth keeping, in the order they will be acted on. The complete list: what you send replaces the stored one. Omitted or null keeps it.",
+            "description": "The ideas worth keeping, in the order they will be acted on. The complete list: what you send replaces the stored one. Omitted or null keeps it. A list may not grow past 500 items (422); items the plan already holds, in either list, are kept whatever their size.",
             "title": "Organized"
           },
           "principles": {
             "anyOf": [
               {
+                "maxLength": 1048576,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The standards and constraints the work has to hold to. Omitted or null keeps the stored text; an empty string clears it.",
+            "description": "The standards and constraints the work has to hold to. Omitted or null keeps the stored text; an empty string clears it. A new text is at most 20000 characters (422); one equal to the stored text is kept.",
             "title": "Principles"
           },
           "purpose": {
             "anyOf": [
               {
+                "maxLength": 1048576,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Why the project exists \u2014 the outcome it serves. Omitted or null keeps the stored text; an empty string clears it.",
+            "description": "Why the project exists \u2014 the outcome it serves. Omitted or null keeps the stored text; an empty string clears it. A new text is at most 20000 characters (422); one equal to the stored text is kept.",
             "title": "Purpose"
           },
           "vision": {
             "anyOf": [
               {
+                "maxLength": 1048576,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "What success looks like, described as if it had already happened. Omitted or null keeps the stored text; an empty string clears it.",
+            "description": "What success looks like, described as if it had already happened. Omitted or null keeps the stored text; an empty string clears it. A new text is at most 20000 characters (422); one equal to the stored text is kept.",
             "title": "Vision"
           }
         },
@@ -545,6 +770,7 @@
       "RoleUpdate": {
         "properties": {
           "role": {
+            "maxLength": 32,
             "title": "Role",
             "type": "string"
           }
@@ -556,12 +782,54 @@
         "type": "object"
       },
       "ServerBuild": {
-        "description": "Which build of the server is answering.",
+        "description": "Which build of the server is answering, under which configuration (RISK-OPS-002, brief 0073).\n\nHashes and numbers only: never a file, a path on the host or a value from its `.env`.",
         "properties": {
+          "applied_compose_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SHA-256 of the compose file the host applied, as mounted read-only into the container, or null when it is not mounted.",
+            "title": "Applied Compose Sha256"
+          },
+          "build": {
+            "default": "dev",
+            "description": "The id of the deploy-workflow run that built this image, or 'dev'. Only the image that run pushed carries it.",
+            "title": "Build",
+            "type": "string"
+          },
           "commit": {
             "description": "The commit this image was built from, or 'dev' when it was not built by the deploy workflow.",
             "title": "Commit",
             "type": "string"
+          },
+          "compose_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SHA-256 of the deploy compose file baked into this image, or null.",
+            "title": "Compose Sha256"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The schema version this process left its database at, or null before it has initialised one.",
+            "title": "Schema Version"
           }
         },
         "required": [
@@ -631,6 +899,27 @@
           "sha256"
         ],
         "title": "SkillRelease",
+        "type": "object"
+      },
+      "StoredBrainstormItem": {
+        "description": "One item of a stored plan, as it is read back: unbounded, because a plan written before the\nlimits (brief 0073) must still be readable \u2014 a response that failed its own model would be a 500.",
+        "properties": {
+          "id": {
+            "description": "Identifier of the item, unique within the list. Any string.",
+            "title": "Id",
+            "type": "string"
+          },
+          "text": {
+            "description": "One idea, or one organized step, as free text.",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "title": "StoredBrainstormItem",
         "type": "object"
       },
       "Task": {
@@ -835,31 +1124,36 @@
             "default": [],
             "description": "UUIDs of tasks that must be done first.",
             "items": {
+              "maxLength": 64,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Depends",
             "type": "array"
           },
           "description": {
             "description": "What the task is, as free text. Never parsed for tags or attributes.",
+            "maxLength": 2000,
             "title": "Description",
             "type": "string"
           },
           "due": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Hard deadline only: the date by which it must be done. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
+            "description": "Hard deadline only: the date by which it must be done. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400).",
             "title": "Due"
           },
           "priority": {
             "anyOf": [
               {
+                "maxLength": 16,
                 "type": "string"
               },
               {
@@ -884,6 +1178,7 @@
           "recur": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -896,46 +1191,51 @@
           "scheduled": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Earliest start, or the day to follow up; does not hide the task. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
+            "description": "Earliest start, or the day to follow up; does not hide the task. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400).",
             "title": "Scheduled"
           },
           "tags": {
             "default": [],
             "description": "Tags, written without `+`. Status tags are `next`, `waiting`, `someday`; contexts are `@name` (`@home`).",
             "items": {
+              "maxLength": 100,
               "type": "string"
             },
+            "maxItems": 50,
             "title": "Tags",
             "type": "array"
           },
           "until": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The task expires and is deleted after this date. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
+            "description": "The task expires and is deleted after this date. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400).",
             "title": "Until"
           },
           "wait": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Hides the task from every list until this date (tickler). `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time.",
+            "description": "Hides the task from every list until this date (tickler). `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400).",
             "title": "Wait"
           }
         },
@@ -951,6 +1251,7 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 64,
                   "type": "string"
                 },
                 "type": "array"
@@ -959,36 +1260,39 @@
                 "type": "null"
               }
             ],
-            "description": "The complete set of UUIDs of tasks that must be done first: a UUID not listed is dropped. An empty list clears it; null or omitted leaves it unchanged.",
+            "description": "The complete set of UUIDs of tasks that must be done first: a UUID not listed is dropped. An empty list clears it; null or omitted leaves it unchanged. The set may not grow past 100 (422).",
             "title": "Depends"
           },
           "description": {
             "anyOf": [
               {
+                "maxLength": 131072,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "What the task is, as free text. Never parsed for tags or attributes. Null, omitted or empty leaves it unchanged: a description can be replaced, never cleared.",
+            "description": "What the task is, as free text. Never parsed for tags or attributes. Null, omitted or empty leaves it unchanged: a description can be replaced, never cleared. A new description is at most 2000 characters (422); a value equal to the stored one is kept whatever its size.",
             "title": "Description"
           },
           "due": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Hard deadline only: the date by which it must be done. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged. A recurring task cannot lose it (400).",
+            "description": "Hard deadline only: the date by which it must be done. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400). On modify, an empty string clears it; null or omitted leaves it unchanged. A recurring task cannot lose it (400).",
             "title": "Due"
           },
           "priority": {
             "anyOf": [
               {
+                "maxLength": 16,
                 "type": "string"
               },
               {
@@ -1013,6 +1317,7 @@
           "recur": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -1025,19 +1330,21 @@
           "scheduled": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Earliest start, or the day to follow up; does not hide the task. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged.",
+            "description": "Earliest start, or the day to follow up; does not hide the task. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400). On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Scheduled"
           },
           "tags": {
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 131072,
                   "type": "string"
                 },
                 "type": "array"
@@ -1046,13 +1353,14 @@
                 "type": "null"
               }
             ],
-            "description": "The complete tag set, written without `+`: tags not listed are removed, so this overwrites changes made elsewhere. To change single tags use `tags_add` / `tags_remove`.",
+            "description": "The complete tag set, written without `+`: tags not listed are removed, so this overwrites changes made elsewhere. To change single tags use `tags_add` / `tags_remove`. A tag the task does not carry yet is at most 100 characters, and the set may not grow past 50 tags (422); tags it already carries are kept.",
             "title": "Tags"
           },
           "tags_add": {
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 100,
                   "type": "string"
                 },
                 "maxItems": 50,
@@ -1069,9 +1377,9 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 131072,
                   "type": "string"
                 },
-                "maxItems": 50,
                 "type": "array"
               },
               {
@@ -1084,25 +1392,27 @@
           "until": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The task expires and is deleted after this date. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged.",
+            "description": "The task expires and is deleted after this date. `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400). On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Until"
           },
           "wait": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Hides the task from every list until this date (tickler). `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. On modify, an empty string clears it; null or omitted leaves it unchanged.",
+            "description": "Hides the task from every list until this date (tickler). `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, in the server's local time. Other Taskwarrior date expressions are accepted as one word (`tomorrow`, `eom`, `now+3d`); a value with spaces is refused (400). On modify, an empty string clears it; null or omitted leaves it unchanged.",
             "title": "Wait"
           }
         },
@@ -1126,6 +1436,12 @@
             ],
             "title": "Account Id"
           },
+          "password_change_required": {
+            "default": false,
+            "description": "True when this login was accepted by a pre-2026-11 bcrypt hash for a password of 72 bytes or more. bcrypt read only its first 72 bytes, so the stored hash cannot be upgraded from it: set a new password (PUT /auth/password). After a transition window such a login is refused.",
+            "title": "Password Change Required",
+            "type": "boolean"
+          },
           "token_type": {
             "default": "bearer",
             "title": "Token Type",
@@ -1141,10 +1457,13 @@
       "UserCreate": {
         "properties": {
           "password": {
+            "description": "The password to set: 8 to 1024 bytes in UTF-8 (counted in bytes, not characters), no NUL character. For up to 7 days after the server's password-hashing upgrade, shorter than 72 bytes.",
+            "maxLength": 1024,
             "title": "Password",
             "type": "string"
           },
           "username": {
+            "maxLength": 256,
             "title": "Username",
             "type": "string"
           }
@@ -1209,10 +1528,13 @@
       "UserLogin": {
         "properties": {
           "password": {
+            "description": "At most 4096 bytes in UTF-8. No minimum: a password set before the rule still works.",
+            "maxLength": 4096,
             "title": "Password",
             "type": "string"
           },
           "username": {
+            "maxLength": 256,
             "title": "Username",
             "type": "string"
           }
@@ -1229,6 +1551,7 @@
           "email": {
             "anyOf": [
               {
+                "maxLength": 320,
                 "type": "string"
               },
               {
@@ -1240,6 +1563,7 @@
           "full_name": {
             "anyOf": [
               {
+                "maxLength": 200,
                 "type": "string"
               },
               {
@@ -1556,6 +1880,8 @@
     },
     "/auth/apikey": {
       "get": {
+        "deprecated": true,
+        "description": "Deprecated since 2026-11-25 (brief 0070): API keys are stored as hashes. Returns a key issued before then until the legacy cutoff (`API_KEY_LEGACY_CUTOFF`, at the latest 2027-01-15), and an empty string after it and for every key created since. Only a signed-in session, or the legacy key itself, reads it; any other API key gets `\"\"`. Use `GET /auth/apikeys` (metadata) and `POST /auth/apikeys`.",
         "operationId": "get_apikey_auth_apikey_get",
         "parameters": [
           {
@@ -1610,6 +1936,8 @@
     },
     "/auth/apikey/regenerate": {
       "post": {
+        "deprecated": true,
+        "description": "Deprecated since 2026-11-25 (brief 0070): API keys are stored as hashes. Needs a signed-in session (`Authorization: Bearer <jwt>`); an API key gets 403. Ends EVERY key of the account and returns one new key, shown in this response only. Use `POST /auth/apikeys` and `DELETE /auth/apikeys/{key_id}`.",
         "operationId": "regenerate_apikey_auth_apikey_regenerate_post",
         "parameters": [
           {
@@ -1657,6 +1985,191 @@
           }
         ],
         "summary": "Regenerate Apikey",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/apikeys": {
+      "get": {
+        "operationId": "list_apikeys_auth_apikeys_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyMetadata"
+                  },
+                  "title": "Response List Apikeys Auth Apikeys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The account's API keys, as metadata (never a key, never its hash)",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "description": "Needs a signed-in session (`Authorization: Bearer <jwt>`); an API key gets 403. The key is stored as a hash and cannot be retrieved again. At most 10 active keys per account (409 beyond).",
+        "operationId": "create_apikey_auth_apikeys_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ApiKeyCreate"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create an API key; the key is shown in this response only",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/apikeys/{key_id}": {
+      "delete": {
+        "description": "Needs a signed-in session; an API key gets 403. 404 when this account holds no key with this id. Revoking an already revoked key is not an error.",
+        "operationId": "revoke_apikey_auth_apikeys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke one API key (it stops working immediately)",
         "tags": [
           "auth"
         ]

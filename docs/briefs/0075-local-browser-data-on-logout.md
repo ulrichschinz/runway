@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | **Requested outcome** | Security remediation package M6 (`REV-006` and `RISK-SEC-001`) of the November 2026 security plan, ordered by Uli on **2026-11-24** ("please fully implement security-fixes for all"). After an explicit logout, a synthetic browser profile holds no task content, draft, outbox entry, token or role of that account; a second account never sees the first account's namespace; a role written into `localStorage` never shows the admin UI after `/auth/me` has answered. |
-| **Owning unit** | `fe/shared` — `frontend/src/shared/browserStorage.js` (new: the key inventory, every storage access, namespacing, purge, legacy cleanup), `frontend/src/composables/useOutbox.js`, `useTheme.js`, `useDarkMode.js`, `frontend/src/shared/uiFlag.js`, `inboxMode.js`, `frontend/src/api/client.js`, `keepalive.js`. `fe/identity` — `frontend/src/stores/auth.js`, `frontend/src/identity/useAccount.js`, `frontend/src/views/SettingsView.vue`. `fe/tasks` — `frontend/src/tasks/captureDraft.js`, `frontend/src/tasks/components/CaptureLine.vue`. `fe/app` — `frontend/src/router/index.js`, `frontend/src/router/NewUiHost.vue`. `fe/layout` — `frontend/src/components/AppShell.vue`. `be/leaves` — `backend/app/models.py`. `be/routers` — `backend/app/routers/auth.py`. `ops` — `tools/surfaces.py`, `ops/surfaces/`. `docs` — this brief, ADR 0047. |
+| **Owning unit** | `fe/shared` — `frontend/src/shared/browserStorage.js` (new: the key inventory, every storage access, namespacing, purge, legacy cleanup), `frontend/src/composables/useOutbox.js`, `useTheme.js`, `useDarkMode.js`, `frontend/src/shared/uiFlag.js`, `inboxMode.js`, `frontend/src/api/client.js`, `keepalive.js`. `fe/identity` — `frontend/src/stores/auth.js`, `frontend/src/identity/useAccount.js`, `frontend/src/views/SettingsView.vue`. `fe/tasks` — `frontend/src/tasks/captureDraft.js`, `frontend/src/tasks/components/CaptureLine.vue`. `fe/app` — `frontend/src/router/index.js`, `frontend/src/router/NewUiHost.vue`. `fe/layout` — `frontend/src/components/AppShell.vue`. `be/leaves` — `backend/app/models.py`. `be/routers` — `backend/app/routers/auth.py`. `ops` — `tools/surfaces.py`, `ops/surfaces/`. `docs` — this brief, ADR 0050. |
 | **Applicable contracts** | [`AGENTS.md`](../../AGENTS.md) §2, §3 (pure frontend rules in `frontend/src/shared/`), §5 (REST, MCP tool `me_auth_me_get`, localStorage keys are public surfaces), §9 (the S8 capture is the check behind `RULE-SURF-001`); [`frontend/AGENTS.md`](../../frontend/AGENTS.md) (tests cover logic, not components; features never import features); [`backend/AGENTS.md`](../../backend/AGENTS.md). |
-| **Governed by** | ADR 0042 (the `ui` key, kept as a cross-account preference); ADR 0007 (frontend test scope); new **ADR 0047** (local browser data on logout). |
+| **Governed by** | ADR 0042 (the `ui` key, kept as a cross-account preference); ADR 0007 (frontend test scope); new **ADR 0050** (local browser data on logout). |
 | **Rule IDs touched** | `RULE-SURF-001` — its S8 capture now also reads the key declarations in `frontend/src/shared/browserStorage.js` (otherwise the namespaced keys would be invisible to the snapshot). Check, ledger statement, negative fixture and docs change in the same commit (META-RULE). No rule added or removed. |
 | **Risks touched** | `RISK-SEC-001` — resolved when its closing criterion holds (role from a server response on every mount, never from storage). `RISK-TEST-004` — names the logout-confirm path as the remaining unrendered gap. New `RISK-FE-001` — a session that ends without an explicit logout (401, expiry, closed browser) leaves that account's namespace in the profile, locked rather than wiped (decision D6). New `SHIM-FE-001` — the legacy-key migration and cleanup code, with a removal date. |
 | **Entry points** | Every `localStorage` read/write in `frontend/src` (inventory below); `auth.login`, `auth.fetchMe`, `auth.logout`; the axios 401 interceptor; the outbox load/save/flush; the capture draft; `GET /auth/me`. |
@@ -15,7 +15,7 @@
 | **Analogous implementations** | Brief 0062 (storage that refuses writes: the memory-only outbox); brief 0052 (capture draft bound to the user); `shared/sessionEnd.js` (a pure rule the client only calls); `tests/threeIsolation.test.js` (a source scan that holds an isolation property). |
 | **Delivery Pattern** | **Security or Operability Change** (failure scenario, control, adversarial proof) plus **Public-Surface Migration** for the storage keys and `/auth/me`: expand → migrate → switch here; contract deferred (`SHIM-FE-001`). |
 | **Required tests** | Unit (frontend pure logic): `frontend/tests/browserStorage.test.js` — inventory, namespaces, purge, legacy migration, outbox decision, source scan. Store-level (node, no rendering): `frontend/tests/authStore.test.js` — role from `/me`, logout purge in a synthetic profile with a real `useOutbox` and the real draft, second account isolation, 401 locks. Adjusted: `useOutbox.test.js` (namespaced key). ASGI/REST: `backend/tests/unit/test_auth.py::TestAccountId`. Browser tier: **not available in this repository** (no browser runner; adding one needs a dependency and a browser download) — recorded in `RISK-TEST-004`. |
-| **Intended scope** | The files above, the snapshots `ops/surfaces/{openapi,mcp-tools,spa}.json` where they really change, `rules/ledger.yaml`, `rules/shims.yaml`, `tools/fixtures/negative.sh`, `docs/security.md`, `docs/threat-model.md`, `docs/operations.md`, `docs/task-interface.md`, ADR 0047. **Not** in scope: server-side token revocation on logout (M2's `auth_version`), CSP (M7.4), moving the JWT out of `localStorage`. |
+| **Intended scope** | The files above, the snapshots `ops/surfaces/{openapi,mcp-tools,spa}.json` where they really change, `rules/ledger.yaml`, `rules/shims.yaml`, `tools/fixtures/negative.sh`, `docs/security.md`, `docs/threat-model.md`, `docs/operations.md`, `docs/task-interface.md`, ADR 0050. **Not** in scope: server-side token revocation on logout (M2's `auth_version`), CSP (M7.4), moving the JWT out of `localStorage`. |
 | **Base revision** | `5d85f6e` (`main`) |
 
 ## Failure scenario
@@ -120,7 +120,7 @@ rollback across an unsent queue should therefore be avoided or announced; nothin
 ## Pre-checks
 
 - `make check` GREEN at `5d85f6e` before any edit (25 s of 180 s).
-- Red tests written before the control and observed failing — see ADR 0047 §Evidence. The source
+- Red tests written before the control and observed failing — see ADR 0050 §Evidence. The source
   scan in `browserStorage.test.js` was additionally watched going red on a constructed violation
   (a `localStorage.getItem('outbox')` appended to `shared/theme.js`, then reverted).
 - Round 1: `make check` GREEN on the change; `make verify` was not recorded here (corrected in
@@ -146,7 +146,7 @@ The regression guard "the same account, locked before the deploy, gets its unsen
 before and after (the legitimate re-login keeps its work).
 
 Residual: the `created_at` line is drawn with the browser's clock against the server's; a skewed
-client clock moves it by the skew (ADR 0047).
+client clock moves it by the skew (ADR 0050).
 
 Gate, round 2 (2026-11-24, local, arm64): `make check` GREEN (17 s of 180 s). `make verify` GREEN
 (145 s of 600 s), **with the container tier `py-test-container` skipped** — "the docker daemon is not

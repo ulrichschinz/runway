@@ -34,6 +34,21 @@ describe('endsSession', () => {
     }
   })
 
+  // REV-001 review: a request sent with the pre-change token can come back 401 after the
+  // password change committed and the new token was adopted. That 401 is about a token the
+  // tab no longer holds, so it must not drop the new one and send the user to /login.
+  it('leaves the session alone when the refused request carried a token no longer stored', () => {
+    expect(endsSession(rejected(401, { token: 'old.jwt' }), 'new.jwt')).toBe(false)
+  })
+
+  it('ends the session when the refused token is the one still stored', () => {
+    expect(endsSession(rejected(401, { token: 'cur.jwt' }), 'cur.jwt')).toBe(true)
+  })
+
+  it('ends the session when no token is stored any more, as there is nothing to keep', () => {
+    expect(endsSession(rejected(401, { token: 'old.jwt' }), null)).toBe(true)
+  })
+
   it('ignores an error without a response or without a request', () => {
     expect(endsSession(new Error('Network Error'))).toBe(false)
     expect(endsSession({ response: { status: 401 } })).toBe(false)

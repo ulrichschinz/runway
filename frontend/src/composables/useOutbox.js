@@ -6,7 +6,7 @@
  * `shared/browserStorage.js`), applies one queue function and writes the result back in the
  * same synchronous step — before any request leaves — so a reload, a crash, a 401 that reloads
  * `/login` (`api/client.js`) or a second tab finds every write that is not confirmed. The queue
- * is namespaced by the account id the login and `/auth/me` name (brief 0075, ADR 0047): another
+ * is namespaced by the account id the login and `/auth/me` name (brief 0075, ADR 0050): another
  * account never reads it, and an explicit logout removes it. A session of the previous deploy that
  * has no account bound yet keeps its queue where that deploy did (`queueKey`, the legacy key), so a
  * reload loses nothing; ops a fresh login marked `prior` there are never shown or sent from here.
