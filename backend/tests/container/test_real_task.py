@@ -266,7 +266,12 @@ class TestDateValuesAreOneArgument:
         TASKDATA does not override: an `on-launch` hook that creates `rc_loaded` on every command,
         and `default.project=PWNED` on every add. Both are shown to fire by the controls below.
         """
-        hooks = real_data_root / "evilhooks"
+        # The hook must sit on an exec-capable filesystem; under the deploy hardening /tmp is
+        # noexec, so the container check provides RUNWAY_TEST_HOOK_DIR for this alone.
+        hook_root = os.environ.get("RUNWAY_TEST_HOOK_DIR")
+        hooks = (
+            (Path(hook_root) / real_data_root.name) if hook_root else real_data_root / "evilhooks"
+        )
         hooks.mkdir()
         hook = hooks / "on-launch.rc-loaded"
         hook.write_text(f"#!/bin/sh\ntouch '{rc_loaded}'\n")

@@ -16,6 +16,10 @@
 !backend
 !ops/deploy/docker-compose.yml
 
+# The operator's volume-ownership tool, run inside this image before the backend leaves uid 0
+# (ADR 0048). One file, standard library only.
+!ops/deploy/volume_ownership.py
+
 # The Claude skill the image serves from GET /skill (ADR 0040). Admitted file by file for the
 # same reason the rest of this file is deny-all: integrations/ also holds an installer, tests
 # and a README, and none of them belong in a runtime image.

@@ -35,6 +35,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgnutls30 \
     && rm -rf /var/lib/apt/lists/*
 
+# The user the service runs as (finding SEC-003, ADR 0048). Numeric and fixed, so the compose
+# file, the host's volume ownership and RULE-OPS-004 can all name it without resolving a name
+# that could map to anything: uid and gid 10001, no login shell, no home directory. It owns two
+# directories in this image, /app/data and /app/db, and nothing else — the application code
+# below stays root-owned and is therefore read-only to the process that runs it.
+RUN groupadd --system --gid 10001 runway \
+ && useradd --system --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent \
+      --shell /usr/sbin/nologin runway
+
 WORKDIR /app
 
 # The lock, not the range. requirements.txt names nine direct dependencies; the lock names
@@ -60,7 +69,20 @@ COPY integrations/claude/skills/runway /app/integrations/claude/skills/runway
 COPY integrations/claude/hooks /app/integrations/claude/hooks
 COPY integrations/claude/.claude-plugin/plugin.json /app/integrations/claude/.claude-plugin/plugin.json
 
-RUN mkdir -p /app/data
+# The two writable places, and the only ones the runtime user owns. /app/data is DATA_ROOT; /app/db
+# holds users.db and, beside it, the rollback journal SQLite creates for every write. The journal
+# is why the database needs a directory of its own: until 2026-11 it was created in /app, the
+# image's own layer, where a read-only root or an unprivileged user cannot write and where it was
+# lost whenever the container was recreated. In the deployment both are bind mounts that cover
+# these directories; the ownership here is what a fresh volume starts from.
+RUN mkdir -p /app/data /app/db \
+ && chown 10001:10001 /app/data /app/db \
+ && chmod 0700 /app/data /app/db
+
+# The operator's tool for handing an existing deployment's volumes to uid 10001 — dry-run by
+# default, targeted, never through a link (docs/operations.md#container-hardening). Outside /app
+# so that nothing on the application's import path is beside it.
+COPY ops/deploy/volume_ownership.py /opt/runway/volume_ownership.py
 
 # The deployed compose file, carried by the image it belongs to.
 #
@@ -103,6 +125,18 @@ RUN printf '%s\n' "$RUNWAY_BUILD" > /app/BUILD_ID
 #
 # log_config.json is generated from app.logging_setup.dict_config and a unit test holds the
 # two together; edit the module, then regenerate, never the other way round.
+#
+# The image carries the unprivileged user above, but still DEFAULTS to uid 0 — on purpose, and
+# only until the contract step of brief 0076 (SHIM-OPS-001). The deploy compose names the user
+# explicitly, so under it this line decides nothing. It decides everything under a compose that
+# names none: the previous deploy's file, which mounts ./users.db at the root-owned /app and
+# which the host keeps whenever its deploy script does not extract the new one (RISK-OPS-002).
+# An image defaulting to 10001 would there be unable to write the database or a single task,
+# behind a green /api/health. Root here keeps that case exactly as it ran before.
+#
+# RULE-OPS-004 requires exactly `USER 0:0` while SHIM-OPS-001 stands, and a numeric non-root USER
+# equal to the compose's once it is removed. The contract step makes this `USER 10001:10001`.
+USER 0:0
 #
 # --no-proxy-headers: uvicorn otherwise rewrites the client address from X-Forwarded-For whenever
 # the peer is 127.0.0.1 — under the development compose's host networking that is nginx and

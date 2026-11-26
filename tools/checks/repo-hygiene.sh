@@ -17,6 +17,7 @@ tracked=$(git ls-files)
 set -- \
 	'.env|.env' \
 	'users.db|users.db' \
+	'db|/db/' \
 	'data|data/' \
 	'backend/.venv|backend/.venv/' \
 	'frontend/node_modules|frontend/node_modules/' \

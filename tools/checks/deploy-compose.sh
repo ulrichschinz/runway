@@ -11,6 +11,10 @@
 # This is the boundary on that widening. It does not make the deploy compose safe to write
 # carelessly — it makes the specific host-scoped escalations fail the gate instead of the
 # review.
+#
+# RULE-OPS-004  Every deploy service MUST run read-only, with no-new-privileges, cap_drop ALL
+#               and an explicit numeric non-root user matching its image's final-stage USER —
+#               except the exact transitional shape a declared shim names (ADR 0048).
 set -eu
 . "$(dirname -- "$0")/../lib.sh"
 
@@ -30,5 +34,5 @@ if [ -n "$findings" ]; then
 	exit "$EX_RULE"
 fi
 
-ok "the deploy compose asks the host for no privilege it does not need"
+ok "the deploy compose asks the host for no privilege it does not need, and gives up what it must"
 exit "$EX_OK"

@@ -3,6 +3,8 @@ data/
 # `data/` above is for the Taskwarrior data root; this one path is design source (ADR 0042).
 !docs/design/2026-10-31-unified-ui/shared/data/
 users.db
+# The directory users.db is mounted into, with its journal (ADR 0048). Anchored: only the root's.
+/db/
 .env
 .claude/
 backend/.venv/

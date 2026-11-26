@@ -961,6 +961,283 @@ p.write_text(t.replace(anchor, anchor + "      - /var/run/docker.sock:/var/run/d
 HOSTMOUNT
 expect_red "OPS-003-hostmount" "tools/checks/deploy-compose.sh" "RULE-OPS-003"
 
+# --- RULE-OPS-004 — a service gets its writable root back ------------------------
+# One line in a long YAML block, and the backend's whole filesystem — its code included — is
+# writable again to whatever runs in it (finding SEC-003, ADR 0048).
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'WRITABLEROOT'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = '    user: "${RUNWAY_BACKEND_USER:-0:0}"\n'
+assert anchor in t and "    read_only: true\n" in t, "the backend's hardening is not where the fixture expects it"
+p.write_text(t.replace("    read_only: true\n", "", 1))
+WRITABLEROOT
+expect_red "OPS-004-writable" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — the compose overrides the image back to root ------------------
+# The quiet way to undo a USER line: the compose `user:` wins over the image, and "0:0" is a
+# perfectly well-formed value.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'ROOTUSER'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    image: ghcr.io/ulrichschinz/runway-frontend:${RUNWAY_SHA:-latest}\n"
+assert anchor in t, "the frontend's image line is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + '    user: "0:0"\n', 1))
+ROOTUSER
+expect_red "OPS-004-root-user" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — root spelled with a leading zero -------------------------------
+# Docker parses "00" as uid 0. A check comparing strings to "0" would take `00:00` in both the
+# compose and the Dockerfile for a matching non-root pair, and the container would run as root
+# behind a green gate.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" "$SANDBOX/frontend/Dockerfile" <<'ZEROPAD'
+import pathlib
+import sys
+
+compose, dockerfile = (pathlib.Path(a) for a in sys.argv[1:3])
+t = compose.read_text()
+anchor = "    image: ghcr.io/ulrichschinz/runway-frontend:${RUNWAY_SHA:-latest}\n"
+assert anchor in t, "the frontend's image line is not where the fixture expects it"
+compose.write_text(t.replace(anchor, anchor + '    user: "00:00"\n', 1))
+t = dockerfile.read_text()
+anchor = "USER 10002:10002\n"
+assert anchor in t, "frontend/Dockerfile has no USER line where the fixture expects it"
+dockerfile.write_text(t.replace(anchor, "USER 00:00\n", 1))
+ZEROPAD
+expect_red "OPS-004-zero-pad" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — the image loses its USER --------------------------------------
+# Without a USER in the final stage, any service whose compose line is later dropped runs as
+# root, and the image no longer says which uid owns what it writes.
+python3 - "$SANDBOX/frontend/Dockerfile" <<'NOUSER'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "USER 10002:10002\n"
+assert anchor in t, "frontend/Dockerfile has no USER line where the fixture expects it"
+p.write_text(t.replace(anchor, "", 1))
+NOUSER
+expect_red "OPS-004-no-user" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — the backend image switches before its data has -----------------
+# While SHIM-OPS-001 stands, the backend image must default to the compose fallback's uid 0.
+# An image defaulting to 10001 works under the new compose and fails every write under the
+# previous one, which the host keeps whenever its deploy script does not extract the new file
+# (RISK-OPS-002) — behind a green /api/health.
+python3 - "$SANDBOX/backend/Dockerfile" <<'EARLYUSER'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "USER 0:0\n"
+assert anchor in t, "backend/Dockerfile has no transitional USER line where the fixture expects it"
+p.write_text(t.replace(anchor, "USER 10001:10001\n", 1))
+EARLYUSER
+expect_red "OPS-004-early-user" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — the shim is removed and the root backend stays -----------------
+# The exception is only an exception while SHIM-OPS-001 is declared. Removing the shim and
+# forgetting the compose is the contract step done halfway, and must go red.
+python3 - "$SANDBOX/rules/shims.yaml" <<'NOSHIMOPS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+start = t.index("  - id: SHIM-OPS-001\n")
+end = t.find("\n  - id: ", start + 1)
+p.write_text(t[:start] + (t[end + 1 :] if end >= 0 else ""))
+NOSHIMOPS
+expect_red "OPS-004-shim-gone" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — a later security_opt entry turns no-new-privileges back off ----
+# Docker applies security_opt in order and the last no-new-privileges value wins. A check that
+# only asks whether `no-new-privileges:true` appears somewhere takes this for hardened.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'NNPOVERRIDE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "      - no-new-privileges:true\n"
+assert anchor in t, "no-new-privileges is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + "      - no-new-privileges:false\n", 1))
+NNPOVERRIDE
+expect_red "OPS-004-nnp-override" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — the seccomp profile is switched off ----------------------------
+# One more list entry beside a correct one. Unconfined seccomp (or apparmor, or label=disable)
+# hands the container every syscall the default profile withholds.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'SECCOMP'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "      - no-new-privileges:true\n"
+assert anchor in t, "no-new-privileges is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + "      - seccomp:unconfined\n", 1))
+SECCOMP
+expect_red "OPS-004-seccomp" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — root comes back as a supplementary group -----------------------
+# `user:` is non-root in both halves, and `group_add: ["0"]` gives the process gid 0 anyway:
+# every root-group-writable file in the image and on the mounts is its to write.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'GROUPROOT'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    image: ghcr.io/ulrichschinz/runway-frontend:${RUNWAY_SHA:-latest}\n"
+assert anchor in t, "the frontend's image line is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + '    group_add: ["0"]\n', 1))
+GROUPROOT
+expect_red "OPS-004-group-root" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-003 — a service joins the host's process namespace -------------------
+# `pid: host` lets the container see and signal every process on the machine; `ipc`, `uts`,
+# `userns_mode` and `cgroup` set to host undo their namespace the same way.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'HOSTPID'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    image: ghcr.io/ulrichschinz/runway-frontend:${RUNWAY_SHA:-latest}\n"
+assert anchor in t, "the frontend's image line is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + "    pid: host\n", 1))
+HOSTPID
+expect_red "OPS-003-host-pid" "tools/checks/deploy-compose.sh" "RULE-OPS-003"
+
+# --- RULE-OPS-003 — a host device is passed in --------------------------------------
+# A block device in the container is the host's disk, readable and writable below every
+# filesystem permission.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'DEVICES'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    image: ghcr.io/ulrichschinz/runway-frontend:${RUNWAY_SHA:-latest}\n"
+assert anchor in t, "the frontend's image line is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + '    devices: ["/dev/sda:/dev/sda"]\n', 1))
+DEVICES
+expect_red "OPS-003-devices" "tools/checks/deploy-compose.sh" "RULE-OPS-003"
+
+# --- RULE-OPS-004 — the frontend compose is switched before its image is the rollback target --
+# While SHIM-OPS-002 stands the frontend block must still start the previous deploy's image,
+# root nginx writing /etc/nginx. `read_only: true` here looks like more hardening and turns the
+# deploy into one that pinning RUNWAY_SHA cannot roll back.
+python3 - "$SANDBOX/ops/deploy/docker-compose.yml" <<'EARLYFRONT'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    image: ghcr.io/ulrichschinz/runway-frontend:${RUNWAY_SHA:-latest}\n"
+assert anchor in t, "the frontend's image line is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + "    read_only: true\n", 1))
+EARLYFRONT
+expect_red "OPS-004-early-front" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-004 — SHIM-OPS-002 is removed and the frontend block stays transitional --
+# The frontend switch done halfway: the exception goes, the compose does not change, and the
+# frontend would keep a writable root and every default capability behind a green gate.
+python3 - "$SANDBOX/rules/shims.yaml" <<'NOSHIMFRONT'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+start = t.index("  - id: SHIM-OPS-002\n")
+end = t.find("\n  - id: ", start + 1)
+p.write_text(t[:start] + (t[end + 1 :] if end >= 0 else ""))
+NOSHIMFRONT
+expect_red "OPS-004-front-shim-gone" "tools/checks/deploy-compose.sh" "RULE-OPS-004"
+
+# --- RULE-OPS-005 — a header loses `always` ---------------------------------------
+# It still appears on every 200, so nothing looks wrong in a browser; it is gone from every
+# 404 and 502, which are the responses an attacker can provoke (finding SEC-004).
+python3 - "$SANDBOX/frontend/nginx.conf" <<'NOALWAYS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = 'add_header X-Content-Type-Options "nosniff" always;'
+assert anchor in t, "the nosniff header is not where the fixture expects it"
+p.write_text(t.replace(anchor, 'add_header X-Content-Type-Options "nosniff";', 1))
+NOALWAYS
+expect_red "OPS-005-no-always" "tools/checks/edge-headers.sh" "RULE-OPS-005"
+
+# --- RULE-OPS-005 — a location declares a header of its own ------------------------
+# The likeliest regression: a caching header for the SPA. nginx then inherits none of the
+# server's add_header lines into that location, and every security header vanishes from it.
+python3 - "$SANDBOX/frontend/nginx.conf" <<'LOCATIONHEADER'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    location / {\n"
+assert anchor in t, "the SPA location is not where the fixture expects it"
+p.write_text(t.replace(anchor, anchor + '        add_header Cache-Control "no-cache";\n', 1))
+LOCATIONHEADER
+expect_red "OPS-005-location" "tools/checks/edge-headers.sh" "RULE-OPS-005"
+
+# --- RULE-OPS-005 — the strict policy allows inline script --------------------------
+# 'unsafe-inline' in script-src is the one word that turns a CSP back into decoration.
+python3 - "$SANDBOX/frontend/nginx.conf" <<'UNSAFEINLINE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "default-src 'self'; script-src 'self';"
+assert anchor in t, "the strict policy is not where the fixture expects it"
+p.write_text(t.replace(anchor, "default-src 'self'; script-src 'self' 'unsafe-inline';", 1))
+UNSAFEINLINE
+expect_red "OPS-005-unsafe" "tools/checks/edge-headers.sh" "RULE-OPS-005"
+
+# --- RULE-OPS-005 — HSTS from the inner HTTP server ---------------------------------
+# It looks like hardening and is a claim about hosts this server cannot see.
+python3 - "$SANDBOX/frontend/nginx.conf" <<'HSTS'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = "    server_tokens off;\n"
+assert anchor in t, "server_tokens is not where the fixture expects it"
+hsts = '    add_header Strict-Transport-Security "max-age=63072000" always;\n'
+p.write_text(t.replace(anchor, anchor + hsts, 1))
+HSTS
+expect_red "OPS-005-hsts" "tools/checks/edge-headers.sh" "RULE-OPS-005"
+
+# --- RULE-OPS-005 — the report-only shim is removed and nothing is enforced ----------
+# Removing SHIM-WEB-001 without moving the strict policy into the enforced header is the
+# contract step done halfway: the gate must then ask for the enforced strict policy.
+python3 - "$SANDBOX/rules/shims.yaml" <<'NOSHIMWEB'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+start = t.index("  - id: SHIM-WEB-001\n")
+end = t.find("\n  - id: ", start + 1)
+p.write_text(t[:start] + (t[end + 1 :] if end >= 0 else ""))
+NOSHIMWEB
+expect_red "OPS-005-shim-gone" "tools/checks/edge-headers.sh" "RULE-OPS-005"
+
 # --- RULE-GOV-002 — the decay review silently stopped happening -------------
 #
 # The failure this rule exists for is not a bad review; it is no review. A scheduled

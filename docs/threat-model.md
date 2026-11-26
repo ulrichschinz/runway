@@ -473,7 +473,9 @@ cleartext keys of the previous image), roles, profile fields, project plans, sit
 settings, when each kind of review last happened and which projects are on hold or done, and the
 storage migration's protocol. Eight tables (`api_keys` added by brief 0070), created and migrated at
 [`backend/app/database.py:13-106`](../backend/app/database.py) and lines 112-117. Bind-mounted from
-`/opt/services/runway/users.db` ([`ops/deploy/docker-compose.yml:22-24`](../ops/deploy/docker-compose.yml)).
+`/opt/services/runway/users.db` ([`ops/deploy/docker-compose.yml`](../ops/deploy/docker-compose.yml),
+the backend's `volumes:`) — since 2026-11-24 into the directory `./db` at `/app/db`, so that SQLite's
+rollback journal is written to the host rather than the image's layer (ADR 0048).
 Its schema is a protected surface, snapshotted at
 [`ops/surfaces/db-schema.sql`](../ops/surfaces/db-schema.sql).
 
@@ -501,7 +503,10 @@ the root (so a case- or normalisation-folded alias is refused too); that residua
 non-secret choice between the old and the new UI, removed again with the switch (ADR 0042). The keys
 `outbox`, `captureDraft`, `role`, `fullName`, `email` are legacy, migrated and removed (`SHIM-FE-001`).
 A JWT in `localStorage` is readable by any script running on the origin; the compensating position is
-that the app serves no third-party script and CORS is closed.
+that the app serves no third-party script and CORS is closed —
+and, since 2026-11-24, that the edge sends a same-origin Content-Security-Policy:
+framing, plugins and `<base>` enforced, the strict script/style/connect policy still report-only until
+`SHIM-WEB-001` ends (ADR 0048, [docs/security.md](security.md#browser-headers)).
 
 An **explicit logout** removes every account-bound key and leaves only the UI preferences; with unsent
 changes it asks first (ADR 0050, decision D6). The namespace is the stable `account_id`, so a second
@@ -512,6 +517,15 @@ than the account's `created_at` (a skewed client clock shifts that line — `SHI
 draft in the profile, locked to the account but readable by anyone holding the profile —
 `RISK-FE-001`. The dialog and the cross-tab reload are not exercised in a browser — `RISK-TEST-004`.
 
+**Who can write the stores.** Until 2026-11-24 the backend ran as uid 0 on a writable root with Docker's
+default capabilities, so a write primitive inside the container reached the whole container (finding
+SEC-003). Now the root filesystem is read-only, `/tmp` is a `noexec` tmpfs, `no-new-privileges` is set and
+every capability but `DAC_OVERRIDE` is dropped; the image's user is uid 10001, and the backend runs as that
+user once the operator has migrated the host's volume ownership (`SHIM-OPS-001`,
+[docs/operations.md](operations.md#container-hardening)). This narrows what a defect can reach to the two
+mounts. It does **not** separate tenants: every account's store belongs to the same uid, and the tenancy
+boundary is still `TASKDATA`.
+
 **Enforced**
 - `RULE-SURF-001` — the migrated database schema, the served OpenAPI schema, the runtime MCP tool
   list, the Taskwarrior template and the SPA's routes and `localStorage` keys are all snapshotted, so
@@ -520,7 +534,15 @@ draft in the profile, locked to the account but readable by anyone holding the p
   to are semantically identical (brief 0073).
 - `RULE-HYG-001` and `RULE-HYG-002` — no store is tracked in git, and `.gitignore` covers each.
 - `RULE-TEST-002` — cross-tenant isolation is tested against the real binary, so the boundary these
-  directories provide is exercised rather than reasoned about.
+  directories provide is exercised rather than reasoned about; since 2026-11-24 as uid 10001 on a
+  read-only root, and the runtime images under the deploy flags.
+- `RULE-OPS-004` — every deploy service runs read-only, without new privileges or capabilities, as an
+  explicit numeric non-root user matching its image, with no-new-privileges as the last word of a
+  `security_opt` that may carry nothing else and no `group_add`; the backend's uid-0 fallback only
+  while `SHIM-OPS-001` stands, the frontend's previous-deploy block (its image non-root regardless)
+  only while `SHIM-OPS-002` stands. `RULE-OPS-003` also refuses host namespaces, devices and
+  sysctls.
+- `RULE-OPS-005` — the edge declares the browser headers on every response, same-origin, no HSTS.
 
 **Asserted**
 - **That production has reached schema version 1 is not visible from here.** Since brief 0073 a fresh
@@ -536,6 +558,15 @@ draft in the profile, locked to the account but readable by anyone holding the p
   deployment's state.
 - Backups themselves are outside this repository entirely — nothing here creates, encrypts, verifies
   or restores one, and API keys in a backup are the second half of `WAIVER-SEC-003`.
+- **Whether the backend actually runs as uid 10001 in production** is a read on the host, not a gate:
+  the switch is the operator's `RUNWAY_BACKEND_USER` line, and nothing here can see the host's `.env`
+  (`SHIM-OPS-001`, `RISK-OPS-002`). Until then it is uid 0 with `DAC_OVERRIDE`. The backend *image* also
+  still defaults to uid 0 until the contract step, so that it writes under the previous compose whenever
+  the host keeps it; under that compose it runs as root with Docker's default capabilities, as before.
+- **The runtime images' behaviour under the hardening** is asserted by the container tier, which had not
+  executed anywhere when brief 0076 was written (`RISK-TEST-001`); until its first CI run it is design.
+- **What the public origin sends** is read only after a deploy, by `verify-deploy`; Traefik in front of
+  nginx could change any header and no gate sees it (`RISK-OPS-008`).
 
 ---
 
