@@ -57,8 +57,15 @@ shims:
       authentication, so a caller sending an expired key in the Bearer slot never appears; and
       it only sees what reaches this application, so a client that has migrated but still has
       the old code path is indistinguishable from one that never had it.
+
+      Re-approved on 2026-11-26, the day after the expiry, by the maintainer. The soak the
+      paragraphs above ask for has not been read on the deploy host yet, so removal would
+      still be blind; the security remediation (docs/plan/security-remediation-2026-11.md)
+      is waiting on a green gate to deploy. The new date matches WAIVER-SEC-003's, so the
+      API-key migration and the removal of this shape are decided together, after the audit
+      query in docs/operations.md has been run against data/audit.db.
     owner: maintainer
-    approved_on: 2026-08-25
-    expires: 2026-11-25
+    approved_on: 2026-11-26
+    expires: 2027-01-31
     re_open_trigger: "the expiry passes, or a caller is found still using the Bearer shape after Step 13"
     decision_record: docs/adr/0018-cors-startup-refusal-and-the-inbox-shim.md
