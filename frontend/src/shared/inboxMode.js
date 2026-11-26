@@ -4,10 +4,12 @@
  * on a touch screen (`(pointer: coarse)`) or at phone width, and the list elsewhere; "Liste ·
  * Stapel" in the Inbox head, `s` and the palette change it, and the choice is remembered here.
  *
- * The key is a literal in a `.js` file on purpose: `tools/surfaces.py` snapshots localStorage
- * keys only in that form, and `inboxMode` is in `ops/surfaces/spa.json`. Storage access is
+ * The key `inboxMode` is declared in `shared/browserStorage.js` (a UI preference, kept across
+ * accounts and logouts) and snapshotted from there into `ops/surfaces/spa.json`. Storage access is
  * guarded: a browser refusing site data gets the device default and keeps a change for the page.
  */
+
+import { KEY, readKey, writeKey } from './browserStorage.js'
 
 export const INBOX_MODES = Object.freeze(['list', 'stack'])
 
@@ -32,21 +34,13 @@ export function resolveInboxMode(stored, device) {
 
 /** @returns {'list'|'stack'} the remembered mode, or the device default */
 export function readInboxMode(device) {
-  let stored = null
-  try {
-    stored = localStorage.getItem('inboxMode')
-  } catch {
-    // Storage refused: the default.
-  }
-  return resolveInboxMode(stored, device)
+  // Storage refused: the default.
+  return resolveInboxMode(readKey(KEY.inboxMode) ?? null, device)
 }
 
 /** Remember the mode; storage that refuses changes nothing but its persistence. */
 export function writeInboxMode(mode) {
   if (!INBOX_MODES.includes(mode)) return
-  try {
-    localStorage.setItem('inboxMode', mode)
-  } catch {
-    // Storage refused: the mode holds for this page.
-  }
+  // Storage refused: the mode holds for this page.
+  writeKey(KEY.inboxMode, mode)
 }

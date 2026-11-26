@@ -27,7 +27,12 @@ class TestRegistration:
         _set_registration(True)
         r = client.post("/auth/register", json={"username": "bob", "password": "pw-long-enough"})
         assert r.status_code == 201
-        assert r.json() == {"username": "bob", "role": "user", "full_name": "", "email": ""}
+        body = r.json()
+        # `account_id` since brief 0075: the stable id the SPA namespaces browser data by.
+        assert body.pop("account_id").isdigit()
+        # `created_at` only on GET /auth/me (the migration's proof); register leaves it null.
+        assert body.pop("created_at") is None
+        assert body == {"username": "bob", "role": "user", "full_name": "", "email": ""}
 
     def test_is_refused_when_the_site_setting_is_off(self, client):
         _set_registration(False)
@@ -157,6 +162,64 @@ class TestVanishedAccount:
         """Not "you are not an admin" — there is no "you" any more."""
         _delete_account(registered["username"])
         assert client.get("/admin/users", headers=auth).status_code == 401
+
+
+class TestAccountId:
+    """The browser namespaces an account's local data by `account_id` (brief 0075, ADR 0050).
+
+    A username is not a stable identity: an account deleted and registered again under the
+    same name must not inherit the old account's unsent offline queue. `account_id` is
+    `users.id`, which is AUTOINCREMENT and so never handed out twice.
+    """
+
+    def test_me_names_the_account_by_a_stable_id(self, client, auth):
+        first = client.get("/auth/me", headers=auth).json()["account_id"]
+        assert isinstance(first, str) and first
+        assert client.get("/auth/me", headers=auth).json()["account_id"] == first
+
+    def test_two_accounts_have_two_ids(self, client, registered, auth):
+        from tests.conftest import register_user
+
+        bob = register_user(client, "bob")
+        mine = client.get("/auth/me", headers=auth).json()["account_id"]
+        theirs = client.get("/auth/me", headers={"Authorization": f"Bearer {bob['token']}"}).json()[
+            "account_id"
+        ]
+        assert mine != theirs
+
+    def test_the_same_username_registered_again_is_another_account(self, client, registered, auth):
+        """The REV-006 variant a username namespace would open: delete, re-register, inherit."""
+        from tests.conftest import register_user
+
+        before = client.get("/auth/me", headers=auth).json()["account_id"]
+        _delete_account(registered["username"])
+        again = register_user(client, registered["username"])
+        after = client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {again['token']}"}
+        ).json()["account_id"]
+        assert after != before
+
+    def test_login_names_the_account_too(self, client, registered, auth):
+        """The SPA binds the namespace at login, so a failed /auth/me leaves no unbound window."""
+        r = client.post(
+            "/auth/login",
+            json={"username": registered["username"], "password": registered["password"]},
+        )
+        assert r.status_code == 200
+        assert r.json()["account_id"] == client.get("/auth/me", headers=auth).json()["account_id"]
+
+    def test_me_names_when_the_account_was_created(self, client, registered, auth):
+        """Ops older than the account cannot be its own: the legacy migration's proof (ADR 0050)."""
+        from datetime import datetime
+
+        created = client.get("/auth/me", headers=auth).json()["created_at"]
+        assert created.endswith("Z")
+        assert datetime.fromisoformat(created.replace("Z", "+00:00")).year >= 2026
+
+    def test_api_key_callers_see_the_same_id(self, client, registered, auth):
+        by_jwt = client.get("/auth/me", headers=auth).json()["account_id"]
+        by_key = client.get("/auth/me", headers={"X-Api-Key": registered["api_key"]}).json()
+        assert by_key["account_id"] == by_jwt
 
 
 class TestProfile:

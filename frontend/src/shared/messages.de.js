@@ -134,6 +134,8 @@ export default {
   'waiting.sorted': 'nach Nachhak-Datum', 'someday.sub': 'im Rückblick durchsehen',
   'all.open': '{n} offen', 'all.doneN': '{n} erledigt in 7 Tagen', 'all.showDone': 'Erledigte zeigen',
   'set.look': 'Darstellung', 'set.system': 'System', 'set.light': 'Hell', 'set.dark': 'Dunkel', 'set.signout': 'Abmelden',
+  // An explicit logout with unsent changes (decision D6, ADR 0050): OK discards them, Abbrechen keeps them.
+  'signout.discardQ': '{n} lokale Änderung(en) sind noch nicht beim Server angekommen. Abmelden und diese lokalen Änderungen verwerfen? (Abbrechen: angemeldet bleiben und später senden.)',
   // command palette (graft from 04)
   'pal.title': 'Befehle', 'pal.ph': 'Befehl, Todo oder Projekt suchen', 'pal.goto': 'Gehe zu {v}', 'pal.check': 'Abhaken: {d}',
   'pal.plan': 'Für heute planen: {d}', 'pal.unplan': 'Nicht mehr für heute: {d}', 'pal.clarify': 'Inbox klären ({n})',

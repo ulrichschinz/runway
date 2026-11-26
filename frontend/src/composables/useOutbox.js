@@ -2,12 +2,18 @@
  * The write path's effects around the pure queue in `shared/outboxQueue.js` (plan §6.4,
  * brief 0049): storage, timers, requests, the keepalive flush.
  *
- * Storage is the queue. Every change re-reads `localStorage['outbox']`, applies one queue
- * function and writes the result back in the same synchronous step — before any request
- * leaves — so a reload, a crash, a 401 that reloads `/login` (`api/client.js`) or a second
- * tab finds every write that is not confirmed. Ops belong to the user who made them
- * (`username`); another user's ops are kept as they are and never sent. When storage
- * refuses, the queue lives in memory for this page.
+ * Storage is the queue. Every change re-reads the account's queue (`outbox:<accountId>`,
+ * `shared/browserStorage.js`), applies one queue function and writes the result back in the
+ * same synchronous step — before any request leaves — so a reload, a crash, a 401 that reloads
+ * `/login` (`api/client.js`) or a second tab finds every write that is not confirmed. The queue
+ * is namespaced by the account id the login and `/auth/me` name (brief 0075, ADR 0050): another
+ * account never reads it, and an explicit logout removes it. A session of the previous deploy that
+ * has no account bound yet keeps its queue where that deploy did (`queueKey`, the legacy key), so a
+ * reload loses nothing; ops a fresh login marked `prior` there are never shown or sent from here.
+ * Signed out, and when storage refuses, the queue lives in memory for this page, and the page
+ * reports it (`reportPending`) so a logout asks about it too. Once an account is bound, this
+ * user's ops queued in memory join its stored queue. When the binding goes (a logout), the memory
+ * copy goes with it.
  *
  * Done and delete wait in a hold (`HOLD_MS`); `pagehide` and a hidden tab send every held
  * op at once with `fetch(…, {keepalive: true})` (`api/keepalive.js`).
@@ -16,6 +22,9 @@
 import { ref } from 'vue'
 import client from '../api/client.js'
 import { sendKeepalive } from '../api/keepalive.js'
+import {
+  ACCOUNT_BOUND, LEGACY, queueKey, readKey, readToken, readUsername, reportPending, writeKey,
+} from '../shared/browserStorage.js'
 import {
   alreadyApplied, begin, commit, createOp, enqueue, fail, failureOf, hold, inFlightUntil, isSendable, opsOf,
   pauseAuth, recover, restore, resume, retry, serialize, undo, verifyRequest, withOpsOf,
@@ -27,21 +36,12 @@ const FOREIGN_GRACE_MS = 2000
 let seq = 0
 const newId = () => `${Date.now().toString(36)}-${(++seq).toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
-function currentUser() {
-  try {
-    return localStorage.getItem('username')
-  } catch {
-    return null
-  }
-}
+const currentUser = () => readUsername()
 
-function hasToken() {
-  try {
-    return !!localStorage.getItem('token')
-  } catch {
-    return false
-  }
-}
+const hasToken = () => !!readToken()
+
+/** Ops of this session, as against the `prior` ones a fresh login found in the legacy queue. */
+const live = (list) => list.filter((op) => !op.prior)
 
 /** The server's reason for refusing a request (FastAPI's `detail`), or ''. */
 function messageOf(err) {
@@ -93,14 +93,36 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
    * tab sends a done the user took back or a capture that was already posted (review of brief 0062).
    */
   const gone = new Set()
+  /** The key `all` belongs to: the bound account's queue, the legacy one (`queueKey`), or null. */
+  let key = queueKey()
+
+  /**
+   * The binding changed since the last read. From no binding (memory, or the legacy queue): this
+   * user's ops join the new queue (`save` writes it). Unbound, or bound to another account: the
+   * memory copy belonged to the account that left, and nothing of it is kept or sent.
+   */
+  function rebind(next) {
+    const me = currentUser()
+    const carried = key === null || key === LEGACY.outbox ? live(all).filter((op) => op.user === me) : []
+    key = next
+    memoryOnly = false
+    gone.clear()
+    const text = next ? readKey(next) : null
+    const stored = restore(text)
+    const known = new Set(stored.map((op) => op.id))
+    all = [...stored, ...carried.filter((op) => !known.has(op.id))]
+  }
 
   function load() {
-    if (memoryOnly) return
-    try {
-      all = restore(localStorage.getItem('outbox'))
-    } catch {
-      // Storage refused: keep the copy in memory.
+    const next = queueKey()
+    if (next !== key) {
+      rebind(next)
+      return
     }
+    if (memoryOnly || key === null) return
+    const text = readKey(key)
+    // undefined: storage refused, keep the copy in memory.
+    if (text !== undefined) all = restore(text)
   }
 
   /**
@@ -109,22 +131,22 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
    * there (another tab's among them) stays as it is.
    */
   function pruneStored() {
-    if (!gone.size) return
-    try {
-      const stored = restore(localStorage.getItem('outbox'))
-      const kept = stored.filter((op) => !gone.has(op.id))
-      if (kept.length < stored.length) localStorage.setItem('outbox', serialize(kept))
-    } catch {
-      // Storage keeps nothing at all: there is no stale queue to replay.
-    }
+    if (!gone.size || key === null) return
+    const text = readKey(key)
+    // Storage keeps nothing at all: there is no stale queue to replay.
+    if (text === undefined) return
+    const stored = restore(text)
+    const kept = stored.filter((op) => !gone.has(op.id))
+    if (kept.length < stored.length) writeKey(key, serialize(kept))
   }
 
   function save() {
-    try {
-      localStorage.setItem('outbox', serialize(all))
+    // No account bound: nothing is written where another account, or nobody, would find it.
+    if (key === null) return
+    if (writeKey(key, serialize(all))) {
       memoryOnly = false
       gone.clear()
-    } catch {
+    } else {
       // Storage refused or full: the queue lives in memory for this page.
       memoryOnly = true
       pruneStored()
@@ -136,8 +158,10 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
     load()
     const me = currentUser()
     const before = all
-    const mine = fn(opsOf(all, me))
-    all = withOpsOf(all, me, mine)
+    const prior = all.filter((op) => op.prior)
+    const pool = live(all)
+    const mine = fn(opsOf(pool, me))
+    all = [...prior, ...withOpsOf(pool, me, mine)]
     const now = new Set(all.map((op) => op.id))
     for (const op of before) if (!now.has(op.id)) gone.add(op.id)
     save()
@@ -222,6 +246,8 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
    * survives the page. An op that must be verified first waits for the next start.
    */
   function flush() {
+    // Signed out, or the session ended: nothing goes out without a token, the ops wait (locked).
+    if (!hasToken()) return
     let flushing = []
     mutate((list) => {
       flushing = list.filter((op) => op.state === 'held' || (op.state === 'queued' && !op.verify))
@@ -272,6 +298,8 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
   }
 
   load()
+  // A logout asks about what only this page holds, too (storage refused, or not yet written).
+  reportPending(() => all.map((op) => op.id))
   const recoverNow = () => mutate((list) => recover(list, Date.now(), { authed: hasToken(), tab }))
   // Ops another tab has in flight are left to it; once their window has passed, they are
   // taken over (that tab was closed or its request was lost). Armed at boot and whenever
@@ -299,10 +327,16 @@ export function useOutbox({ onSettled, onFailed = () => {} }) {
   })
   // Another tab changed the queue: show it, and arm its holds here too, late (`schedule`).
   window.addEventListener('storage', (event) => {
-    if (event.key !== 'outbox') return
+    if (event.key !== null && event.key !== queueKey() && event.key !== key) return
     load()
-    ops.value = opsOf(all, currentUser())
+    ops.value = opsOf(live(all), currentUser())
     schedule({ foreign: true })
+    armRecover()
+  })
+
+  // `/auth/me` bound the session (the first load after a login or the deploy): read that queue.
+  window.addEventListener(ACCOUNT_BOUND, () => {
+    recoverNow()
     armRecover()
   })
 

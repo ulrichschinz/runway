@@ -24,7 +24,11 @@ What is captured, and why that source:
 * **S5 taskrc template** — verbatim. The urgency coefficients are a behavioural contract:
   changing one re-orders every user's list, and existing `.taskrc` files are never updated.
 * **S8 SPA** — routes and localStorage keys, parsed from source. Bookmarks depend on the
-  first; the second is where a logged-in session lives.
+  first; the second is where a logged-in session lives. Keys are read from two forms: the
+  `declareKey('…')` inventory in `frontend/src/shared/browserStorage.js`, which since ADR 0050
+  is the only file that touches storage and whose per-account keys (`outbox:{account}`) are
+  built at run time, and any literal `localStorage.getItem('…')` call — so a direct call that
+  bypassed the inventory would still show up in the snapshot.
 
 Env vars are checked separately by `check_env_vars`, because that is a consistency question
 between code and documentation rather than a snapshot.
@@ -193,6 +197,7 @@ def capture_spa() -> dict:
             continue
         text = path.read_text(encoding="utf-8")
         keys |= set(re.findall(r"localStorage\.(?:get|set|remove)Item\(\s*'([^']+)'", text))
+        keys |= set(re.findall(r"\bdeclareKey\(\s*'([^']+)'", text))
 
     return {"routes": routes, "local_storage_keys": sorted(keys)}
 

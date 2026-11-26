@@ -1425,6 +1425,17 @@
             "title": "Access Token",
             "type": "string"
           },
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
           "password_change_required": {
             "default": false,
             "description": "True when this login was accepted by a pre-2026-11 bcrypt hash for a password of 72 bytes or more. bcrypt read only its first 72 bytes, so the stored hash cannot be upgraded from it: set a new password (PUT /auth/password). After a transition window such a login is refused.",
@@ -1466,6 +1477,28 @@
       },
       "UserInfo": {
         "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
           "email": {
             "default": "",
             "title": "Email",

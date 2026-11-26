@@ -258,6 +258,13 @@ export RUNWAY_SHA=<the last good commit sha>
 sudo docker compose pull && sudo docker compose up -d --remove-orphans
 ```
 
+**Rolling back across ADR 0050 (brief 0075).** The image before it reads only the unnamespaced
+`outbox`/`captureDraft` keys. A browser that loaded the newer bundle has already moved its unsent
+offline changes into `outbox:<accountId>`, which the older image does not see: they are stranded,
+not deleted, and go out again once the newer image is back. Before such a rollback, ask users with
+the "nicht gesendet" line showing to let it drain, or announce it. Nothing in the database changes
+(`account_id` is `users.id`, which every version has).
+
 Find candidate SHAs in the Actions run summary of any successful deploy, or:
 
 ```sh
@@ -1456,6 +1463,23 @@ and the service stays on whatever it was.
 Nothing compares the checked-in copy against the host. A gate check cannot do it — CI has no access to the
 deploy host — so the honest options are a scheduled job that reports divergence from somewhere that does, or
 accepting that this file is correct as of the date on it.
+
+## Defect fixed 2026-11-24: logout left unsent task text in the browser
+
+Until this date an explicit logout removed the token and the profile keys and left the offline queue
+(`outbox`, the full text of every unsent change) and the capture draft in `localStorage`, filtered from
+view by username only (`REV-006`); and `auth.role` was read from `localStorage['role']` (`RISK-SEC-001`).
+Logout now asks when changes are unsent, removes every account-bound key, and the role comes from
+`GET /auth/me` ([ADR 0050](adr/0050-local-browser-data-on-logout.md),
+[brief 0075](briefs/0075-local-browser-data-on-logout.md)). No occurrence of another person reading a
+profile is known; the exposure needed access to the same browser profile or script on the origin.
+
+What would have caught it: a test that inspects the whole profile after logout, rather than the keys
+the code thought it wrote. `frontend/tests/authStore.test.js` does that now.
+
+After the deploy: the first `GET /auth/me` in each browser migrates that user's legacy queue and draft;
+other users' legacy leftovers go with the next explicit logout. The legacy-key code is `SHIM-FE-001`
+(expires 2027-03-01).
 
 ## Defect fixed 2026-11-10: a token for a deleted account was still accepted
 

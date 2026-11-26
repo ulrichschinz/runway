@@ -54,16 +54,20 @@ than the role model does: it means a compromised admin account reads *settings a
 everybody's data.
 
 **Three actors reach the system, not two.** The browser SPA, which authenticates with a JWT held in
-`localStorage` (`token`, `role`, `username` and four more, snapshotted in
+`localStorage` (`token`, `username`, `accountId`, the account's namespaced queue and draft, three
+UI preferences, and five legacy keys read once for migration — declared in
+[`frontend/src/shared/browserStorage.js`](../frontend/src/shared/browserStorage.js), snapshotted in
 [`ops/surfaces/spa.json`](../ops/surfaces/spa.json)); agents and MCP clients, which authenticate with
 a permanent API key — over MCP they reach only the task, GTD, project and inbox operations plus
 `health` and `me`, never an authentication, API-key, user or admin operation (ADR 0037); and the
 operator with shell on the deploy host, who is outside every control in this repository. The third is the largest trusted actor and there is exactly one of them
 (`RISK-GOV-001`), which is also why nothing here can be enforced by review.
 
-**The frontend's role check is decoration.** `auth.role` is read from `localStorage`, so a viewer can
-make the admin UI render for themselves; every `/admin` route is guarded server-side, so the result is
-a screenful of 403s rather than access. `RISK-SEC-001`.
+**The frontend's role check is display.** Since ADR 0050 `auth.role` comes from `GET /auth/me` on every
+page load and is never read from `localStorage` (`RISK-SEC-001`, resolved; `frontend/tests/authStore.test.js`
+writes `admin` into a synthetic profile and requires `user`). Code in the page can still change the
+in-memory store; every `/admin` route is guarded server-side, so the result is a screenful of 403s rather
+than access.
 
 **Nobody can lock the instance out of administration.** `bootstrap_admin` at
 [`backend/app/database.py:158-197`](../backend/app/database.py) promotes `BOOTSTRAP_ADMIN` **only
@@ -492,13 +496,26 @@ brief 0065 still live in `DATA_ROOT/<username>/` until the operator migrates the
 `compat` mode only for a single-component name that is, in exactly that spelling, a directory under
 the root (so a case- or normalisation-folded alias is refused too); that residual is `RISK-SEC-006`.
 
-**The browser** — `localStorage` holds `token`, `role`, `username`, `email`, `fullName`, `theme`
-and `ui` ([`ops/surfaces/spa.json`](../ops/surfaces/spa.json)); `ui` is the non-secret choice
-between the old and the new UI, removed again with the switch (ADR 0042). A JWT in `localStorage` is readable by any
-script running on the origin; the compensating position is that the app serves no third-party script
-and CORS is closed — and, since 2026-11-24, that the edge sends a same-origin Content-Security-Policy:
+**The browser** — `localStorage` holds `token`, `username`, `accountId`, the account's unsent queue
+`outbox:<accountId>` and capture draft `captureDraft:<accountId>` (task text), and the UI preferences
+`theme`, `ui` and `inboxMode` ([`ops/surfaces/spa.json`](../ops/surfaces/spa.json), declared in
+[`frontend/src/shared/browserStorage.js`](../frontend/src/shared/browserStorage.js)); `ui` is the
+non-secret choice between the old and the new UI, removed again with the switch (ADR 0042). The keys
+`outbox`, `captureDraft`, `role`, `fullName`, `email` are legacy, migrated and removed (`SHIM-FE-001`).
+A JWT in `localStorage` is readable by any script running on the origin; the compensating position is
+that the app serves no third-party script and CORS is closed —
+and, since 2026-11-24, that the edge sends a same-origin Content-Security-Policy:
 framing, plugins and `<base>` enforced, the strict script/style/connect policy still report-only until
 `SHIM-WEB-001` ends (ADR 0048, [docs/security.md](security.md#browser-headers)).
+
+An **explicit logout** removes every account-bound key and leaves only the UI preferences; with unsent
+changes it asks first (ADR 0050, decision D6). The namespace is the stable `account_id`, so a second
+account — including one registered later under the same username — never reads the first one's. The
+legacy migration holds that too: after a fresh login it adopts a legacy op only when it is not older
+than the account's `created_at` (a skewed client clock shifts that line — `SHIM-FE-001`).
+**Asserted only:** a session that ends without a logout (a 401, a closed browser) leaves the queue and
+draft in the profile, locked to the account but readable by anyone holding the profile —
+`RISK-FE-001`. The dialog and the cross-tab reload are not exercised in a browser — `RISK-TEST-004`.
 
 **Who can write the stores.** Until 2026-11-24 the backend ran as uid 0 on a writable root with Docker's
 default capabilities, so a write primitive inside the container reached the whole container (finding

@@ -1,10 +1,13 @@
 {
   "local_storage_keys": [
+    "accountId",
     "captureDraft",
+    "captureDraft:{account}",
     "email",
     "fullName",
     "inboxMode",
     "outbox",
+    "outbox:{account}",
     "role",
     "theme",
     "token",

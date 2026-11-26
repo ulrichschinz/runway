@@ -17,7 +17,10 @@ vi.mock('../src/api/client.js', () => ({
 }))
 vi.mock('../src/api/keepalive.js', () => ({ sendKeepalive: vi.fn(async () => ({ ok: true, json: async () => null })) }))
 
-function fakeBrowser({ refuseWrites, store = new Map([['token', 't'], ['username', 'uli']]) }) {
+// The account's queue (brief 0075): namespaced by the account id `/auth/me` named.
+const QUEUE = 'outbox:1'
+
+function fakeBrowser({ refuseWrites, store = new Map([['token', 't'], ['username', 'uli'], ['accountId', '1']]) }) {
   const writes = []
   const browser = { store, writes, full: false }
   vi.stubGlobal('localStorage', {
@@ -90,16 +93,16 @@ describe('useOutbox with a working storage', () => {
   it('writes the queue before the request leaves, and sends it', async () => {
     const outbox = await start({ refuseWrites: false })
     outbox.add('capture', { description: 'Milch kaufen', label: 'Milch kaufen' })
-    expect(browser.writes).toContain('outbox')
-    expect(JSON.parse(browser.store.get('outbox')).ops.length).toBe(1)
+    expect(browser.writes).toContain(QUEUE)
+    expect(JSON.parse(browser.store.get(QUEUE)).ops.length).toBe(1)
     await flush()
     expect(sent).toEqual(['POST /inbox'])
-    expect(JSON.parse(browser.store.get('outbox')).ops).toEqual([])
+    expect(JSON.parse(browser.store.get(QUEUE)).ops).toEqual([])
   })
 })
 
 describe('useOutbox when storage fills up after it took writes (review of brief 0062)', () => {
-  const stored = () => JSON.parse(browser.store.get('outbox')).ops
+  const stored = () => JSON.parse(browser.store.get(QUEUE)).ops
   const long = 'Notiz '.repeat(200)
 
   it('strikes a done the user took back from the queue storage still holds, so no start sends it', async () => {
@@ -144,5 +147,72 @@ describe('useOutbox when storage fills up after it took writes (review of brief 
     browser.full = false
     outbox.hold('done', { uuid: 'u-z', label: 'Paket' })
     expect(stored().map((op) => (op.kind === 'capture' ? 'capture' : op.uuid)).sort()).toEqual(['capture', 'u-x', 'u-z'])
+  })
+})
+
+describe('useOutbox and the account namespace (brief 0075, ADR 0050)', () => {
+  const queueKeys = () => [...browser.store.keys()].filter((k) => k.startsWith('outbox'))
+
+  it('a session with no account bound yet keeps its queue where the previous deploy did, and still sends', async () => {
+    // Review of brief 0075: memory only, a reload in that window lost the capture.
+    const outbox = await start({ refuseWrites: false, store: new Map([['token', 't'], ['username', 'uli']]) })
+    outbox.hold('done', { uuid: 'u-0', label: 'Belege' })
+    expect(queueKeys()).toEqual(['outbox'])
+    outbox.add('capture', { description: 'Milch kaufen', label: 'Milch kaufen' })
+    await flush()
+    expect(sent).toEqual(['POST /inbox'])
+  })
+
+  it('signed out, nothing is written to storage', async () => {
+    const outbox = await start({ refuseWrites: false, store: new Map([['username', 'uli']]) })
+    outbox.hold('done', { uuid: 'u-1', label: 'Belege' })
+    expect(queueKeys()).toEqual([])
+  })
+
+  it('what was queued before the account was bound joins its queue', async () => {
+    const outbox = await start({ refuseWrites: false, store: new Map([['token', 't'], ['username', 'uli']]) })
+    outbox.hold('done', { uuid: 'u-1', label: 'Belege' })
+    browser.store.set('accountId', '1')
+    outbox.hold('done', { uuid: 'u-2', label: 'Angebot' })
+    expect(JSON.parse(browser.store.get(QUEUE)).ops.map((op) => op.uuid)).toEqual(['u-1', 'u-2'])
+  })
+
+  it("never shows or sends an op a fresh login marked as an earlier account's", async () => {
+    const prior = JSON.stringify({ v: 1, ops: [{ id: 'p', kind: 'capture', method: 'POST', path: '/inbox', body: { description: 'alt' }, state: 'queued', user: 'uli', at: 1, prior: true }] })
+    const outbox = await start({ refuseWrites: false, store: new Map([['token', 't'], ['username', 'uli'], ['outbox', prior]]) })
+    outbox.add('capture', { description: 'neu', label: 'neu' })
+    await flush()
+    expect(outbox.ops.value.map((op) => op.body?.description)).not.toContain('alt')
+    expect(sent).toEqual(['POST /inbox'])
+    // Kept, unread, for the bind to judge.
+    expect(browser.store.get('outbox')).toContain('"prior":true')
+  })
+
+  it("never reads another account's queue, nor the unnamespaced legacy one", async () => {
+    const other = JSON.stringify({ v: 1, ops: [{ id: 'x', kind: 'capture', method: 'POST', path: '/inbox', body: { description: 'fremd' }, state: 'queued', user: 'uli', at: 1 }] })
+    const outbox = await start({ refuseWrites: false, store: new Map([['token', 't'], ['username', 'uli'], ['accountId', '1'], ['outbox:2', other], ['outbox', other]]) })
+    await flush()
+    expect(outbox.ops.value).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  it('after a logout purged the namespace, the memory copy is dropped and nothing is sent', async () => {
+    const outbox = await start({ refuseWrites: false })
+    outbox.hold('done', { uuid: 'u-1', label: 'Belege' })
+    for (const k of ['accountId', QUEUE, 'token', 'username']) browser.store.delete(k)
+    await vi.advanceTimersByTimeAsync(6100)
+    expect(sent).toEqual([])
+    expect(queueKeys()).toEqual([])
+  })
+
+  it('does not flush with keepalive once the token is gone', async () => {
+    const { sendKeepalive } = await import('../src/api/keepalive.js')
+    sendKeepalive.mockClear()
+    const outbox = await start({ refuseWrites: false })
+    outbox.hold('done', { uuid: 'u-1', label: 'Belege' })
+    browser.store.delete('token')
+    outbox.flush()
+    expect(sendKeepalive).not.toHaveBeenCalled()
+    expect(JSON.parse(browser.store.get(QUEUE)).ops.length).toBe(1)
   })
 })

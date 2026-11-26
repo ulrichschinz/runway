@@ -1,6 +1,7 @@
 import { ref } from 'vue'
+import { KEY, readKey, writeKey } from '../shared/browserStorage.js'
 
-const stored = localStorage.getItem('theme')
+const stored = readKey(KEY.theme)
 // The system preference is deliberately NOT consulted: the app defaults to light
 // mode regardless (commit cb707b4). The matchMedia probe that used to live here was
 // dead from that commit onward.
@@ -19,7 +20,7 @@ applyThemeColor(isDark.value)
 export function useDarkMode() {
   function toggleDark() {
     isDark.value = !isDark.value
-    localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
+    writeKey(KEY.theme, isDark.value ? 'dark' : 'light')
     document.documentElement.classList.toggle('dark', isDark.value)
     applyThemeColor(isDark.value)
   }

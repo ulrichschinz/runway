@@ -505,7 +505,9 @@ rules:
     statement: >
       Every protected public surface — the served OpenAPI schema, the runtime MCP tool list,
       the migrated database schema, the Taskwarrior template, and the SPA routes and
-      localStorage keys — MUST match its snapshot in ops/surfaces/.
+      localStorage keys — MUST match its snapshot in ops/surfaces/. The storage keys are read
+      from the declareKey inventory in frontend/src/shared/browserStorage.js and from any
+      literal localStorage call (ADR 0050).
     class: executable
     check: tools/checks/surfaces.sh
     fixture: tools/fixtures/negative.sh
@@ -521,6 +523,11 @@ rules:
       declaration is the point: the contract claimed for months that MCP tool names were
       handler function names, and booting the app showed they are operation ids. Zero of the
       seven tool names the README documented existed.
+
+      Since ADR 0050 every storage call goes through one module and the per-account keys are
+      built at run time (`outbox:<accountId>`), so a scan for literal localStorage calls alone
+      would have reported an empty key list and passed. The inventory's declarations are
+      therefore part of the capture, with their own negative fixture.
 
   - id: RULE-SURF-002
     statement: >
@@ -1246,7 +1253,11 @@ residual_risks:
   - id: RISK-TEST-004
     statement: >
       Frontend rendering, routing, keyboard handling, swipe gestures and dark mode are
-      covered by no test. The suite deliberately covers pure logic only.
+      covered by no test. The suite deliberately covers pure logic only. Named explicitly
+      since ADR 0050: the logout flow is tested in node with the real auth store, outbox and
+      draft over a synthetic profile, but no test clicks Abmelden, sees the confirm dialog, or
+      watches the pagehide flush and the cross-tab reload in a real browser — there is no
+      browser runner in this repository.
     owner: maintainer
     re_open_trigger: "a defect that only manifests in a mounted component or across the SPA/API boundary"
     decision_record: docs/adr/0007-frontend-test-scope.md
@@ -1318,14 +1329,35 @@ residual_risks:
 
   - id: RISK-SEC-001
     statement: >
-      The frontend's role check is cosmetic. `auth.role` in the Vue store is read from
-      localStorage, so a viewer can make the admin UI render for themselves. Every /admin
-      route is guarded server-side, so the result is a screen full of 403s rather than
-      access — a display bug, not a privilege escalation. Making it honest means deriving
-      the role from a server response on every mount rather than from client storage.
+      RESOLVED 2026-11-24 by brief 0075 (ADR 0050), closing criterion as stated here before:
+      the role is derived from a server response on every mount rather than from client
+      storage. `auth.role` starts as `user` in memory and is set only from GET /auth/me on
+      every store creation; nothing reads localStorage['role'] any more, and the key is
+      removed from every profile on the first /auth/me after the deploy.
+      frontend/tests/authStore.test.js writes `admin` into a synthetic profile and requires
+      `user` before and after /auth/me answers. What remains is what was always true and is
+      not this risk: anyone running code in the page can change the in-memory store, which
+      shows them admin screens and gives them 403s — every /admin route is guarded
+      server-side, and those guards stay the security boundary.
     owner: maintainer
-    re_open_trigger: "any admin-only behaviour is implemented in the frontend without a server-side guard behind it"
-    decision_record: docs/security.md
+    re_open_trigger: "any admin-only behaviour is implemented in the frontend without a server-side guard behind it, or the role is read from browser storage again"
+    decision_record: docs/adr/0050-local-browser-data-on-logout.md
+
+  - id: RISK-FE-001
+    statement: >
+      Only an explicit logout removes an account's data from the browser. A session that ends
+      any other way — a 401 on an expired or revoked token, a closed browser, a lost device —
+      leaves the account's unsent queue (task text) and capture draft in localStorage under
+      its namespace (`outbox:<accountId>`, `captureDraft:<accountId>`), locked: the UI shows
+      them to nobody but the same account signing in again, but anyone with the browser
+      profile or script on the origin can read them. That is decision D6 of the security plan
+      (ADR 0050): wiping on a 401 would silently destroy work the user never chose to discard.
+      The JWT itself also stays in localStorage while a session lasts (SEC-004's CSP is the
+      compensating control, not this). No test can show a profile is safe after a session
+      that was not ended deliberately, because it is not.
+    owner: maintainer
+    re_open_trigger: "a shared-device or kiosk deployment is supported, the queue starts holding data beyond task text, or a report of a locked namespace read by another person"
+    decision_record: docs/adr/0050-local-browser-data-on-logout.md
 
   - id: RISK-SEC-002
     statement: >
