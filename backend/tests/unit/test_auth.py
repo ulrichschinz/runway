@@ -56,11 +56,20 @@ class TestRegistration:
         assert r.json()["detail"] == "Username already taken"
 
     def test_creates_the_per_user_data_directory_and_taskrc(self, client):
+        """Since brief 0065 (SEC-001) the directory is named by the account's storage id,
+        never by its name, and nothing named after the account is created."""
         _set_registration(True)
         client.post("/auth/register", json={"username": "bob", "password": "pw"})
-        user_dir = settings.data_root / "bob"
+        con = sqlite3.connect(settings.db_path)
+        storage_id, layout = con.execute(
+            "SELECT storage_id, storage_layout FROM users WHERE username='bob'"
+        ).fetchone()
+        con.close()
+        assert layout == "storage_id"
+        user_dir = settings.data_root / storage_id
         assert user_dir.is_dir()
         assert (user_dir / ".taskrc").is_file()
+        assert not (settings.data_root / "bob").exists()
 
 
 class TestLogin:

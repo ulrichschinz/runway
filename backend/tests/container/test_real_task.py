@@ -26,21 +26,30 @@ import pytest
 from app.config import settings
 from app.models import TaskCreate
 from app.services import task_service, user_service
+from app.task_storage import LAYOUT_STORAGE_ID, Account, TaskStore, new_storage_id
+from tests.container.conftest import store_of
 
 pytestmark = pytest.mark.container
+
+
+# The two synthetic accounts' stores, provisioned per test by `real_data_root`. Since brief
+# 0065 (SEC-001) the service takes a resolved store, never a username.
+S: dict[str, TaskStore] = {}
 
 
 @pytest.fixture(autouse=True)
 def real_data_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the service at a throwaway data root and provision users in it."""
     monkeypatch.setattr(settings, "data_root", tmp_path)
-    for name in ("alice", "bob"):
-        user_service.init_user_data(name)
+    S.clear()
+    for number, name in enumerate(("alice", "bob"), start=1):
+        account = Account(number, name, new_storage_id(), LAYOUT_STORAGE_ID)
+        S[name] = user_service.provision_store(account)
     return tmp_path
 
 
 def _task_dirs(root: Path) -> dict[str, Path]:
-    return {name: root / name for name in ("alice", "bob")}
+    return {name: store.path for name, store in S.items()}
 
 
 class TestTheBinaryItself:
@@ -66,25 +75,25 @@ class TestTheBinaryItself:
 
 class TestRoundTrip:
     def test_a_created_task_can_be_read_back(self):
-        created = task_service.create_task("alice", TaskCreate(description="real task"))
-        fetched = task_service.get_task("alice", created.uuid)
+        created = task_service.create_task(S["alice"], TaskCreate(description="real task"))
+        fetched = task_service.get_task(S["alice"], created.uuid)
         assert fetched.description == "real task"
         assert fetched.status == "pending"
 
     def test_attributes_survive_the_binary(self):
         created = task_service.create_task(
-            "alice",
+            S["alice"],
             TaskCreate(description="attributed", project="runway", tags=["next"], priority="H"),
         )
-        fetched = task_service.get_task("alice", created.uuid)
+        fetched = task_service.get_task(S["alice"], created.uuid)
         assert fetched.project == "runway"
         assert "next" in fetched.tags
         assert fetched.priority == "H"
 
     def test_completing_removes_a_task_from_the_pending_list(self):
-        created = task_service.create_task("alice", TaskCreate(description="finish me"))
-        task_service.complete_task("alice", created.uuid)
-        pending = task_service.list_tasks("alice", ["status:pending"])
+        created = task_service.create_task(S["alice"], TaskCreate(description="finish me"))
+        task_service.complete_task(S["alice"], created.uuid)
+        pending = task_service.list_tasks(S["alice"], ["status:pending"])
         assert created.uuid not in [t.uuid for t in pending]
 
 
@@ -92,20 +101,20 @@ class TestUrgency:
     """Urgency is Taskwarrior's, computed from the checked-in coefficients."""
 
     def test_the_next_tag_outranks_the_someday_tag(self):
-        task_service.create_task("alice", TaskCreate(description="soon", tags=["next"]))
-        task_service.create_task("alice", TaskCreate(description="later", tags=["someday"]))
-        by_description = {t.description: t.urgency for t in task_service.list_tasks("alice")}
+        task_service.create_task(S["alice"], TaskCreate(description="soon", tags=["next"]))
+        task_service.create_task(S["alice"], TaskCreate(description="later", tags=["someday"]))
+        by_description = {t.description: t.urgency for t in task_service.list_tasks(S["alice"])}
         assert by_description["soon"] > by_description["later"]
 
     def test_the_list_is_returned_in_descending_urgency_order(self):
         for description, tags in [("c", ["someday"]), ("a", ["next"]), ("b", [])]:
-            task_service.create_task("alice", TaskCreate(description=description, tags=tags))
-        urgencies = [t.urgency for t in task_service.list_tasks("alice")]
+            task_service.create_task(S["alice"], TaskCreate(description=description, tags=tags))
+        urgencies = [t.urgency for t in task_service.list_tasks(S["alice"])]
         assert urgencies == sorted(urgencies, reverse=True)
 
     def test_urgency_is_non_zero_so_the_coefficients_are_actually_loaded(self):
-        created = task_service.create_task("alice", TaskCreate(description="u", tags=["next"]))
-        assert task_service.get_task("alice", created.uuid).urgency > 10
+        created = task_service.create_task(S["alice"], TaskCreate(description="u", tags=["next"]))
+        assert task_service.get_task(S["alice"], created.uuid).urgency > 10
 
 
 class TestCrossTenantIsolation:
@@ -116,17 +125,17 @@ class TestCrossTenantIsolation:
     """
 
     def test_a_users_tasks_are_invisible_to_another_user(self):
-        task_service.create_task("alice", TaskCreate(description="alice private"))
-        bob_tasks = [t.description for t in task_service.list_tasks("bob")]
+        task_service.create_task(S["alice"], TaskCreate(description="alice private"))
+        bob_tasks = [t.description for t in task_service.list_tasks(S["bob"])]
         assert "alice private" not in bob_tasks
 
     def test_a_task_uuid_from_one_user_cannot_be_read_by_another(self):
-        created = task_service.create_task("alice", TaskCreate(description="alice private"))
+        created = task_service.create_task(S["alice"], TaskCreate(description="alice private"))
         with pytest.raises(ValueError, match="Task not found"):
-            task_service.get_task("bob", created.uuid)
+            task_service.get_task(S["bob"], created.uuid)
 
     def test_each_user_gets_a_separate_store_on_disk(self, real_data_root):
-        task_service.create_task("alice", TaskCreate(description="hers"))
+        task_service.create_task(S["alice"], TaskCreate(description="hers"))
         dirs = _task_dirs(real_data_root)
         assert any(dirs["alice"].rglob("*.sqlite3"))
 
@@ -143,52 +152,52 @@ class TestCrossTenantIsolation:
         Now the description travels after `--`, where Taskwarrior stops interpreting
         options. The payload is data.
         """
-        task_service.create_task("bob", TaskCreate(description="bob private note"))
-        payload = f"rc.data.location={settings.data_root / 'bob'}"
+        task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
+        payload = f"rc.data.location={S['bob'].path}"
 
-        created = task_service.create_task("alice", TaskCreate(description=payload))
+        created = task_service.create_task(S["alice"], TaskCreate(description=payload))
         assert created.description == payload, "the override should be stored verbatim"
 
-        alice = [t.description for t in task_service.list_tasks("alice")]
+        alice = [t.description for t in task_service.list_tasks(S["alice"])]
         assert payload in alice
         assert "bob private note" not in alice, "the store was redirected"
 
     def test_the_redirect_no_longer_reaches_another_users_store(self, real_data_root):
         """The decisive test, inverted. Alice writes an override naming Bob's directory and
         Bob's store must be untouched — no new file, no new task, nothing."""
-        task_service.create_task("bob", TaskCreate(description="bob private note"))
-        bob_dir = real_data_root / "bob"
+        task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
+        bob_dir = S["bob"].path
         before = sorted(f.name for f in bob_dir.rglob("*") if f.is_file())
 
         payload = f"rc.data.location={bob_dir}"
         # Both paths that carry free text: add, and the annotate path that used to be the
         # sharp edge because it applied the override and still returned success.
-        alice_task = task_service.create_task("alice", TaskCreate(description=payload))
-        task_service.annotate_task("alice", alice_task.uuid, payload)
+        alice_task = task_service.create_task(S["alice"], TaskCreate(description=payload))
+        task_service.annotate_task(S["alice"], alice_task.uuid, payload)
 
         after_files = sorted(f.name for f in bob_dir.rglob("*") if f.is_file())
         assert after_files == before, "alice's command touched bob's data directory"
 
-        bob_tasks = [t.description for t in task_service.list_tasks("bob")]
+        bob_tasks = [t.description for t in task_service.list_tasks(S["bob"])]
         assert bob_tasks == ["bob private note"]
 
     def test_an_rc_shaped_annotation_is_stored_as_annotation_text(self):
         """The annotate path was the sharp edge: it returned success while applying the
         override, so a user could run Taskwarrior against another store and get a 200.
         Now the text is text."""
-        payload = f"rc.data.location={settings.data_root / 'bob'}"
-        created = task_service.create_task("alice", TaskCreate(description="host"))
-        task = task_service.annotate_task("alice", created.uuid, payload)
+        payload = f"rc.data.location={S['bob'].path}"
+        created = task_service.create_task(S["alice"], TaskCreate(description="host"))
+        task = task_service.annotate_task(S["alice"], created.uuid, payload)
         assert [a.description for a in task.annotations] == [payload]
 
     def test_annotating_another_users_task_still_fails(self):
         """The uuid is a filter, not free text, so the isolation that always held must
         still hold: alice cannot reach bob's task at all."""
-        bob_task = task_service.create_task("bob", TaskCreate(description="bob private note"))
+        bob_task = task_service.create_task(S["bob"], TaskCreate(description="bob private note"))
         with pytest.raises((ValueError, RuntimeError)):
-            task_service.annotate_task("alice", bob_task.uuid, "sneaky")
+            task_service.annotate_task(S["alice"], bob_task.uuid, "sneaky")
 
-        after = task_service.get_task("bob", bob_task.uuid)
+        after = task_service.get_task(S["bob"], bob_task.uuid)
         assert after.annotations == []
         assert after.description == "bob private note"
 
@@ -197,8 +206,8 @@ class TestCrossTenantIsolation:
         whole string became the override's value. That argument is gone — the string is
         text now, whatever its shape — and this asserts the outcome rather than the
         accident."""
-        payload = f"rc.data.location={settings.data_root / 'bob'} buy milk"
-        created = task_service.create_task("alice", TaskCreate(description=payload))
+        payload = f"rc.data.location={S['bob'].path} buy milk"
+        created = task_service.create_task(S["alice"], TaskCreate(description=payload))
         assert created.description == payload
 
     def test_the_choke_point_refuses_an_override_in_a_structural_position(self):
@@ -207,7 +216,7 @@ class TestCrossTenantIsolation:
         from app.services import task_runner
 
         with pytest.raises(task_runner.UnsafeArgument):
-            task_runner.export_tasks("alice", [f"rc.data.location={settings.data_root / 'bob'}"])
+            task_runner.export_tasks(S["alice"], [f"rc.data.location={S['bob'].path}"])
 
 
 class TestTagsAreAFullSet:
@@ -262,11 +271,11 @@ class TestTagsAreAFullSet:
         from app.models import TaskModify
         from app.services import task_runner
 
-        task_runner.add_task("alice", ["+@home,@office"], ["legacy"])
-        uuid = task_runner.export_latest("alice")[0]["uuid"]
-        assert task_service.get_task("alice", uuid).tags == ["@home,@office"]
+        task_runner.add_task(S["alice"], ["+@home,@office"], ["legacy"])
+        uuid = task_runner.export_latest(S["alice"])[0]["uuid"]
+        assert task_service.get_task(S["alice"], uuid).tags == ["@home,@office"]
 
-        task = task_service.modify_task("alice", uuid, TaskModify(tags=["@home", "@office"]))
+        task = task_service.modify_task(S["alice"], uuid, TaskModify(tags=["@home", "@office"]))
         assert sorted(task.tags) == ["@home", "@office"]
         assert task.description == "legacy"
 
@@ -276,10 +285,10 @@ class TestTagsAreAFullSet:
         the description and keeps the tag. The fake refuses the token for the same reason."""
         from app.services import task_runner
 
-        task_runner.add_task("alice", [f"tags:{tag}"], ["legacy"])
-        uuid = task_runner.export_latest("alice")[0]["uuid"]
-        task_runner.modify_task("alice", uuid, [f"-{tag}"])
-        raw = task_runner.export_tasks("alice", [uuid])[0]
+        task_runner.add_task(S["alice"], [f"tags:{tag}"], ["legacy"])
+        uuid = task_runner.export_latest(S["alice"])[0]["uuid"]
+        task_runner.modify_task(S["alice"], uuid, [f"-{tag}"])
+        raw = task_runner.export_tasks(S["alice"], [uuid])[0]
         assert raw["tags"] == [tag]
         assert raw["description"] == f"-{tag}"
 
@@ -288,40 +297,40 @@ class TestTagsAreAFullSet:
         from app.services import task_runner
 
         client, headers = real_client
-        task_runner.add_task("alice", ["tags:1abc,next"], ["Pay rent"])
-        uuid = task_runner.export_latest("alice")[0]["uuid"]
+        task_runner.add_task(store_of("alice"), ["tags:1abc,next"], ["Pay rent"])
+        uuid = task_runner.export_latest(store_of("alice"))[0]["uuid"]
         r = client.put(f"/tasks/{uuid}", json=body, headers=headers)
         assert r.status_code == 400, r.text
         assert "cannot remove tag" in r.text
-        task = task_service.get_task("alice", uuid)
+        task = task_service.get_task(store_of("alice"), uuid)
         assert task.description == "Pay rent"
         assert sorted(task.tags) == ["1abc", "next"]
 
     def test_a_dropped_dependency_is_removed_and_the_rest_kept(self):
         from app.models import TaskModify
 
-        a = task_service.create_task("alice", TaskCreate(description="a")).uuid
-        b = task_service.create_task("alice", TaskCreate(description="b")).uuid
-        c = task_service.create_task("alice", TaskCreate(description="c")).uuid
-        task = task_service.create_task("alice", TaskCreate(description="t", depends=[a]))
+        a = task_service.create_task(S["alice"], TaskCreate(description="a")).uuid
+        b = task_service.create_task(S["alice"], TaskCreate(description="b")).uuid
+        c = task_service.create_task(S["alice"], TaskCreate(description="c")).uuid
+        task = task_service.create_task(S["alice"], TaskCreate(description="t", depends=[a]))
 
-        task = task_service.modify_task("alice", task.uuid, TaskModify(depends=[a, b]))
+        task = task_service.modify_task(S["alice"], task.uuid, TaskModify(depends=[a, b]))
         assert sorted(task.depends) == sorted([a, b]), "depends:X must add, not replace"
 
-        task = task_service.modify_task("alice", task.uuid, TaskModify(depends=[b, c]))
+        task = task_service.modify_task(S["alice"], task.uuid, TaskModify(depends=[b, c]))
         assert sorted(task.depends) == sorted([b, c])
 
-        task = task_service.modify_task("alice", task.uuid, TaskModify(depends=[]))
+        task = task_service.modify_task(S["alice"], task.uuid, TaskModify(depends=[]))
         assert task.depends == []
 
     def test_a_future_wait_task_can_be_retagged(self):
         from app.models import TaskModify
 
         task = task_service.create_task(
-            "alice", TaskCreate(description="later", tags=["someday"], wait="2030-01-01")
+            S["alice"], TaskCreate(description="later", tags=["someday"], wait="2030-01-01")
         )
         task = task_service.modify_task(
-            "alice", task.uuid, TaskModify(tags_remove=["someday"], tags_add=["next"])
+            S["alice"], task.uuid, TaskModify(tags_remove=["someday"], tags_add=["next"])
         )
         assert task.tags == ["next"]
 
@@ -376,18 +385,18 @@ class TestEmptyStringClears:
         from app.models import TaskModify
 
         task_service.create_task(
-            "alice", TaskCreate(description="rent", recur="monthly", due="2030-01-01")
+            S["alice"], TaskCreate(description="rent", recur="monthly", due="2030-01-01")
         )
-        instance = task_service.list_tasks("alice", ["status:pending"])[0]
+        instance = task_service.list_tasks(S["alice"], ["status:pending"])[0]
         assert instance.recur == "monthly"
         with pytest.raises(ValueError, match="recurring task"):
-            task_service.modify_task("alice", instance.uuid, TaskModify(**{field: ""}))
+            task_service.modify_task(S["alice"], instance.uuid, TaskModify(**{field: ""}))
 
     def test_an_unparseable_date_is_a_rejection_that_names_no_path(self, real_data_root):
         from app.services import task_runner
 
         with pytest.raises(task_runner.TaskwarriorRejected) as exc:
-            task_service.create_task("alice", TaskCreate(description="t", due="notadate"))
+            task_service.create_task(S["alice"], TaskCreate(description="t", due="notadate"))
         assert "notadate" in str(exc.value)
         assert str(real_data_root) not in str(exc.value)
         assert "/" not in str(exc.value)
@@ -419,10 +428,12 @@ class TestRecurringInstances:
         assert r.status_code == 201, r.text
         # Any report generates the instances; the pending export is one.
         instances = [
-            t for t in task_service.list_tasks("alice", ["status:pending"]) if t.recur == "weekly"
+            t
+            for t in task_service.list_tasks(store_of("alice"), ["status:pending"])
+            if t.recur == "weekly"
         ]
         assert len(instances) >= 2, "expected several generated instances"
-        parent_before = task_runner.export_tasks("alice", ["status:recurring"])
+        parent_before = task_runner.export_tasks(store_of("alice"), ["status:recurring"])
         assert len(parent_before) == 1
 
         target = instances[0].uuid
@@ -433,11 +444,11 @@ class TestRecurringInstances:
         assert elapsed < 2, f"modify took {elapsed:.1f}s: a confirmation prompt waited"
         assert r.json()["tags"] == ["next"]
 
-        parent_after = task_runner.export_tasks("alice", ["status:recurring"])
+        parent_after = task_runner.export_tasks(store_of("alice"), ["status:recurring"])
         assert parent_after[0].get("tags", []) == parent_before[0].get("tags", [])
         others = [
             t
-            for t in task_service.list_tasks("alice", ["status:pending"])
+            for t in task_service.list_tasks(store_of("alice"), ["status:pending"])
             if t.recur == "weekly" and t.uuid != target
         ]
         assert others and all("next" not in t.tags for t in others)
@@ -534,7 +545,7 @@ class TestListSemantics:
     def test_a_recurring_task_without_a_due_date_is_refused(self, real_client):
         client, headers = real_client
         with pytest.raises(ValueError, match="due"):
-            task_service.create_task("alice", TaskCreate(description="r", recur="weekly"))
+            task_service.create_task(S["alice"], TaskCreate(description="r", recur="weekly"))
         r = client.post("/tasks", json={"description": "r", "recur": "weekly"}, headers=headers)
         assert r.status_code == 400, r.text
 
@@ -927,14 +938,14 @@ class TestWhatTheFakeClaims:
     def _add(mods, text="t"):
         from app.services import task_runner
 
-        task_runner.add_task("alice", mods, [text])
-        return task_runner.export_latest("alice")[0]
+        task_runner.add_task(S["alice"], mods, [text])
+        return task_runner.export_latest(S["alice"])[0]
 
     @staticmethod
     def _descriptions(filters):
         from app.services import task_runner
 
-        return sorted(t["description"] for t in task_runner.export_tasks("alice", filters))
+        return sorted(t["description"] for t in task_runner.export_tasks(S["alice"], filters))
 
     def test_hidden_is_status_waiting_and_plus_waiting_yet_exports_pending(self):
         hidden = self._add(["wait:2030-01-01"], "hidden")
@@ -967,8 +978,8 @@ class TestWhatTheFakeClaims:
         done = self._add([], "done")
         gone = self._add([], "gone")
         self._add(["wait:2030-01-01"], "hidden")
-        task_runner.done_task("alice", done["uuid"])
-        task_runner.delete_task("alice", gone["uuid"])
+        task_runner.done_task(S["alice"], done["uuid"])
+        task_runner.delete_task(S["alice"], gone["uuid"])
         assert self._descriptions(["status:completed"]) == ["done"]
         all_group = ["(", "status:pending", "or", "status:waiting", "or", "status:completed", ")"]
         assert self._descriptions(all_group) == ["done", "hidden"]
@@ -978,10 +989,10 @@ class TestWhatTheFakeClaims:
 
         done = self._add([], "done")
         gone = self._add([], "gone")
-        task_runner.done_task("alice", done["uuid"])
-        task_runner.delete_task("alice", gone["uuid"])
+        task_runner.done_task(S["alice"], done["uuid"])
+        task_runner.delete_task(S["alice"], gone["uuid"])
         for uuid in (done["uuid"], gone["uuid"]):
-            assert task_runner.export_tasks("alice", [uuid])[0]["end"]
+            assert task_runner.export_tasks(S["alice"], [uuid])[0]["end"]
 
     @pytest.mark.parametrize(
         "value,stored",
@@ -1005,7 +1016,7 @@ class TestWhatTheFakeClaims:
         from app.services import task_runner
 
         with pytest.raises(task_runner.TaskwarriorRejected, match="priority"):
-            task_runner.add_task("alice", ["priority:X"], ["t"])
+            task_runner.add_task(S["alice"], ["priority:X"], ["t"])
 
     def test_a_tag_with_a_leading_digit_becomes_text(self):
         """Why the fake refuses `+1abc` rather than storing it as a tag."""
@@ -1022,10 +1033,12 @@ class TestWhatTheFakeClaims:
         from app.services import task_runner
 
         task = self._add([], "hello world")
-        task_runner.modify_task("alice", task["uuid"], [], [""])
-        assert task_runner.export_tasks("alice", [task["uuid"]])[0]["description"] == "hello world"
+        task_runner.modify_task(S["alice"], task["uuid"], [], [""])
+        assert (
+            task_runner.export_tasks(S["alice"], [task["uuid"]])[0]["description"] == "hello world"
+        )
 
-        task_runner.modify_task("alice", task["uuid"], ["priority:H"], [""])
-        after = task_runner.export_tasks("alice", [task["uuid"]])[0]
+        task_runner.modify_task(S["alice"], task["uuid"], ["priority:H"], [""])
+        after = task_runner.export_tasks(S["alice"], [task["uuid"]])[0]
         assert after["description"] == "hello world"
         assert after["priority"] == "H"

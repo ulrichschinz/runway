@@ -91,6 +91,14 @@ JWT_EXPIRE_HOURS=24
 # configurable — logs are always JSON and always pass through the redaction filter.
 LOG_LEVEL=INFO
 
+# Which Taskwarrior directory layout is served (ADR 0043). `compat` (the default) still
+# serves an account created before the storage-id switch from data/<username>/, if that name
+# is, in exactly that spelling, a directory directly under data/; `strict` serves only
+# data/<storage_id>/. Both compose files pass it through to the backend. Set `strict` after
+# the storage migration reports every account `done` — see docs/operations.md. An
+# unrecognised value is treated as `strict`.
+TASK_STORAGE_MODE=compat
+
 # Container paths. Change these only alongside the compose bind mounts.
 DATA_ROOT=/app/data
 DB_PATH=/app/users.db
@@ -113,10 +121,14 @@ Register your first user at the login page (set `ALLOW_REGISTRATION=false` after
 
 | Path | Contents |
 |---|---|
-| `./data/<username>/` | Per-user Taskwarrior data (`taskchampion.sqlite3`) |
+| `./data/<storage_id>/` | Per-user Taskwarrior data (`taskchampion.sqlite3`). The directory is named by a random, immutable id stored in `users.storage_id` — never by the username (finding SEC-001, ADR 0043). |
+| `./data/<username>/` | The same, for an account created before that change and not yet migrated. Kept as the rollback source after migration until the contract step removes it. |
+| `./data/audit.db` | The audit log |
 | `./users.db` | Users, API keys, projects (SQLite) |
 
-Both are bind-mounted and excluded from git. Back them up to retain all data.
+Both are bind-mounted and excluded from git. Back them up to retain all data. To move existing
+accounts to the storage-id layout, follow
+[Moving task storage off the username](docs/operations.md#moving-task-storage-off-the-username).
 
 ---
 

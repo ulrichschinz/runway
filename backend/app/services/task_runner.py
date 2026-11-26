@@ -37,7 +37,7 @@ import os
 import re
 import subprocess
 
-from app.config import settings
+from app.task_storage import TaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +109,13 @@ def reject_structural_tokens(args: list[str]) -> None:
             )
 
 
-def _run(username: str, args: list[str], text: list[str] | None = None) -> str:
-    """Invoke `task` for one user.
+def _run(store: TaskStore, args: list[str], text: list[str] | None = None) -> str:
+    """Invoke `task` for one account's store.
+
+    `store` is a directory `task_storage.resolve` has already checked — never a username.
+    Until brief 0065 this took the username and joined it onto the data root itself, which is
+    how `alice/../alice` became alice's store (finding SEC-001). The type is the control: there
+    is no name here left to turn into a path.
 
     `args` are structural: filters, subcommands, modifiers — parsed by Taskwarrior.
     `text` is free text supplied by a user and is placed after `--`, where it cannot be
@@ -118,14 +123,11 @@ def _run(username: str, args: list[str], text: list[str] | None = None) -> str:
     """
     reject_structural_tokens(args)
 
-    user_data_dir = settings.data_root / username
-    taskrc_path = user_data_dir / ".taskrc"
-
     env = {
         **os.environ,
-        "TASKDATA": str(user_data_dir),
-        "TASKRC": str(taskrc_path),
-        "HOME": str(user_data_dir),
+        "TASKDATA": str(store.path),
+        "TASKRC": str(store.taskrc),
+        "HOME": str(store.path),
     }
 
     cmd = ["task", *_OWN_OVERRIDES, *args]
@@ -156,46 +158,46 @@ def _run(username: str, args: list[str], text: list[str] | None = None) -> str:
     return result.stdout
 
 
-def export_tasks(username: str, filter_args: list[str] | None = None) -> list[dict]:
+def export_tasks(store: TaskStore, filter_args: list[str] | None = None) -> list[dict]:
     args = [*(filter_args or []), "export"]
-    raw = _run(username, args)
+    raw = _run(store, args)
     if not raw.strip():
         return []
     return json.loads(raw)
 
 
-def export_latest(username: str) -> list[dict]:
+def export_latest(store: TaskStore) -> list[dict]:
     """The task most recently added, via Taskwarrior's own `+LATEST` virtual tag.
 
     Replaces re-querying by description text, which put user input into a *filter* position —
     the one place `--` cannot protect, and a second injection surface for the same string.
     """
-    return export_tasks(username, ["+LATEST"])
+    return export_tasks(store, ["+LATEST"])
 
 
-def add_task(username: str, mods: list[str], text: list[str]) -> str:
-    return _run(username, ["add", *mods], text)
+def add_task(store: TaskStore, mods: list[str], text: list[str]) -> str:
+    return _run(store, ["add", *mods], text)
 
 
-def modify_task(username: str, uuid: str, mods: list[str], text: list[str] | None = None) -> str:
-    return _run(username, [uuid, "modify", *mods], text)
+def modify_task(store: TaskStore, uuid: str, mods: list[str], text: list[str] | None = None) -> str:
+    return _run(store, [uuid, "modify", *mods], text)
 
 
-def done_task(username: str, uuid: str) -> str:
-    return _run(username, [uuid, "done"])
+def done_task(store: TaskStore, uuid: str) -> str:
+    return _run(store, [uuid, "done"])
 
 
-def delete_task(username: str, uuid: str) -> str:
-    return _run(username, [uuid, "delete"])
+def delete_task(store: TaskStore, uuid: str) -> str:
+    return _run(store, [uuid, "delete"])
 
 
-def start_task(username: str, uuid: str) -> str:
-    return _run(username, [uuid, "start"])
+def start_task(store: TaskStore, uuid: str) -> str:
+    return _run(store, [uuid, "start"])
 
 
-def stop_task(username: str, uuid: str) -> str:
-    return _run(username, [uuid, "stop"])
+def stop_task(store: TaskStore, uuid: str) -> str:
+    return _run(store, [uuid, "stop"])
 
 
-def annotate_task(username: str, uuid: str, text: str) -> str:
-    return _run(username, [uuid, "annotate"], [text])
+def annotate_task(store: TaskStore, uuid: str, text: str) -> str:
+    return _run(store, [uuid, "annotate"], [text])

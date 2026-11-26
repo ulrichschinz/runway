@@ -442,6 +442,28 @@ rules:
       to be enforced by something that goes red, exactly as RULE-RULE-002 does for waivers.
       A date nothing checks is a wish.
 
+  - id: RULE-SEC-003
+    statement: >
+      Only backend/app/task_storage.py may build a path from the data root: no other module of
+      the serving application may read `data_root` from settings or from the resolver, except
+      database.audit_db_path for the audit database's fixed name.
+    class: executable
+    check: tools/checks/storage-binding.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/security.md#the-taskwarrior-boundary
+    fix: none
+    owner: maintainer
+    non_waivable: true
+    rationale: >
+      Finding SEC-001 was `settings.data_root / username`, written in two modules, with nothing
+      but review between a caller-chosen name and the directory Taskwarrior opened: `alice/../alice`
+      was alice's store. Brief 0065 names every store by a random, immutable storage id and decides
+      the directory in one function that refuses anything but a real directory directly under the
+      resolved root. A second place that builds paths from the root is how the finding comes back,
+      and it would arrive looking like an ordinary convenience. Non-waivable because the store is
+      the only tenancy boundary the system has. Name-based and static — see RISK-SEC-006 for what
+      the rule does not see.
+
   - id: RULE-ARCH-004
     statement: >
       A standard-library module listed in architecture.toml's restricted_imports MUST NOT be
@@ -1177,6 +1199,26 @@ residual_risks:
     owner: maintainer
     re_open_trigger: "a migrations/ directory with a version table exists, or a third role is introduced"
     decision_record: docs/security.md
+
+  - id: RISK-SEC-006
+    statement: >
+      SEC-001 is contained but not closed until the operator has migrated. Accounts created
+      before brief 0065 keep storage_layout='legacy' and are served from DATA_ROOT/<username>/ in
+      the default `compat` mode (SHIM-SEC-007) — only when the name is one path component that
+      is, in exactly that spelling, a real directory directly under the root, so a separator,
+      `.`/`..`, a symlink, a storage-id-shaped name, or a spelling a case- or
+      normalisation-insensitive filesystem only reaches by folding it (`ALICE` opening `alice`)
+      is refused. The migration groups legacy accounts by the inode their raw name opens, so
+      such a pair is blocked there too. That the production volume is case- and
+      normalisation-sensitive (ext4 is expected) is an operator check, not something this
+      repository can see. Whether production holds an alias account already is unknown from
+      this repository; the migration's dry run answers it. RULE-SEC-003 is a static scan of
+      backend/app/ by name: a path built from os.environ, from a copied value, or by a library is
+      outside it. The container tier that proves isolation against the real binary runs only in
+      CI on amd64 (RISK-TEST-001); locally it was run against the host's Taskwarrior 3.5.0.
+    owner: maintainer
+    re_open_trigger: "the migration's plan reports an alias or a blocked account in production, TASK_STORAGE_MODE=strict is set (downgrade this risk), SHIM-SEC-007 expires, or the legacy directories are removed (close it)"
+    decision_record: docs/adr/0043-account-identity-and-taskwarrior-storage.md
 
   - id: RISK-TEST-001
     statement: >

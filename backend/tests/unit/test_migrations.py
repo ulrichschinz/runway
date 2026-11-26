@@ -366,3 +366,139 @@ async def test_the_project_status_table_holds_one_row_per_project_and_checks_the
             )
     finally:
         connection.close()
+
+
+# --- SEC-001: the storage id (ADR 0043) ------------------------------------------------------
+
+
+def _schema(path: str) -> list[tuple[str, str]]:
+    connection = sqlite3.connect(path)
+    try:
+        return sorted(
+            (row[0], row[1])
+            for row in connection.execute(
+                "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+            )
+        )
+    finally:
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_an_upgraded_database_gets_storage_ids_and_keeps_the_legacy_layout(
+    isolated_storage: Path,
+):
+    """Existing accounts are described truthfully: they still live under their names until
+    the migration has copied them, so the boot gives them an id and nothing else."""
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,"
+        " hashed_password TEXT NOT NULL, api_key TEXT UNIQUE,"
+        " created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    connection.executemany(
+        "INSERT INTO users (username, hashed_password) VALUES (?, 'x')", [("alice",), ("bob",)]
+    )
+    connection.commit()
+    connection.close()
+
+    with migration_lines() as buffer:
+        await init_db()
+        await init_db()
+    assert buffer.getvalue() == ""
+
+    connection = sqlite3.connect(path)
+    rows = list(connection.execute("SELECT storage_id, storage_layout FROM users ORDER BY id"))
+    connection.close()
+    assert [layout for _, layout in rows] == ["legacy", "legacy"]
+    ids = [sid for sid, _ in rows]
+    assert len(set(ids)) == 2
+    assert all(len(sid) == 32 and set(sid) <= set("0123456789abcdef") for sid in ids)
+
+
+@pytest.mark.anyio
+async def test_fresh_and_upgraded_databases_end_with_the_same_storage_objects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from app.config import settings
+
+    fresh = str(tmp_path / "fresh.db")
+    monkeypatch.setattr(settings, "db_path", fresh)
+    monkeypatch.setattr(settings, "data_root", tmp_path / "data")
+    await init_db()
+
+    upgraded = str(tmp_path / "upgraded.db")
+    connection = sqlite3.connect(upgraded)
+    connection.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,"
+        " hashed_password TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr(settings, "db_path", upgraded)
+    await init_db()
+
+    assert _schema(fresh) == _schema(upgraded)
+    assert ("table", "storage_migrations") in _schema(fresh)
+    assert ("index", "users_storage_id") in _schema(fresh)
+    assert ("trigger", "users_storage_id_immutable") in _schema(fresh)
+    assert {"storage_id", "storage_layout"} <= columns(fresh)
+
+
+@pytest.mark.anyio
+async def test_a_storage_id_cannot_be_rewritten_malformed_or_shared(isolated_storage: Path):
+    """The id is the path. One that could be changed, shaped like a path, or shared by two
+    accounts would bring the finding back through the database."""
+    await init_db()
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    sid = "0123456789abcdef0123456789abcdef"
+    connection.execute(
+        "INSERT INTO users (username, hashed_password, storage_id) VALUES ('alice', 'x', ?)", (sid,)
+    )
+    connection.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        connection.execute(
+            "UPDATE users SET storage_id='ffffffffffffffffffffffffffffffff' WHERE username='alice'"
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "INSERT INTO users (username, hashed_password, storage_id) VALUES ('bob', 'x', ?)",
+            (sid,),
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "INSERT INTO users (username, hashed_password, storage_id) VALUES ('eve', 'x', ?)",
+            ("../alice" + "0" * 24,),
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "INSERT INTO users (username, hashed_password, storage_layout) VALUES ('x', 'x', 'y')"
+        )
+    connection.close()
+
+
+@pytest.mark.anyio
+async def test_a_row_written_by_the_previous_image_is_backfilled_on_the_next_boot(
+    isolated_storage: Path,
+):
+    """Rollback compatibility: the old image inserts accounts without the new columns and
+    creates DATA_ROOT/<username>/. Default 'legacy' plus the boot backfill describe that row
+    truthfully when the new image starts again."""
+    await init_db()
+    path = str(isolated_storage / "users.db")
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO users (username, hashed_password, api_key) VALUES ('old', 'x', 'k')"
+    )
+    connection.commit()
+    connection.close()
+    await init_db()
+    connection = sqlite3.connect(path)
+    sid, layout = connection.execute(
+        "SELECT storage_id, storage_layout FROM users WHERE username='old'"
+    ).fetchone()
+    connection.close()
+    assert layout == "legacy"
+    assert len(sid) == 32

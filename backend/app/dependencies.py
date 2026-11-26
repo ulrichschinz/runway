@@ -2,9 +2,10 @@ from aiosqlite import Connection
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app import audit
+from app import audit, task_storage
 from app.auth import decode_token
-from app.database import get_db
+from app.database import get_account, get_db
+from app.task_storage import StorageRefused, TaskStore
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -95,3 +96,38 @@ async def get_current_admin(
     if not row or row["role"] != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return username
+
+
+async def get_task_store(
+    request: Request,
+    username: str = Depends(get_current_user),
+    db: Connection = Depends(get_db),
+) -> TaskStore:
+    """The authenticated account's Taskwarrior directory — never a path built from its name.
+
+    Finding SEC-001 (ADR 0043). Every route that reaches Taskwarrior takes this instead of a
+    username, so the only thing that can arrive at `task_runner._run` is a directory
+    `task_storage.resolve` has already checked. It adds no parameter of its own: the OpenAPI
+    schema and the MCP tool list are unchanged by it.
+
+    A refusal is a 500 with a fixed message and an audit row naming the reason, never the path.
+    The caller did nothing wrong; the server will not serve this account's data until an
+    operator has looked (docs/operations.md#moving-task-storage-off-the-username).
+    """
+    account = await get_account(db, username)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    try:
+        store = task_storage.resolve(account)
+    except StorageRefused as refused:
+        audit.record(
+            audit.STORAGE_REFUSED,
+            outcome=audit.REFUSED,
+            actor=username,
+            route=audit.route_of(request),
+            detail=refused.reason,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(refused)
+        ) from refused
+    return store

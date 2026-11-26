@@ -176,7 +176,37 @@ throttled identically — exempting them would make the limiter a user-enumerati
 
 Per-user isolation rests entirely on three environment variables handed to a subprocess:
 `TASKDATA`, `TASKRC` and `HOME`, each pointing at one user's directory. There is no ownership
-column and no second gate.
+column and no second gate. So two things have to hold: the argument list must not redirect the
+store (SEC-3, below), and the directory itself must be the account's and no one else's.
+
+**Which directory (finding SEC-001, [ADR 0043](adr/0043-account-identity-and-taskwarrior-storage.md)).**
+Until brief 0065 the directory was `DATA_ROOT/<username>`, built from the registered name in
+two modules, so `alice/../alice` opened alice's store and `../x` created directories outside
+the data root. Now:
+
+1. Every account has a **`storage_id`** — 32 hex characters from the OS CSPRNG, unique by
+   index, shaped by a `CHECK`, and immutable by trigger. The store is `DATA_ROOT/<storage_id>/`.
+2. [`backend/app/task_storage.py`](../backend/app/task_storage.py) `resolve` is the only
+   function that turns an account into a directory. It accepts only the id shape and refuses
+   anything that is not a real directory (not a symlink) directly under the resolved root.
+   `get_task_store` hands the routers a resolved `TaskStore`; `task_runner._run` accepts
+   nothing else, so no code path is left that turns a name into a path.
+3. **`RULE-SEC-003`** fails the gate when any other module of `backend/app/` reads
+   `data_root`, except the audit database's fixed name. Non-waivable.
+4. New accounts are created only in the new layout. The username keeps a hygiene rule at
+   registration (plain, NFC, no control characters or separators, at most 64 characters; 400
+   otherwise) that is explicitly *not* the path control.
+5. **Transition (`SHIM-SEC-007`, `RISK-SEC-006`).** An account created before the change is
+   `storage_layout='legacy'` and, in the default `TASK_STORAGE_MODE=compat`, is served from
+   `DATA_ROOT/<username>/` only when that name is one path component that is, in exactly that
+   spelling, a real directory under the root — an alias name, including a spelling a case- or
+   normalisation-insensitive filesystem folds onto another directory, is refused with 500 and a
+   `storage.refused` audit row. The migration groups accounts by inode, not by spelling. `strict` refuses every legacy account. The operator moves accounts with
+   `python -m app.services.storage_migration`
+   ([runbook](operations.md#moving-task-storage-off-the-username)).
+
+Registration may be opened again once `tests/unit/test_storage_identity.py` and
+`tests/container/test_storage_isolation.py` are green in CI on amd64 at the deployed commit.
 
 Taskwarrior consumes `rc.<key>=<value>` **anywhere in its argument list** as a runtime
 configuration override — including `rc.data.location`, which chooses which store it opens. A

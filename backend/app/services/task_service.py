@@ -14,6 +14,7 @@ from app.models import (
     validate_project_name,
 )
 from app.services import task_runner
+from app.task_storage import TaskStore
 
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
@@ -228,15 +229,15 @@ def scope_key(tags: list[str] | None) -> str:
     return "+".join(sorted({token[1:] for token in _tag_filters(tags)}))
 
 
-def list_tasks(username: str, filter_args: list[str] | None = None) -> list[Task]:
-    raw_list = task_runner.export_tasks(username, filter_args)
+def list_tasks(store: TaskStore, filter_args: list[str] | None = None) -> list[Task]:
+    raw_list = task_runner.export_tasks(store, filter_args)
     tasks = [_raw_to_task(r) for r in raw_list]
     tasks.sort(key=lambda t: t.urgency, reverse=True)
     return tasks
 
 
 def search_tasks(
-    username: str,
+    store: TaskStore,
     *,
     status: str | None = None,
     include_done: bool | None = None,
@@ -299,7 +300,7 @@ def search_tasks(
         filters.append(f"project.is:{validate_project_name(project)}")
     filters += _tag_filters(tags)
 
-    tasks = list_tasks(username, filters)
+    tasks = list_tasks(store, filters)
     if "due_before" in days:
         tasks = [t for t in tasks if t.due and _local_day(t.due) < days["due_before"]]
     if "due_after" in days:
@@ -320,9 +321,9 @@ def search_tasks(
     return tasks[:limit] if limit is not None else tasks
 
 
-def get_task(username: str, uuid: str) -> Task:
+def get_task(store: TaskStore, uuid: str) -> Task:
     _validate_uuid(uuid)
-    raw_list = task_runner.export_tasks(username, [uuid])
+    raw_list = task_runner.export_tasks(store, [uuid])
     if not raw_list:
         raise ValueError("Task not found")
     return _raw_to_task(raw_list[0])
@@ -400,7 +401,7 @@ def _build_args(
     return mods, text
 
 
-def create_task(username: str, task: TaskCreate) -> Task:
+def create_task(store: TaskStore, task: TaskCreate) -> Task:
     mods, text = _build_args(
         task.description,
         task.project,
@@ -414,19 +415,19 @@ def create_task(username: str, task: TaskCreate) -> Task:
         task.depends,
         mode="create",
     )
-    task_runner.add_task(username, mods, text)
+    task_runner.add_task(store, mods, text)
 
     # Read back by Taskwarrior's own +LATEST virtual tag rather than by re-querying the
     # description. The old form put the user's text into a *filter* position — the one place
     # the `--` separator cannot protect — so the same string was an injection surface twice,
     # and it silently returned the wrong task whenever two tasks shared a description.
-    latest = task_runner.export_latest(username)
+    latest = task_runner.export_latest(store)
     if latest:
         return _raw_to_task(latest[0])
-    return list_tasks(username)[0]
+    return list_tasks(store)[0]
 
 
-def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
+def modify_task(store: TaskStore, uuid: str, task: TaskModify) -> Task:
     """Change the fields that are set; leave the rest alone.
 
     `tags` is the complete desired set, `tags_add`/`tags_remove` are deltas, and `depends`
@@ -450,7 +451,7 @@ def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
         or task.depends is not None
         or bool(task.project)
     )
-    current = get_task(username, uuid) if needs_current else None
+    current = get_task(store, uuid) if needs_current else None
     project_is_new = bool(task.project) and (current is None or task.project != current.project)
     mods, text = _build_args(
         task.description,
@@ -481,53 +482,53 @@ def modify_task(username: str, uuid: str, task: TaskModify) -> Task:
                 mods += _depends_diff(current.depends, task.depends)
 
     if not mods and not text:
-        return get_task(username, uuid)
-    task_runner.modify_task(username, uuid, mods, text)
-    return get_task(username, uuid)
+        return get_task(store, uuid)
+    task_runner.modify_task(store, uuid, mods, text)
+    return get_task(store, uuid)
 
 
-def complete_task(username: str, uuid: str) -> None:
+def complete_task(store: TaskStore, uuid: str) -> None:
     _validate_uuid(uuid)
-    task_runner.done_task(username, uuid)
+    task_runner.done_task(store, uuid)
 
 
-def remove_task(username: str, uuid: str) -> None:
+def remove_task(store: TaskStore, uuid: str) -> None:
     _validate_uuid(uuid)
-    task_runner.delete_task(username, uuid)
+    task_runner.delete_task(store, uuid)
 
 
-def start_task(username: str, uuid: str) -> Task:
+def start_task(store: TaskStore, uuid: str) -> Task:
     _validate_uuid(uuid)
-    task_runner.start_task(username, uuid)
-    return get_task(username, uuid)
+    task_runner.start_task(store, uuid)
+    return get_task(store, uuid)
 
 
-def stop_task(username: str, uuid: str) -> Task:
+def stop_task(store: TaskStore, uuid: str) -> Task:
     _validate_uuid(uuid)
-    task_runner.stop_task(username, uuid)
-    return get_task(username, uuid)
+    task_runner.stop_task(store, uuid)
+    return get_task(store, uuid)
 
 
-def annotate_task(username: str, uuid: str, text: str) -> Task:
+def annotate_task(store: TaskStore, uuid: str, text: str) -> Task:
     _validate_uuid(uuid)
-    task_runner.annotate_task(username, uuid, text)
-    return get_task(username, uuid)
+    task_runner.annotate_task(store, uuid, text)
+    return get_task(store, uuid)
 
 
-def gtd_list(username: str, view: GtdView, tags: list[str] | None = None) -> list[Task]:
+def gtd_list(store: TaskStore, view: GtdView, tags: list[str] | None = None) -> list[Task]:
     """One GTD list, sorted by urgency; the tickler by `wait`, soonest first.
 
     The tickler sorts on the stored `wait` string: Taskwarrior exports every date in the same
     UTC basic format (`20300101T000000Z`), so string order is date order.
     """
     filters = [*_VIEW_FILTERS[view], *_tag_filters(tags)]
-    tasks = list_tasks(username, filters)
+    tasks = list_tasks(store, filters)
     if view == "tickler":
         tasks.sort(key=lambda t: t.wait or "")
     return tasks
 
 
-def project_tasks(username: str, name: str, tags: list[str] | None = None) -> list[Task]:
+def project_tasks(store: TaskStore, name: str, tags: list[str] | None = None) -> list[Task]:
     """A project's visible tasks, matched exactly (D2).
 
     `project:X` is Taskwarrior's hierarchical prefix match, so `alpha` also returned
@@ -541,12 +542,12 @@ def project_tasks(username: str, name: str, tags: list[str] | None = None) -> li
     is created.
     """
     return list_tasks(
-        username,
+        store,
         [*PENDING, f"project.is:{validate_project_name(name)}", *_tag_filters(tags)],
     )
 
 
-def project_names(username: str) -> list[str]:
+def project_names(store: TaskStore) -> list[str]:
     """Distinct project names across a user's open tasks, in first-seen order.
 
     Open includes tasks hidden by a future `wait`, so parking a project's only task in the
@@ -558,7 +559,7 @@ def project_names(username: str) -> list[str]:
     RULE-ARCH-001 now forbids.
     """
     seen: dict[str, None] = {}
-    for raw in task_runner.export_tasks(username, OPEN):
+    for raw in task_runner.export_tasks(store, OPEN):
         project = raw.get("project")
         if project:
             seen[project] = None
@@ -577,14 +578,14 @@ def _is_hidden(raw: dict, now: datetime) -> bool:
     return wait is not None and wait != "" and _parse_tw(wait) > now
 
 
-def _open_raw(username: str) -> list[dict]:
+def _open_raw(store: TaskStore) -> list[dict]:
     """One export of everything the user still owns and has not finished.
 
     Every counter in `summarize` and every project in `project_rollup` is a view over this
     one list. A counter per list would mean a dozen `task` invocations for one summary, and
     they would not even agree with each other: each would see the store at its own instant.
     """
-    return task_runner.export_tasks(username, OPEN)
+    return task_runner.export_tasks(store, OPEN)
 
 
 def project_rollup(raw: list[dict], now: datetime) -> dict[str, dict[str, int]]:
@@ -645,7 +646,7 @@ def _is_stalled(status: str, counts: dict[str, int], exists: bool) -> bool:
 
 
 def project_overview(
-    username: str,
+    store: TaskStore,
     explicit: dict[str, bool] | None = None,
     statuses: dict[str, str] | None = None,
 ) -> list[ProjectOverview]:
@@ -668,7 +669,7 @@ def project_overview(
     explicit = explicit or {}
     statuses = statuses or {}
     now = _now()
-    rollup = project_rollup(_open_raw(username), now)
+    rollup = project_rollup(_open_raw(store), now)
     names: dict[str, None] = dict.fromkeys(rollup)
     for name in (*explicit, *statuses):
         names.setdefault(name, None)
@@ -693,7 +694,7 @@ def project_overview(
 
 
 def summarize(
-    username: str,
+    store: TaskStore,
     tags: list[str] | None = None,
     explicit: set[str] | None = None,
     statuses: dict[str, str] | None = None,
@@ -728,7 +729,7 @@ def summarize(
     statuses = statuses or {}
     now = _now()
     today = now.date()
-    raw = _open_raw(username)
+    raw = _open_raw(store)
 
     visible = [t for t in raw if not _is_hidden(t, now)]
     inbox = [t for t in visible if not t.get("project") and not t.get("tags")]

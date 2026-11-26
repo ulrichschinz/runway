@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP
 
-from app import audit, startup_checks
+from app import audit, startup_checks, task_storage
 from app.config import cors_origin_list, settings
 from app.database import init_db
 from app.logging_setup import configure_logging, resolve_level
@@ -42,7 +42,13 @@ async def lifespan(app: FastAPI):
     )
     logger.info(
         "startup complete",
-        extra={"log_level": resolve_level(), "registration_seed": settings.allow_registration},
+        # The storage mode as the resolver will apply it, so an operator can see the switch
+        # took (an unrecognised value reads `strict`, which is what it does). SEC-001.
+        extra={
+            "log_level": resolve_level(),
+            "registration_seed": settings.allow_registration,
+            "task_storage_mode": task_storage.storage_mode(),
+        },
     )
     yield
 

@@ -780,6 +780,24 @@ p.write_text(t)
 LOGCREDS
 expect_red "OPS-002-fstring" "tools/checks/log-secrets.sh" "RULE-OPS-002"
 
+# --- RULE-SEC-003 — a username is joined onto the data root again ------------
+# SEC-001 exactly as it was written: `_run` building TASKDATA from the account name instead of
+# taking the resolved store. The type annotation would still say TaskStore; only this rule and
+# the storage tests stand between the regression and production.
+python3 - "$SANDBOX/backend/app/services/task_runner.py" <<'USERNAMEPATH'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = '        "TASKDATA": str(store.path),\n'
+assert old in t, "the TASKDATA line is not where the fixture expects it"
+t = t.replace("from app.task_storage import TaskStore\n", "from app.config import settings\nfrom app.task_storage import TaskStore\n", 1)
+t = t.replace(old, '        "TASKDATA": str(settings.data_root / store.account),\n', 1)
+p.write_text(t)
+USERNAMEPATH
+expect_red "SEC-003" "tools/checks/storage-binding.sh" "RULE-SEC-003"
+
 # --- RULE-OPS-003 — the deploy compose asks the host for privilege ----------
 # Since the forced command applies this file at the deployed commit, an edit here reaches the
 # host directly. `privileged: true` is the shortest path from "merged a YAML change" to "owns

@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     # Login attempts allowed per username per window before /auth/login answers 429.
     login_rate_limit: int = 10
     login_rate_window_seconds: int = 300
+    # Which Taskwarrior directory layout is served (ADR 0043, finding SEC-001). `compat` serves
+    # an account not yet migrated from DATA_ROOT/<username>/ when that name is one safe path
+    # component; `strict` serves only DATA_ROOT/<storage_id>/. New accounts never use the old
+    # layout in either mode. Anything unrecognised is treated as `strict`. `compat` is the
+    # shim SHIM-SEC-007 and expires with it.
+    task_storage_mode: str = "compat"
     # How much of the JSON log stream is emitted. The *format* is not configurable and
     # neither is the redaction filter: a setting that turns a control off is the setting
     # that gets turned off at 3am. An unrecognised value falls back to INFO rather than

@@ -1,3 +1,6 @@
+-- index users_storage_id
+CREATE UNIQUE INDEX users_storage_id ON users (storage_id);
+
 -- table project_plans
 CREATE TABLE project_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +56,20 @@ CREATE TABLE site_settings (
     value TEXT NOT NULL
 );
 
+-- table storage_migrations
+CREATE TABLE storage_migrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    storage_id TEXT NOT NULL,
+    legacy_path TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('migrated', 'provisioned', 'blocked', 'rolled_back')),
+    reason TEXT NOT NULL DEFAULT '',
+    files INTEGER NOT NULL DEFAULT 0,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    manifest TEXT NOT NULL DEFAULT '',
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- table users
 CREATE TABLE users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,4 +77,10 @@ CREATE TABLE users (
     hashed_password TEXT NOT NULL,
     api_key TEXT UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-, role TEXT DEFAULT 'user', full_name TEXT DEFAULT '', email TEXT DEFAULT '');
+, role TEXT DEFAULT 'user', full_name TEXT DEFAULT '', email TEXT DEFAULT '', storage_id TEXT CHECK (storage_id IS NULL OR (length(storage_id) = 32 AND storage_id NOT GLOB '*[^0-9a-f]*')), storage_layout TEXT NOT NULL DEFAULT 'legacy' CHECK (storage_layout IN ('legacy', 'storage_id')));
+
+-- trigger users_storage_id_immutable
+CREATE TRIGGER users_storage_id_immutable
+    BEFORE UPDATE OF storage_id ON users
+    WHEN OLD.storage_id IS NOT NULL AND NEW.storage_id IS NOT OLD.storage_id
+    BEGIN SELECT RAISE(ABORT, 'storage_id is immutable'); END;
