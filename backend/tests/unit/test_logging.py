@@ -228,7 +228,7 @@ def test_an_innocent_field_survives():
 
 
 def test_a_real_jwt_is_redacted_under_a_neutral_name():
-    token = create_access_token("alice")
+    token = create_access_token("alice", auth_version=1)
     assert token.startswith("eyJ")
 
     with isolated_logger() as (logger, stream):

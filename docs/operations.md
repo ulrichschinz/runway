@@ -223,6 +223,10 @@ gh api /users/ulrichschinz/packages/container/runway-backend/versions \
   --jq '.[] | .metadata.container.tags' | head
 ```
 
+**Rolling back across brief 0066** (the session version): while the older image runs, a password change
+ends no session. After rolling forward again, end every session once — see
+[Ending sessions](#ending-sessions).
+
 ## Health
 
 Both services declare a healthcheck in the **checked-in** `docker-compose.yml`, and `frontend` waits for
@@ -721,6 +725,55 @@ Registration may be reopened once the commit running in production has its conta
 **6. Contract — not yet, and not by hand.** Removing `data/<username>/` directories is its own change, after
 `strict` has run for 14 days and one migrated account has been restored from the backup. Until then the legacy
 directories are the rollback source; the backup still has to include them.
+
+## Ending sessions
+
+Since brief 0066 (finding REV-001, ADR 0044) every JWT carries the account's `users.auth_version`, and
+`get_current_user` refuses a token whose version is not the stored one. `PUT /auth/password` raises it,
+which is how a password change ends every other session. API keys are **not** touched by any of this.
+
+**End one account's sessions** — a suspected stolen token, a lost device — on the host, with the backend
+running (the next request with an old token is 401; nothing needs restarting):
+
+```sh
+sqlite3 users.db "UPDATE users SET auth_version = auth_version + 1 WHERE username = 'alice';"
+```
+
+**End every session of every account** — the global event, e.g. after a rollback (below) or when tokens may
+have leaked from a log. Cheaper than rotating `JWT_SECRET` and leaves agents on API keys running:
+
+```sh
+sqlite3 users.db "UPDATE users SET auth_version = auth_version + 1;"
+```
+
+The version can only go up (trigger `users_auth_version_monotone`); a statement that lowers it fails. If
+the key may be compromised too, rotate it as well (`POST /auth/apikey/regenerate`, Einstellungen →
+API-Key) — a password change deliberately does not.
+
+**The deploy that introduces it.** Tokens issued by the previous image have no `auth_version`. For one
+`JWT_EXPIRE_HOURS` after this image first boots they are accepted as version 1 (`SHIM-SEC-008`); after that
+none qualifies, with no action. When that is (UTC epoch seconds, plus `JWT_EXPIRE_HOURS`):
+
+```sh
+sqlite3 users.db "SELECT value FROM site_settings WHERE key = 'auth_version_expand_at';"
+```
+
+After the deploy, check with a **synthetic** account (never a real user's credentials): log in twice, change
+the password with the first token, and confirm the second token gets `401` on `GET /api/auth/me` while the
+token in the change's response gets `200`.
+
+**Rollback.** The previous image ignores `auth_version`: while it runs, a password change ends no session
+(REV-001 is open again) and nothing else breaks. **After rolling forward, run the global statement above
+once**, so a token that should have been revoked during the rollback is not valid again. Users log in once
+more; that is the price.
+
+**Restoring `users.db` from a backup** brings back the `auth_version` values *and the password hashes*
+from the moment of the backup. Every revocation made since then is undone: a token that a later password
+change or the per-account `UPDATE` above had ended carries the restored version again and is accepted
+until it expires, and the old password logs in again. The monotone trigger cannot prevent that, because
+a restore replaces the file and runs no `UPDATE`. **After every restore, run the global statement above
+once, before the app serves traffic**, and tell the users whose password changed after the backup that
+their old password is back.
 
 ## The deploy host's topology
 

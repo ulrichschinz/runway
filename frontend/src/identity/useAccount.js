@@ -95,7 +95,9 @@ export function useAccount() {
     if (refused) return Promise.resolve({ error: refused })
     return once('password', async () => {
       try {
-        await client.put('/auth/password', { current_password: form.current, new_password: form.next })
+        const { data } = await client.put('/auth/password', { current_password: form.current, new_password: form.next })
+        // The change ended every earlier session, this one too; the answer carries its successor.
+        if (data?.access_token) auth.adoptToken(data.access_token)
         return { ok: true }
       } catch (e) {
         return { error: e?.response?.status === 400 ? 'set.pw.wrong' : failure(e) }

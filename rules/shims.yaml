@@ -97,3 +97,32 @@ shims:
     expires: 2027-02-28
     re_open_trigger: "the expiry passes, the plan reports a blocked account that cannot be migrated, or an alias account is found"
     decision_record: docs/adr/0043-account-identity-and-taskwarrior-storage.md
+
+  - id: SHIM-SEC-008
+    what: >
+      `get_current_user` accepts a JWT without an `auth_version` claim — the form every image
+      before brief 0066 issued — counted as version 1, and only when its `exp` is no later than
+      `site_settings.auth_version_expand_at` + JWT_EXPIRE_HOURS (`_presented_version` in
+      backend/app/dependencies.py).
+    why: >
+      Every user logged in at the moment of the deploy holds such a token. Refusing them on the
+      deploy would log everybody out at once; the window lets them run out naturally. It cannot
+      weaken revocation: a versionless token counts as version 1, so the first password change
+      after the deploy ends it like any other (finding REV-001, ADR 0044).
+    removal: >
+      The contract step of brief 0066, its own change: delete the versionless branch and the
+      `auth_version_expand_at` row once one JWT_EXPIRE_HOURS has passed since this image first
+      booted in production. From that moment the branch already accepts nothing — no token
+      issued before the boot can still be unexpired — so removal changes no behaviour.
+    evidence: >
+      `SELECT value FROM site_settings WHERE key='auth_version_expand_at'` on the deploy host, plus
+      JWT_EXPIRE_HOURS, is in the past. That is a query on the host, not something this
+      repository can see; the unit tests show the branch refuses everything after the window.
+    owner: maintainer
+    # Written by the implementing agent on the owner's order of 2026-11-24 to carry out M2.1;
+    # the owner has not yet reviewed this entry itself (RISK-GOV-001: no independent review).
+    # Explicit owner sign-off before merge is a deferred step of brief 0066.
+    approved_on: 2026-11-24
+    expires: 2027-01-31
+    re_open_trigger: "the expiry passes, JWT_EXPIRE_HOURS is raised in production, or a rollback to an image before brief 0066 happens"
+    decision_record: docs/adr/0044-credential-lifecycle-jwt-password-and-api-key.md

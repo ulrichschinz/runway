@@ -141,6 +141,12 @@ Runway supports two authentication methods, accepted by all API endpoints:
 Authorization: Bearer <token>
 ```
 
+**Changing the password ends every session.** `PUT /api/auth/password` revokes every JWT of the
+account issued before it, on every route and every MCP tool, and answers with a new one for the
+caller (`{"detail": …, "access_token": …, "token_type": "bearer"}`); a client that keeps using its
+old token gets `401`. API keys are not affected by a password change — rotate them with
+`POST /api/auth/apikey/regenerate` if they may be compromised.
+
 **API key** — permanent, per-user, managed in the app settings:
 ```
 X-Api-Key: <key>

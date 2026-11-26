@@ -32,6 +32,17 @@ Two credentials reach the same principal, checked in this order by `get_current_
    gets the same **401** as no credential at all, on every route. A token outlives the row
    it was issued for; until 2026-11-10 it kept working everywhere except `GET /auth/me`,
    which answered 500 (`WAIVER-TYPE-001`, [brief 0056](briefs/0056-a-vanished-user-gets-401.md)).
+   **And the token must carry the account's current `auth_version`** (ADR 0044, finding
+   REV-001). Every token holds `sub`, `iat`, `exp`, a random `jti` and `auth_version`;
+   `PUT /auth/password` raises the version in the same statement that writes the new hash, so
+   every token issued before the change — other browsers, other devices, a stolen one — gets
+   401 on its next REST request and its next MCP tool call. The session that made the change
+   receives a new token in the response. A token without `exp` or `sub`, or with a malformed
+   version, is refused. The operator ends one account's sessions, or everyone's, with one
+   `UPDATE` ([`docs/operations.md`](operations.md#ending-sessions)). For one JWT lifetime after
+   the deploy, a token from the previous image (no `auth_version`) still counts as version 1:
+   `SHIM-SEC-008`. **API keys are not revoked by a password change** — they rotate separately
+   (`POST /auth/apikey/regenerate`); both settings pages say so before the change and point to it after.
 3. **`Authorization: Bearer <api_key>`** — an API key in the Bearer slot, tried last, only
    after a JWT decode fails. This is `SHIM-SEC-006`, not a design: it is the shape `/inbox`
    used before it was unified onto `get_current_user` (finding SEC-6), kept because every
