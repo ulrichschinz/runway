@@ -35,3 +35,7 @@ quietly, and why it does not go higher than the remediation needs.
 - The time goes back down by making the gate parallel (unit suite across processes, fixture arms in
   parallel sandboxes), not by raising the budget again. Re-open trigger: `verify` on CI over
   900 s, or the parallel gate is done (then the budget comes back down).
+- The `verify` job's `timeout-minutes` in `.github/workflows/verify.yml` was 15, below the budget: the
+  M8 deploy run on `main` (run 45865110401) was cancelled at 15 minutes while `verify` was still green.
+  It is 25 now, the budget plus setup (checkout, toolchain, image build). The job timeout never sits
+  below the budget again; if the budget comes down, the timeout follows.
