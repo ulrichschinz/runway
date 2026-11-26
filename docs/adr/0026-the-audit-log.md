@@ -3,6 +3,8 @@
 - **Date:** 2026-08-28
 - **Status:** Accepted
 - **Scope:** `backend`, `ops`
+- **Amended by:** [ADR 0047](0047-audit-retention-and-versioned-migrations.md) (2026-11-25) — the file is
+  measured with a high-water mark and a warning threshold; retention is still undecided (gate D7).
 
 ## Context
 

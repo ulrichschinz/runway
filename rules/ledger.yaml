@@ -405,8 +405,10 @@ rules:
 
   - id: RULE-SEC-001
     statement: >
-      Every HTTP route MUST declare its required guard in rules/route-guards.toml, the
-      declaration MUST match the guard the handler enforces, and a route declared open
+      Every HTTP and WebSocket route the booted application serves — wherever it is declared, framework and
+      transport routes included — MUST declare its required guard in rules/route-guards.toml, the
+      declaration MUST match the guard the route's resolved dependency tree enforces, every
+      operation in the served OpenAPI schema MUST be in that inventory, and a route declared open
       MUST record why.
     class: executable
     check: tools/checks/route-guards.sh
@@ -422,7 +424,11 @@ rules:
       thirty handlers. Declaring the posture as checked-in state turns "did anyone think
       about authorization for this route" into a question the gate answers. Open routes
       carry a reason because a route anyone can reach is a decision, and a decision with no
-      recorded reason cannot be told apart from an oversight.
+      recorded reason cannot be told apart from an oversight. The inventory became the running
+      application on 2026-11-25 (brief 0073, ADR 0047): reading one directory left six served
+      routes undeclared, and a route beside GET /health would have shipped green (RISK-SEC-005).
+      A WebSocket route has no HTTP method and no OpenAPI entry; it is declared as `WS <path>`,
+      and a route kind the checker cannot classify fails the gate instead of being skipped.
 
   - id: RULE-SEC-002
     statement: >
@@ -566,6 +572,29 @@ rules:
       runs at the start of every session, it reaches users through the same version bump the
       skill does, and a stale copy of it is worse than stale skill text — the skill is read
       by a model that can notice it is wrong, the hook is executed.
+
+  - id: RULE-SURF-005
+    statement: >
+      The schema init_db() produces from an empty file and from every historical baseline in
+      backend/tests/fixtures/schema_history/ MUST be semantically identical — columns in order with
+      type, NOT NULL, default and key; CHECK clauses; AUTOINCREMENT; indexes by columns, uniqueness
+      and predicate; foreign keys; triggers; and the applied schema version.
+    class: executable
+    check: tools/checks/surfaces.sh
+    fixture: tools/fixtures/negative.sh
+    contract: docs/task-interface.md#make-surfaces
+    fix: none
+    owner: maintainer
+    non_waivable: false
+    rationale: >
+      RULE-SURF-001 snapshots the schema a fresh database gets, and production is not a fresh
+      database: it was created in April 2026 and migrated by ALTER TABLE ever since. For seven months
+      the snapshot recorded an api_key UNIQUE constraint and a column order production did not have,
+      and the rule compared the snapshot against itself and passed (RISK-SURF-001). The upgrade path
+      has to be built and compared, not assumed. Statement text is not compared — the same schema is
+      spelled differently by CREATE and by ALTER — what it means is. A schema change now goes into
+      VERSIONED_MIGRATIONS, which runs on both paths; a CREATE edited instead fails here because a
+      database that already has the table never sees the edit. Brief 0073, ADR 0047.
 
   - id: RULE-DEP-002
     statement: >
@@ -1050,29 +1079,20 @@ residual_risks:
 
   - id: RISK-SURF-001
     statement: >
-      A fresh database and a migrated one do not have the same schema, and the snapshot that
-      is supposed to be the truth about the schema only ever describes the fresh one.
-      CREATE_USERS declares `api_key TEXT UNIQUE`; the migration that back-fills that column
-      into an existing database declares plain `TEXT`, because SQLite cannot add a UNIQUE
-      column by ALTER TABLE at all. So an instance created after the column existed enforces
-      uniqueness and an instance migrated into it does not — and production is the second
-      kind. tools/surfaces.py captures the schema by running init_db() against an empty
-      temporary file, which is the fresh path, so ops/surfaces/db-schema.sql records the
-      UNIQUE constraint that production does not have. RULE-SURF-001 compares that snapshot
-      against itself and passes: the mechanism cannot see this class of drift, because both
-      sides of the comparison are generated the same way. The practical exposure is small —
-      api_key is secrets.token_urlsafe(32), so a collision is not a real event — but the
-      snapshot is relied on as a description of production and on this point it is wrong.
-
-      Brief 0070 (2026-11-25) kept the drift from spreading: API keys moved to a new table,
-      `api_keys`, created by the same CREATE TABLE IF NOT EXISTS on both paths, and
-      test_api_keys.py generates a fresh and an upgraded database and compares that table's
-      schema. The legacy lookup does not assume `users.api_key` was unique — a hash that two
-      rows carry is refused. `users.api_key` itself, and so this drift, goes with the M4
-      contract step (a versioned table rebuild), after the legacy cutoff of 2027-01-15.
+      Closed in this repository on 2026-11-25 (brief 0073, ADR 0047); open until production
+      reports it. The drift: CREATE_USERS declared `api_key TEXT UNIQUE` while a database migrated by
+      ALTER TABLE — production, created in April 2026 — had plain TEXT and another column order, and
+      ops/surfaces/db-schema.sql described only the fresh path, so RULE-SURF-001 compared the snapshot
+      against itself and passed. Now: versioned step 1 rebuilds `users` into one declared shape on
+      both paths (plain `api_key TEXT`, as production has it; the column goes with the API-key
+      contract), and RULE-SURF-005 builds every historical baseline in
+      backend/tests/fixtures/schema_history/ and requires it to mean what a fresh database means.
+      What is not yet evidence: that production ran step 1. A role that is neither 'user' nor 'admin'
+      refuses the step and leaves the old shape in place; verify-deploy compares the
+      `schema_version` production reports with the snapshot's and fails until it matches.
     owner: maintainer
-    re_open_trigger: "a migrations/ directory with a version table exists, or a second column diverges between the created and migrated schemas, or a uniqueness assumption is written against api_key"
-    decision_record: docs/adr/0025-narrowing-the-migration-except.md
+    re_open_trigger: "verify-deploy reports a schema_version below the snapshot's, a historical database shape is found that the baselines do not cover, or a schema change lands outside VERSIONED_MIGRATIONS"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   - id: RISK-OPS-002
     statement: >
@@ -1106,9 +1126,20 @@ residual_risks:
       nothing reads /opt/services/runway/docker-compose.yml, so a compose that drifted, or a
       deploy that never rewrote it, still looks exactly like one that did as long as the
       containers it already runs answer correctly.
+
+      Narrowed 2026-11-25 (brief 0073, ADR 0047 Decision 4). The deploy compose now mounts its
+      own file read-only into the backend, and GET /skill reports the SHA-256 of that host-applied
+      file beside the SHA-256 of the compose baked into the image, the build id (the workflow run
+      that pushed the image) and the schema version. verify-deploy requires all four to match this
+      run and this commit, and requires the registry's :latest and :<sha> to resolve to the digest
+      build-and-push pushed; a stubbed run of both steps fails for each mismatch
+      (test_deploy_evidence.py). What remains: CI still cannot ask the host which digest its
+      container runs — the chain is the build id plus the registry digest — and nothing compares
+      anything between deploys. That a deploy of this change actually passed the new checks is a
+      production observation not yet made.
     owner: maintainer
-    re_open_trigger: "a check confirms after a deploy that the host's compose matches the deployed commit, or a documented topology claim is found to be false again"
-    decision_record: docs/adr/0032-the-deploy-mechanism-correction.md
+    re_open_trigger: "verify-deploy fails on the applied compose, the build id or the digest, the host gains a way to report its container's image digest, or a documented topology claim is found to be false again"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   - id: RISK-DOC-002
     statement: >
@@ -1219,18 +1250,18 @@ residual_risks:
 
   - id: RISK-SEC-002
     statement: >
-      The users.role column is TEXT DEFAULT 'user' with no database-level constraint, so a
-      value written outside the application — by hand on the host, or by a future migration
-      — is not rejected. Every in-application writer validates against VALID_ROLES, and an
-      unrecognised value is not equal to 'admin', so the failure is closed rather than open.
-      A CHECK constraint cannot be added by ALTER TABLE at all; it needs the table copied,
-      which is a different shape of migration from the additive loop init_db runs. Half of
-      this risk's re-open trigger fired on 2026-08-28: WAIVER-OPS-001 is resolved and a failed
-      migration now reports itself (docs/adr/0025-narrowing-the-migration-except.md), so a
-      half-applied rebuild would at least be loud. It would still be half-applied, and the
-      rebuild has no home until there is a migrations/ directory with a version table.
+      Closed in this repository on 2026-11-25 (brief 0073, ADR 0047); open until production
+      reports it. Versioned step 1 rebuilds `users` with `role TEXT NOT NULL DEFAULT 'user'
+      CHECK (role IN ('user', 'admin'))`, so a value written outside the application — by hand on the
+      host or by a future migration — is refused by the database; NULL and '' (what every reader
+      already treated as 'user') become 'user'. A database that already holds another value refuses
+      the step, logs `schema migration refused` with a count, and keeps the old unconstrained column,
+      where every in-application writer still validates against VALID_ROLES and an unrecognised value
+      is not 'admin' (fail closed). Whether production holds such a row is a production read; until
+      verify-deploy has seen schema_version 1 the constraint is not known to be in force there. The
+      constraint does not stop an operator writing 'admin': that is a role.
     owner: maintainer
-    re_open_trigger: "a migrations/ directory with a version table exists, or a third role is introduced"
+    re_open_trigger: "verify-deploy reports schema_version 0, a third role is introduced, or the users table is rebuilt again"
     decision_record: docs/security.md
 
   - id: RISK-SEC-006
@@ -1414,25 +1445,21 @@ residual_risks:
 
   - id: RISK-OPS-006
     statement: >
-      NOTHING PRUNES THE AUDIT DATABASE. `data/audit.db` grows for the lifetime of the
-      deployment and no retention period, no vacuum and no archival step exists — that is a
-      deliberate omission, not an oversight: a first cut that deletes rows is a first cut
-      that can delete the evidence `SHIM-SEC-006` is waiting on, and choosing what may be
-      forgotten is a decision with a legal and an operational half that has not been taken.
-      The growth is dominated by one row per SUCCESSFULLY authenticated request, roughly
-      150 bytes each, so a deployment serving ten thousand requests a day accumulates on the
-      order of half a gigabyte a year on the same partition that holds `users.db` and the
-      Taskwarrior data — the same partition whose exhaustion the container log rotation added
-      in Step 15a was written to prevent, now with a second unbounded writer on it that
-      Docker's log driver does not bound. There is a second, smaller
-      amplification: a login failure writes a row and the rate limiter is per-username, so a
-      caller cycling usernames can append faster than a legitimate one. Rejected credentials
-      deliberately write nothing at all, which is what keeps that bounded by the login route
-      rather than open to any unauthenticated request. Nothing measures the file, nothing
-      alerts on it, and the disk it shares is the one that takes the database down with it.
+      NOTHING PRUNES THE AUDIT DATABASE — but since 2026-11-25 (brief 0073, ADR 0047) something
+      measures it. `data/audit.db` grows for the lifetime of the deployment, about 150 bytes per
+      successfully authenticated request, on the partition that holds `users.db` and the Taskwarrior
+      data. The backend now stats the file (with -wal and -shm) at boot and hourly, keeps the largest
+      size seen as a high-water mark in the file's audit_meta table, and logs `audit store size` at
+      INFO, at WARNING above AUDIT_DB_WARN_BYTES (default 100 MiB). That makes the growth visible; it
+      does not bound it. Bounding it needs a retention period, and choosing what may be forgotten has
+      a legal and an operational half — SHIM-SEC-006's evidence, revocations, role changes and storage
+      migrations must outlive their own evidence period — that is the operator's decision (plan gate
+      D7), not taken. ADR 0047 Decision 1 records what the retention job must respect when it is
+      built. Nothing alerts outside the log stream, and nothing measures the partition's free space.
+      The amplification by login failures is bounded by the login budget (brief 0069).
     owner: maintainer
-    re_open_trigger: "audit.db exceeds 100 MB, a retention period is agreed, disk pressure is observed on the deploy host, or the SHIM-SEC-006 soak completes and the evidence is no longer needed live"
-    decision_record: docs/adr/0026-the-audit-log.md
+    re_open_trigger: "a WARNING 'audit store size' is logged, a retention period is agreed (D7), disk pressure is observed on the deploy host, or the SHIM-SEC-006 soak completes and the evidence is no longer needed live"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   - id: RISK-OPS-001
     statement: >
@@ -1487,44 +1514,40 @@ residual_risks:
 
   - id: RISK-SEC-004
     statement: >
-      Almost no request field declares a length limit. Since brief 0067 the password fields
-      are bounded (1024 UTF-8 bytes) and every request body is (16 KiB on /auth/*, 1 MiB
-      elsewhere — nginx's default, now enforced by the backend itself as well), but the other
-      string fields in backend/app/models.py constrain types and nothing else, and
-      TaskCreate.description, AnnotationCreate.text and InboxItem.note are the ones that
-      matter, because they travel into the Taskwarrior argv and into that user's task store.
-      So the bound on a single task description is now the 1 MiB body, not a field rule. Two consequences, and their severity is deliberately not overstated: a very
-      large description is storage growth in a per-user data directory on the same partition
-      as users.db and audit.db (the partition RISK-OPS-006 is already about), and an
-      argument long enough to exceed the kernel's per-argument limit makes execve fail,
-      which task_runner surfaces as a 500 rather than a 400. The second was NOT reproduced
-      here: the limit is a Linux constant and this repository's development host is macOS,
-      where a one-megabyte argument executed fine. Both are capacity questions, which
-      decision F1 puts out of scope — recorded rather than silently assumed, which is what
-      F1 asks for.
+      Narrowed 2026-11-25 by brief 0073 (plan M8): every free-text field a request carries is now
+      bounded in backend/app/models.py — a username at 256 characters at login and registration
+      (before it reaches an audit row or a log line; audit.py also cuts actor and subject at 256),
+      a task description at 2 000 characters, an annotation and an inbox note at 32 KiB of UTF-8
+      (the cut capping.js and Android's Capping.kt already make), date-like fields at 64, tags at
+      100 each and 50 per task, plan texts at 20 000 — and one past a limit is 422 while the body is
+      parsed, before any handler runs; MCP tool calls meet the same bounds through the tool input
+      schema and the route. The largest Taskwarrior argument is therefore at most 32 KiB, a
+      quarter of Linux's MAX_ARG_STRLEN, and an E2BIG that still occurs is task_runner.ArgumentTooLong, answered 413,
+      not 500. What remains is volume, not size: nothing bounds how many tasks, annotations or plan
+      revisions one account writes, so a user's own store can still grow on the partition that
+      holds users.db and audit.db (RISK-OPS-006). That is a capacity question decision F1 keeps
+      out of scope, recorded rather than assumed. The kernel limit itself was still not reproduced
+      here (the development host is macOS); the 413 path is tested at the subprocess seam.
     owner: maintainer
-    re_open_trigger: "a 500 is observed from a long description or annotation, disk usage grows from task data rather than from logs or audit rows, a body-size limit is set at the proxy, or F1's capacity exclusion is revisited"
+    re_open_trigger: "a 500 is observed from a long field, a field is added to a request model without a bound, disk usage grows from task data rather than from logs or audit rows, or F1's capacity exclusion is revisited"
     decision_record: docs/adr/0027-the-threat-model.md
 
   - id: RISK-SEC-005
     statement: >
-      RULE-SEC-001 reads backend/app/routers/*.py and nothing else — tools/checks/route_guards.py
-      globs that one directory — so a route declared anywhere outside the routers package is
-      neither observed nor required to appear in rules/route-guards.toml. One route is outside
-      it today: GET /health, declared on the app object in backend/app/main.py, unauthenticated,
-      returning a fixed {"status": "ok"}. That route is harmless and it is also the proof of the
-      gap: the declaration file has thirty-nine entries and the application serves forty
-      routes, and nothing anywhere says so. The consequence is not the health check, it is the
-      next route someone adds beside it — a guard forgotten there fails exactly the way
-      RULE-SEC-001 was written to prevent, silently and for everybody, while the gate stays
-      green. The partial backstop is RULE-SURF-001: a new route changes the OpenAPI snapshot,
-      so it cannot arrive unnoticed, but regenerating that snapshot is a normal part of adding
-      a route and it demands no guard declaration. Closing this means widening the checker's
-      scope to every module that can hold a decorator, which also means deciding what an
-      infrastructure route like /health declares.
+      Narrowed 2026-11-25 by brief 0073 (plan M8). RULE-SEC-001 used to glob backend/app/routers/*.py,
+      so GET /health, the three methods of /mcp and the framework's documentation routes were served
+      and declared nowhere, and a route added beside them would have needed no guard decision. The
+      checker now boots the application and inventories fastapi.routing.iter_route_contexts(app.routes),
+      reads each guard from the resolved dependency tree (router-level dependencies included),
+      requires every served OpenAPI operation to be in the inventory and a Mount to be declared; the
+      eight routes are declared open with reasons, and a negative fixture puts a route in main.py.
+      What remains is outside the application object: a path the nginx in front answers itself
+      (the SPA and its fallback), and a handler that authenticates inside its body rather than by
+      dependency — the checker classifies it open, so it must be declared open with a reason, but
+      the checker cannot tell whether that reason is true.
     owner: maintainer
-    re_open_trigger: "a second route is declared outside backend/app/routers/, an authenticated or state-changing route is added to main.py, or the route-guard checker is given a wider scope"
-    decision_record: docs/adr/0027-the-threat-model.md
+    re_open_trigger: "a route authenticates without get_current_user/get_current_admin, nginx answers an API path itself, a sub-application is mounted, or fastapi.routing.iter_route_contexts changes meaning"
+    decision_record: docs/adr/0047-audit-retention-and-versioned-migrations.md
 
   # --- found by the Phase 4 audit, Step 16d (docs/adr/0031-the-phase-4-audit.md) ------
 

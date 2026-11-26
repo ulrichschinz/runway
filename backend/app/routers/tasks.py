@@ -1,10 +1,11 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 
 from app import audit
 from app.dependencies import get_current_user, get_task_store
-from app.models import AnnotationCreate, Task, TaskCreate, TaskModify
+from app.models import AnnotationCreate, LimitExceeded, Task, TaskCreate, TaskModify
 from app.services import task_service
 from app.task_storage import TaskStore
 
@@ -14,6 +15,11 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 def _handle(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
+    except LimitExceeded as e:
+        # A changed value over its bound (brief 0073): the 422 pydantic gives for a new task.
+        raise RequestValidationError(
+            [{"type": "too_long", "loc": ("body", e.field), "msg": str(e)}]
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:

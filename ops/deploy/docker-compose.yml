@@ -35,6 +35,11 @@ services:
     volumes:
       - ./data:/app/data
       - ./users.db:/app/users.db
+      # This file itself, read-only, so the server can report the SHA-256 of the compose the host
+      # applied and verify-deploy can compare it with this commit's (brief 0073, RISK-OPS-002). A
+      # hash is all that leaves the container — GET /skill never serves the file. Relative to the
+      # service directory like the two mounts above (RULE-OPS-003).
+      - ./docker-compose.yml:/etc/runway/applied-compose.yml:ro
     environment:
       - JWT_SECRET=${JWT_SECRET}
       - DATA_ROOT=/app/data
@@ -83,6 +88,8 @@ services:
       # Brief 0071: the MCP in-flight budget, total and per source.
       - MCP_MAX_INFLIGHT=${MCP_MAX_INFLIGHT:-32}
       - MCP_SOURCE_MAX_INFLIGHT=${MCP_SOURCE_MAX_INFLIGHT:-8}
+      # Brief 0073: the audit file's size above which the hourly measurement warns (RISK-OPS-006).
+      - AUDIT_DB_WARN_BYTES=${AUDIT_DB_WARN_BYTES:-104857600}
     networks:
       - traefik-public
     # Lands with the next deploy through the mechanism above; until that deploy runs, the host

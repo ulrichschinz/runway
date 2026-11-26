@@ -44,7 +44,13 @@ Coverage floor is a ratchet, not a target — raise it, never lower it to fit a 
 - Schema migrations are `ALTER TABLE` statements in `init_db()`, run on every start. Only
   "duplicate column name" passes silently — that is the re-run path. Every other database
   error is logged at ERROR and the boot continues, so a failed migration is visible but not
-  fatal; the database can still be left half-migrated (`WAIVER-OPS-001`, resolved).
+  fatal; the database can still be left half-migrated (`WAIVER-OPS-001`, resolved). **That
+  list is frozen** (brief 0073, ADR 0047): a new schema change is a step in
+  `VERSIONED_MIGRATIONS`, applied once in one transaction and recorded in `schema_migrations`.
+  Version 1 rebuilds `users`, so its stored SQL reads `CREATE TABLE "users"`. A test that boots
+  a database for the first time sees one INFO line, `schema migration applied`;
+  `test_migrations.py::lines` sets it aside. `RULE-SURF-005` builds every baseline in
+  `tests/fixtures/schema_history/` — never edit one.
 - There is a **second** SQLite file. `DATA_ROOT/audit.db` holds the audit log, under the only
   directory either compose file bind-mounts — anywhere else in the container it would be
   deleted by the next deploy. `users.db` alone is no longer a complete backup.

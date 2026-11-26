@@ -1,36 +1,52 @@
-"""Every HTTP route declares which guard it requires, and the code agrees.
+"""Every route the application serves declares which guard it requires, and the code agrees.
 
 Emits `RULE-ID|message` lines; `tools/checks/route-guards.sh` turns them into gate failures.
 
-`RULE-SEC-001` — the authorization posture of the REST surface is checked-in state, not an
+`RULE-SEC-001` — the authorization posture of the HTTP surface is checked-in state, not an
 emergent property of thirty function signatures. The audit that produced
 `rules/route-guards.toml` was a one-time read of every route. Without this check it would
 stay accurate exactly until the next route is added, and the failure mode of a forgotten
 guard is silent: the route works, it just works for everybody.
 
+**The inventory is the running application, not a directory** (brief 0073, ADR 0047,
+`RISK-SEC-005`). Until 2026-11-25 this file parsed `backend/app/routers/*.py` and nothing
+else, so a route declared on the app object (`GET /health`), a transport route (`/mcp`), the
+framework's own documentation routes and any router-level dependency were invisible to it: six
+served routes were declared nowhere while the gate said every guard matched. It now imports
+`app.main`, walks `fastapi.routing.iter_route_contexts(app.routes)` — every route FastAPI will
+dispatch to, included routers flattened with their prefixes and dependencies applied — and
+reads each route's guard from its **resolved dependency tree**, the thing FastAPI actually runs.
+The served OpenAPI schema is cross-checked: an operation it lists must be in the inventory.
+
 Three guards exist:
 
-    admin   requires Depends(get_current_admin) — an authenticated user whose role is admin
-    user    requires Depends(get_current_user)  — any authenticated principal
-    open    reachable unauthenticated, or authenticating by some other means
+    admin   get_current_admin is in the route's dependency tree — an authenticated admin
+    user    get_current_user is (and get_current_admin is not) — any authenticated principal
+    open    neither: reachable unauthenticated, or authenticating by some other means
 
-`open` is never inferred. Each one is declared with a reason in the TOML, because a route
-that anyone can reach is a decision, and a decision with no recorded reason is indis-
-tinguishable from an oversight.
+`open` is never inferred as acceptable. Each one is declared with a reason in the TOML, because
+a route that anyone can reach is a decision, and a decision with no recorded reason is
+indistinguishable from an oversight. A `Mount` (a sub-application) is a route too and must be
+declared as `MOUNT <path>`: what it serves is not visible from here. A WebSocket route is declared
+as `WS <path>` — it has no HTTP method and is not in the OpenAPI schema, so nothing else would see
+it. Any other route kind with no methods fails the gate outright: a route this file cannot
+classify is reported, never skipped.
 """
 
 from __future__ import annotations
 
-import ast
+import secrets
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-ROUTERS = ROOT / "backend" / "app" / "routers"
 DECLARATION = ROOT / "rules" / "route-guards.toml"
 
-METHODS = ("get", "post", "put", "patch", "delete")
+GUARDS = ("admin", "user", "open")
+# HEAD and OPTIONS are answered for a GET route by the framework, not chosen by a handler.
+IMPLIED_METHODS = {"HEAD", "OPTIONS"}
 
 problems: list[tuple[str, str]] = []
 
@@ -39,72 +55,81 @@ def fail(message: str) -> None:
     problems.append(("RULE-SEC-001", message))
 
 
-def observed() -> dict[str, str]:
-    """Every route in the code, mapped to the guard its signature actually enforces."""
+def _booted_app() -> Any:
+    """Import the application the way `tools/surfaces.py` does: a key generated per run (the boot
+    refuses every published one, brief 0072). Importing does not run the lifespan."""
+    sys.path.insert(0, str(ROOT / "backend"))
+    from app.config import settings
+
+    settings.jwt_secret = secrets.token_urlsafe(48)
+    from app.main import app
+
+    return app
+
+
+def _calls(dependant: Any) -> set[Any]:
+    """Every callable in a resolved dependency tree, sub-dependencies included."""
+    seen: set[Any] = set()
+    stack = [dependant]
+    while stack:
+        node = stack.pop()
+        for child in getattr(node, "dependencies", None) or []:
+            if child.call is not None:
+                seen.add(child.call)
+            stack.append(child)
+    return seen
+
+
+def observed(app: Any) -> dict[str, str]:
+    """Every route the application serves, mapped to the guard its dependency tree enforces."""
+    from fastapi.routing import iter_route_contexts
+    from starlette.routing import Host, Mount, WebSocketRoute
+
+    from app.dependencies import get_current_admin, get_current_user
+
     routes: dict[str, str] = {}
-    for path in sorted(ROUTERS.glob("*.py")):
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        prefix = _router_prefix(tree)
-        for node in tree.body:
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for decorator in node.decorator_list:
-                method = _route_method(decorator)
-                if method is None:
-                    continue
-                route = f"{method} {prefix}{_route_path(decorator)}"
-                routes[route] = _guard_of(node, source)
+    for context in iter_route_contexts(app.routes):
+        route = getattr(context, "original_route", context)
+        path = getattr(context, "path", None) or getattr(route, "path", "?")
+        if isinstance(route, Mount | Host):
+            routes[f"MOUNT {path}"] = "open"
+            continue
+        calls = _calls(getattr(context, "dependant", None))
+        if get_current_admin in calls:
+            guard = "admin"
+        elif get_current_user in calls:
+            guard = "user"
+        else:
+            guard = "open"
+        # A WebSocket route has no methods and is not in the OpenAPI schema, so a methods-only
+        # inventory dropped it without a word (second review of brief 0073): an unauthenticated
+        # `@app.websocket` was served and declared nowhere. FastAPI's APIWebSocketRoute subclasses
+        # starlette's WebSocketRoute, so one test covers both.
+        if isinstance(route, WebSocketRoute):
+            routes[f"WS {path}"] = guard
+            continue
+        methods = set(getattr(context, "methods", None) or [])
+        if not methods:
+            # A route kind this checker does not know is a route it cannot classify: the gate
+            # says so instead of skipping it, and no declaration can silence that.
+            fail(
+                f"{type(route).__name__} {path} is served but has no HTTP method and is not a "
+                "known route kind — the inventory cannot classify it"
+            )
+            continue
+        explicit = methods - IMPLIED_METHODS or methods
+        for method in sorted(explicit):
+            routes[f"{method} {path}"] = guard
     return routes
 
 
-def _router_prefix(tree: ast.Module) -> str:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "APIRouter":
-            for keyword in node.keywords:
-                if keyword.arg == "prefix" and isinstance(keyword.value, ast.Constant):
-                    return str(keyword.value.value)
-    return ""
-
-
-def _route_method(decorator: ast.expr) -> str | None:
-    if not (isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute)):
-        return None
-    if decorator.func.attr not in METHODS:
-        return None
-    return decorator.func.attr.upper()
-
-
-def _route_path(decorator: ast.Call) -> str:
-    if decorator.args and isinstance(decorator.args[0], ast.Constant):
-        return str(decorator.args[0].value)
-    for keyword in decorator.keywords:
-        if keyword.arg == "path" and isinstance(keyword.value, ast.Constant):
-            return str(keyword.value.value)
-    return "?"
-
-
-def _guard_of(node: ast.FunctionDef | ast.AsyncFunctionDef, source: str) -> str:
-    """Read the guard out of the parameter defaults only.
-
-    Deliberately not a substring search over the whole function: a handler that merely
-    mentions `get_current_admin` in a comment or calls it internally is not guarded by it.
-    FastAPI enforces a dependency only when it appears as a parameter default.
-    """
-    names = set()
-    for default in [*node.args.defaults, *node.args.kw_defaults]:
-        if default is None:
-            continue
-        segment = ast.get_source_segment(source, default) or ""
-        if "get_current_admin" in segment:
-            names.add("admin")
-        elif "get_current_user" in segment:
-            names.add("user")
-    if "admin" in names:
-        return "admin"
-    if "user" in names:
-        return "user"
-    return "open"
+def openapi_operations(app: Any) -> set[str]:
+    operations: set[str] = set()
+    for path, item in (app.openapi().get("paths") or {}).items():
+        for method in item:
+            if method.upper() in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                operations.add(f"{method.upper()} {path}")
+    return operations
 
 
 def main() -> int:
@@ -115,24 +140,31 @@ def main() -> int:
 
     data = tomllib.loads(DECLARATION.read_text(encoding="utf-8"))
     declared = {r["route"]: r for r in data.get("routes", [])}
-    actual = observed()
+    app = _booted_app()
+    actual = observed(app)
+
+    for operation in sorted(openapi_operations(app) - set(actual)):
+        fail(
+            f"{operation} is in the served OpenAPI schema but not among the routes the "
+            "application dispatches — the inventory is incomplete"
+        )
 
     for route in sorted(set(actual) - set(declared)):
         fail(
-            f"{route} exists in the code but is not declared in rules/route-guards.toml "
+            f"{route} is served by the application but not declared in rules/route-guards.toml "
             f"(it currently enforces `{actual[route]}`) — every route needs a guard decision"
         )
 
     for route in sorted(set(declared) - set(actual)):
-        fail(f"{route} is declared in rules/route-guards.toml but no such route exists")
+        fail(f"{route} is declared in rules/route-guards.toml but the application serves no such route")
 
     for route in sorted(set(declared) & set(actual)):
         want = declared[route].get("guard")
-        if want not in ("admin", "user", "open"):
+        if want not in GUARDS:
             fail(f"{route} declares guard `{want}`, which is not one of admin/user/open")
             continue
         if want != actual[route]:
-            fail(f"{route} declares `{want}` but the handler enforces `{actual[route]}`")
+            fail(f"{route} declares `{want}` but the route enforces `{actual[route]}`")
         if want == "open" and not str(declared[route].get("reason", "")).strip():
             fail(f"{route} is declared open with no reason — an open route must justify itself")
 

@@ -90,11 +90,13 @@ def _reset_login_rate_limit() -> None:
     """The limiter is module state and outlives a TestClient. Without this, a suite that
     logs in repeatedly trips it in whichever test happens to run tenth — a failure that
     moves when tests are reordered."""
-    from app import rate_limit
+    from app import audit, rate_limit
 
     rate_limit.reset_all()
+    audit.reset_refusals()  # the same for the coalesced registration refusals (brief 0073)
     yield
     rate_limit.reset_all()
+    audit.reset_refusals()
 
 
 @pytest.fixture

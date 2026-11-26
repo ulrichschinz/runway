@@ -80,17 +80,23 @@ returning **403** when the principal is authenticated but not an admin — disti
 
 ## The route guard declaration
 
-[`rules/route-guards.toml`](../rules/route-guards.toml) names every HTTP route and the guard
-it requires. It is normative: **`RULE-SEC-001`** fails the gate when the file and the code
-disagree in either direction, and `tools/checks/route_guards.py` reads the guard out of the
-handler's parameter defaults — where FastAPI actually enforces a dependency — rather than by
-searching the function text.
+[`rules/route-guards.toml`](../rules/route-guards.toml) names every HTTP route the application
+serves and the guard it requires. It is normative: **`RULE-SEC-001`** fails the gate when the file
+and the running application disagree in either direction. Since brief 0073 (`RISK-SEC-005`,
+ADR 0047) `tools/checks/route_guards.py` boots the application and takes its inventory from
+`fastapi.routing.iter_route_contexts(app.routes)` — every route FastAPI dispatches to, wherever it
+was declared, with included routers' prefixes and dependencies applied — and reads each route's
+guard from its **resolved dependency tree**, which is what FastAPI runs, router-level dependencies
+included. The served OpenAPI operations must all be in that inventory, and a mounted
+sub-application is declared as `MOUNT <path>` and a WebSocket route as `WS <path>` — it has no HTTP method and no OpenAPI entry, so until the second review of brief 0073 the inventory dropped it silently; a route kind with no methods that the checker does not know fails the gate. Before, it parsed `backend/app/routers/*.py` only, and
+six served routes — `GET /health`, the three methods of `/mcp` and the framework's documentation
+routes — were declared nowhere.
 
 | Guard | Meaning |
 |---|---|
-| `admin` | `Depends(get_current_admin)` — authenticated, and `role = 'admin'` |
-| `user` | `Depends(get_current_user)` — any authenticated principal |
-| `open` | reachable unauthenticated, or authenticating by some other means |
+| `admin` | `get_current_admin` in the dependency tree — authenticated, and `role = 'admin'` |
+| `user` | `get_current_user` in the tree (and not the admin guard) — any authenticated principal |
+| `open` | neither: reachable unauthenticated, or authenticating by some other means |
 
 **Adding a route means adding a line to that file.** That is the point of it. A forgotten
 guard fails silently — the route works, it just works for everybody — which is not something
@@ -98,7 +104,11 @@ a passing test suite notices, and not something a reviewer reliably notices eith
 the evidence is one missing parameter default among thirty handlers.
 
 An `open` route must record a `reason`. A route anyone can reach is a decision, and a
-decision with no recorded reason cannot be told apart from an oversight. Five are open today:
+decision with no recorded reason cannot be told apart from an oversight. Thirteen are open today —
+the five below, and eight infrastructure routes outside the routers package whose reasons are in the
+declaration file: `GET /health` (the healthcheck and post-deploy probe), `POST`/`GET`/`DELETE /mcp`
+(the transport; each tool call is a request to its own route and meets that route's guard, ADR 0045),
+and `GET /openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc` (the public schema of a public API):
 
 - `POST /auth/register` and `POST /auth/login` — the routes that create and exchange
   credentials cannot require them. Registration is additionally gated at runtime by the
@@ -464,10 +474,13 @@ third-party argument parser, and it could change in any release — as the theme
   `localStorage`, so a viewer can make the admin UI appear. Every `/admin` route is guarded
   server-side, so the result is 403s rather than access — a display bug, not a privilege
   escalation. Recorded as `RISK-SEC-001`.
-- **`role` has no database-level constraint.** The column is `TEXT DEFAULT 'user'` and would
-  accept anything written outside the application. Every in-application writer validates
-  against `VALID_ROLES`; a value written by hand would not be an admin, so it fails closed.
-  Recorded as `RISK-SEC-002`.
+- **`role` is constrained only from schema version 1 on.** Version 1 (brief 0073, ADR 0047)
+  rebuilds `users` with `role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin'))`, so a
+  value written outside the application is refused by the database. A database that already holds
+  such a value refuses the rebuild instead (ERROR `schema migration refused`, counted, never named)
+  and stays at version 0, where the column is the old `TEXT DEFAULT 'user'`; every in-application
+  writer validates against `VALID_ROLES` and an unrecognised value is not an admin, so it still fails
+  closed. Recorded as `RISK-SEC-002` until production reports version 1.
 - **The login limiter is in-process and per-worker** (`RISK-SEC-003`). Under one host and
   one worker — decision F1 — that is the whole population; a second worker would multiply the
   effective limit by the process count. The re-open trigger is executable:

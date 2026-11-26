@@ -92,8 +92,10 @@ async def registration_status(db: Connection = Depends(get_db)):
 @router.post("/register", response_model=UserInfo, status_code=status.HTTP_201_CREATED)
 async def register(request: Request, body: UserCreate, db: Connection = Depends(get_db)):
     route = audit.route_of(request)
+    # Unauthenticated and unthrottled: every refusal here goes through `record_refusal`, one row per
+    # kind and window with a count, so a client cannot grow audit.db at its request rate (brief 0073).
     if not await get_allow_registration(db):
-        audit.record(
+        audit.record_refusal(
             audit.REGISTERED,
             outcome=audit.REFUSED,
             actor=body.username,
@@ -106,7 +108,7 @@ async def register(request: Request, body: UserCreate, db: Connection = Depends(
     # name it will not accept, so the OpenAPI document does not move.
     problem = username_problem(body.username)
     if problem:
-        audit.record(
+        audit.record_refusal(
             audit.REGISTERED,
             outcome=audit.REFUSED,
             actor=body.username,
@@ -119,7 +121,7 @@ async def register(request: Request, body: UserCreate, db: Connection = Depends(
     try:
         account = await create_account(db, body.username, hash_for(phase, body.password))
     except Exception as e:
-        audit.record(
+        audit.record_refusal(
             audit.REGISTERED,
             outcome=audit.FAILURE,
             actor=body.username,

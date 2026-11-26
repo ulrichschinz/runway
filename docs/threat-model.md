@@ -81,24 +81,23 @@ every writer of the same `users.db` on one host; it relies on SQLite file lockin
 filesystem without working locks would void it (not a supported deployment).
 
 **Enforced**
-- `RULE-SEC-001` — every route in [`backend/app/routers/`](../backend/app/routers) declares its guard
-  in [`rules/route-guards.toml`](../rules/route-guards.toml), the declaration must match the guard the
-  handler's parameter defaults actually enforce, and an `open` route must carry a reason. Thirty-nine
-  routes: thirty `user`, four `admin`, five `open`.
+- `RULE-SEC-001` — every route the booted application serves declares its guard in
+  [`rules/route-guards.toml`](../rules/route-guards.toml), the declaration must match the guard the
+  route's resolved dependency tree enforces, and an `open` route must carry a reason. Fifty routes:
+  thirty-three `user`, four `admin`, thirteen `open` (brief 0073).
 - `RULE-GOV-001` — the live branch protection matches [`ops/github/ruleset.json`](../ops/github/ruleset.json),
   so the rule that an unverified commit cannot reach `main` is itself checked-in state.
 - `RULE-TEST-001` and `RULE-TEST-002` — the bootstrap branches, the last-admin refusal and the
   cross-tenant isolation tests run on every gate, the second against the real Taskwarrior binary.
 
 **Asserted**
-- **The route-guard rule does not see the whole surface.** `tools/checks/route_guards.py` globs
-  `backend/app/routers/*.py` only. The served schema has **40** operations
-  ([`ops/surfaces/openapi.json`](../ops/surfaces/openapi.json)) and the declaration file has 39: the
-  odd one is `GET /health` at [`backend/app/main.py:91-93`](../backend/app/main.py), declared on the
-  app object. Harmless in itself, and the proof that the next route added there would need no guard
-  declaration. `RISK-SEC-005`.
-- The `role` column is `TEXT` with no database constraint, so a value written outside the application
-  is not rejected — closed rather than open, since an unrecognised value is not `admin`. `RISK-SEC-002`.
+- **The route-guard rule sees what the application object serves, not what is in front of it.** Since
+  brief 0073 the inventory is the booted app (`GET /health`, `/mcp` and the documentation routes
+  included). What it cannot see: a path nginx answers itself, and a handler that authenticates inside
+  its body instead of by dependency (classified `open`, so it must be declared with a reason).
+  `RISK-SEC-005`.
+- The `role` column refuses anything but `user` and `admin` (`CHECK`, schema version 1, brief 0073) —
+  once the database has reached version 1, which a hand-written role prevents. `RISK-SEC-002`.
 - One maintainer means no independent review of a change to the rules themselves. `RISK-GOV-001`.
 - The deploy host operator is trusted absolutely and nothing here observes them. `RISK-OPS-002`.
 
@@ -187,8 +186,12 @@ is the one place `--` cannot protect. It is now `+LATEST`, Taskwarrior's own vir
 ### Request bodies
 
 Pydantic models at [`backend/app/models.py`](../backend/app/models.py) constrain types. They
-constrain nothing else — there is no `Field(max_length=...)`, no `constr`, no bound of any kind on
-any string field in that file. `RISK-SEC-004`.
+bound every free-text field too, since brief 0073 (plan M8): username 256 characters at login and
+registration, description 2 000 characters, annotation and inbox note 32 KiB of UTF-8 (the capture
+clients' cut), date-like fields 64, tags 100 each and 50 per task, plan texts 20 000. One past a
+limit is 422 while the body is parsed; an `E2BIG` from `execve` that still occurs is 413
+(`task_runner.ArgumentTooLong`), not 500. Volume — how many tasks one account writes — is not bounded.
+`RISK-SEC-004`.
 
 ### Headers, and the three credential shapes
 
@@ -230,8 +233,8 @@ parameter and no body; the archive is built from a fixed file list under one dir
 no name for a caller to supply and therefore nothing to traverse. What they *disclose* is in §8.
 
 **Asserted**
-- No length limit on any request field, and no body-size limit from uvicorn or Starlette. A capacity
-  question, excluded by decision **F1** and recorded rather than assumed. `RISK-SEC-004`.
+- Field and body sizes are bounded (brief 0067, brief 0073); the number of tasks an account writes is
+  not. A capacity question, excluded by decision **F1** and recorded rather than assumed. `RISK-SEC-004`.
 - `--` is a property of a third-party argument parser. It is pinned and tested, not owned.
 - The audit log's route template protects one sink. Nothing structurally prevents a future call site
   from logging a raw path.
@@ -472,18 +475,22 @@ and CORS is closed.
 - `RULE-SURF-001` — the migrated database schema, the served OpenAPI schema, the runtime MCP tool
   list, the Taskwarrior template and the SPA's routes and `localStorage` keys are all snapshotted, so
   none of them moves silently.
+- `RULE-SURF-005` — the schema a fresh database gets and the one every historical baseline is migrated
+  to are semantically identical (brief 0073).
 - `RULE-HYG-001` and `RULE-HYG-002` — no store is tracked in git, and `.gitignore` covers each.
 - `RULE-TEST-002` — cross-tenant isolation is tested against the real binary, so the boundary these
   directories provide is exercised rather than reasoned about.
 
 **Asserted**
-- **A fresh database and a migrated one do not have the same schema, and the snapshot only ever
-  describes the fresh one.** `CREATE_USERS` declares `api_key TEXT UNIQUE`; the migration that
-  back-fills the column declares plain `TEXT`, because SQLite cannot add a `UNIQUE` column by
-  `ALTER TABLE`. Production is the migrated kind. `RULE-SURF-001` compares the snapshot against
-  itself and passes. `RISK-SURF-001`.
-- **Nothing prunes `audit.db`**, and nothing measures it. Roughly one row per authenticated request,
-  on the same partition as `users.db` and the task data. `RISK-OPS-006`.
+- **That production has reached schema version 1 is not visible from here.** Since brief 0073 a fresh
+  and a migrated database end with the same `users` table (version 1 rebuilds it, with the role
+  `CHECK`), and `RULE-SURF-005` builds every historical baseline and compares it with a fresh one. A
+  production database with a hand-written role refuses the step and stays at version 0 with an ERROR;
+  `verify-deploy` fails on that. `RISK-SURF-001`, `RISK-SEC-002`.
+- **Nothing prunes `audit.db`.** It is measured at boot and hourly, with a high-water mark and a WARNING
+  above `AUDIT_DB_WARN_BYTES` (brief 0073), but its growth — roughly one row per authenticated request, on
+  the same partition as `users.db` and the task data — is unbounded until the retention decision (D7,
+  ADR 0047). `RISK-OPS-006`.
 - There are now two files to back up. `users.db` alone is no longer a complete backup of this
   deployment's state.
 - Backups themselves are outside this repository entirely — nothing here creates, encrypts, verifies
@@ -671,8 +678,9 @@ administrator cannot be demoted. Both branches are audited, including the refusa
 `noop: an admin already exists`, which is the evidence that the recovery path did *not* fire on a
 given start ([`backend/app/main.py:38-42`](../backend/app/main.py)).
 
-**Not stopped:** anyone with shell on the deploy host can write the `role` column directly, and
-nothing at the database level would refuse it. `RISK-SEC-002`.
+**Not stopped:** anyone with shell on the deploy host can write the `role` column directly. Since
+schema version 1 (brief 0073) the database refuses a value that is not a role, but `admin` is a role:
+the constraint stops a typo or a third role, not an operator. `RISK-SEC-002`.
 
 ### Log and audit poisoning
 
@@ -705,9 +713,10 @@ minutes old — and the re-open trigger is the first field here that is not alre
 Largely **out of scope by decision F1**, and stated rather than assumed. What exists: `timeout=10` on
 the Taskwarrior call, so a hung binary is a failed request rather than a worker that never returns;
 `restart: unless-stopped` and healthchecks in both compose files; container log rotation at 50 MB per
-service, checked in. What does not exist: any request size limit (`RISK-SEC-004`), any pruning of
-`audit.db` (`RISK-OPS-006`), any capacity budget, and any measurement of the partition all three
-stores share.
+service, checked in; request bodies and fields bounded (briefs 0067 and 0073). What does not exist: a
+bound on how much one account writes (`RISK-SEC-004`), any pruning of
+`audit.db` (`RISK-OPS-006`; it is measured and warned about since brief 0073), any capacity budget, and
+any measurement of the partition all three stores share.
 
 **The MCP endpoint is the exception** (finding REV-004, brief 0071, ADR 0045). It used to keep a session
 — a server transport and a task — for every `initialize`, anonymous ones included, with no expiry and no
@@ -735,9 +744,11 @@ record, and [`AGENTS.md`](../AGENTS.md) §10 carries the short form.
   Several controls above depend on that and say so — the login limiter's counters are per-process
   (`RISK-SEC-003`), and the three stores sharing one partition is only survivable at this size
   (`RISK-OPS-006`).
-- **Nothing here reaches production.** Every claim about the deploy host is a transcription of a read
-  taken on a date, and nothing continuously compares the checked-in copy against the host
-  (`RISK-OPS-002`). CI has no host access; closing it needs a scheduled job somewhere that does.
+- **Nothing here reaches the host itself.** After every deploy `verify-deploy` checks what the running
+  server reports — commit, build id, the SHA-256 of the baked and of the host-applied compose file, the
+  schema version — and that the registry's `:latest` and `:<sha>` are the digest this run pushed
+  (brief 0073). Between deploys nothing compares, and which digest the host's container runs is inferred
+  through the build id, not read (`RISK-OPS-002`). Every other claim about the host is a dated read.
 - **Physical, host and network security are outside the boundary.** No claim is made about the
   operating system, the SSH configuration, Traefik, TLS renewal, or backups.
 - **Frontend rendering, routing and gestures are untested** (`RISK-TEST-004`), and the container test

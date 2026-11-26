@@ -73,11 +73,25 @@ Steps 2 and 4 are there for a failure the gate structurally cannot see: it build
 **503** in production. The same comparison catches an image built from a different commit than the one
 being verified, and a deploy that never reached the host at all.
 
-What it does **not** do is read the host. `/opt/services/runway/docker-compose.yml` is still unobserved, so
-a compose that drifted — or a deploy that never rewrote it — looks exactly like one that did for as long as
-the containers already running answer correctly. `RISK-OPS-002` stays open, narrowed: "the deploy reported
-success" and "this commit is serving production" are now two separate claims, and the second one is
-checked.
+Since brief 0073 the same step also checks **which image, under which compose, at which schema version**
+(`RISK-OPS-002`, ADR 0047 Decision 4). `GET /api/skill`'s `server` object reports:
+
+| field | what it is | must equal |
+|---|---|---|
+| `build` | `/app/BUILD_ID`, the workflow run id baked by `ARG RUNWAY_BUILD` | this run's `GITHUB_RUN_ID` |
+| `compose_sha256` | SHA-256 of `/opt/stack/docker-compose.yml`, the compose baked into the image | SHA-256 of `ops/deploy/docker-compose.yml` at this commit |
+| `applied_compose_sha256` | SHA-256 of the host's own `./docker-compose.yml`, which the deploy compose mounts read-only at `/etc/runway/applied-compose.yml` | the same |
+| `schema_version` | the version `init_db()` left `users.db` at ([Schema migrations](#schema-migrations)) | the `-- schema_version` line of `ops/surfaces/db-schema.sql` |
+
+Only hashes and a number leave the container; the file is never served. An `applied_compose_sha256` that is
+`null` or differs is the failure this repository could not see before: the host script did not write the
+compose the image carries, and the new image is running under the old configuration. A second step then asks
+the registry (`docker buildx imagetools inspect`) whether `:latest` and `:<sha>` resolve to the digest
+`build-and-push` pushed.
+
+What it still does **not** do is read the host: CI has no access, so which digest the host's container runs is
+inferred — the build id is baked only into the image this run pushed — not observed, and between deploys
+nothing compares anything. `RISK-OPS-002` stays open, narrowed to that.
 
 ### The correction of 2026-08-31
 
@@ -534,6 +548,38 @@ one `ALTER TABLE`.
 **Nothing prunes this file.** It grows for the life of the deployment, on the same partition as `users.db`
 and `data/`. Recorded as `RISK-OPS-006`, with the trigger to come back to it.
 
+### The size of the audit log
+
+Since brief 0073 the backend measures the file at boot and every hour and logs one line:
+
+```
+INFO    audit store size  audit_db_bytes=…  audit_db_high_water_bytes=…  audit_db_warn_bytes=104857600
+WARNING audit store size  …  hint="over AUDIT_DB_WARN_BYTES; nothing prunes it …"
+```
+
+`audit_db_bytes` is `audit.db` plus its `-wal` and `-shm` files; `audit_db_high_water_bytes` is the largest
+size ever measured, kept in the file's own `audit_meta` table, so it still says how large the store was after
+an archive or a `VACUUM`. The threshold is `AUDIT_DB_WARN_BYTES` (README). Watch for the WARNING:
+
+```sh
+# on the deploy host
+docker compose logs backend | grep '"audit store size"' | tail -1
+```
+
+**What to do at the warning is not automated, on purpose.** How long audit rows must be kept — and which
+must outlive that, because a revocation, a role change or a storage migration is evidence — is the
+operator's decision (gate D7 of the remediation plan, [ADR 0047](adr/0047-audit-retention-and-versioned-migrations.md)
+Decision 1, which also lists what the eventual retention job must respect). Until it is taken nothing in
+this repository deletes, archives or vacuums a row. Free space on the partition is the operator's to watch
+(`df -h /opt/services/runway`).
+
+**Refusals an anonymous caller can repeat are one row per window, with a count.** A refused login is
+reported by the limiter (`auth.login.throttled … (refusals: N)`, brief 0069); a refused registration
+(`auth.registered`, outcome `refused`/`failure`) writes its first row of a kind in a login window as before,
+and the rest are carried as `… (refusals: N)` by the next row of that kind or by a summary
+`…: N further refusals in the last window` (hourly, and at shutdown). So such rows cannot grow the file at
+a client's request rate; to count refused registrations, sum the `N`s rather than the rows.
+
 ### Is anyone still using the Bearer-as-API-key shape?
 
 The question `SHIM-SEC-006` has been blocked on since Step 13, and the reason this table exists. Three
@@ -612,6 +658,47 @@ docker compose logs --no-log-prefix backend | jq -r 'select(.request_id == "1e4c
 wrapped, and a failure is logged at `ERROR` as `the audit event could not be written` and the request is
 served anyway. So if a row seems absent, grep the log stream for that message before concluding the event
 did not happen.
+
+## Schema migrations
+
+`init_db()` runs at every start (ADR 0025, ADR 0047). First the **additive baseline** — the frozen list of
+`ALTER TABLE` statements every historical database needs — then the **versioned steps**, each applied once,
+in one transaction, and recorded in `schema_migrations`:
+
+```sh
+# on the deploy host: which version is this database at?
+cd /opt/services/runway
+sqlite3 users.db 'SELECT version, name, datetime(applied_at, "unixepoch") FROM schema_migrations;'
+```
+
+The boot also says it: one INFO line `schema migration applied` (with `schema_version`) the first time a
+step runs, and `GET /api/skill` reports `server.schema_version`, which `verify-deploy` compares with the
+`-- schema_version` line of `ops/surfaces/db-schema.sql`.
+
+**Version 1 — `users` in one declared shape** (brief 0073). The table is rebuilt with the same columns and
+data, a `CHECK (role IN ('user', 'admin'))`, and without the `UNIQUE` on `api_key` that only fresh databases
+had. Ids and the id sequence are kept; every index and trigger is re-created. `role` NULL or empty becomes
+`user`. **A role that is neither refuses the step**: the boot continues at version 0 and logs
+
+```
+ERROR schema migration refused  migration_version=1  migration_error="N account(s) carry a role ..."
+```
+
+and `verify-deploy` fails on `schema_version`. Find and fix the rows, then restart the backend — the step
+runs again at the next boot:
+
+```sh
+sqlite3 users.db "SELECT id, role FROM users WHERE role NOT IN ('user', 'admin');"
+sqlite3 users.db "UPDATE users SET role='user' WHERE id=<id>;"   # or 'admin', deliberately
+docker compose restart backend
+```
+
+**Rollback.** The previous image boots on a rebuilt database and serves it unchanged: it ignores
+`schema_migrations`, and its additive loop finds every column present. Rolling forward again does not re-run
+a step. Taking a copy of `users.db` before the first deploy of a new step stays the rule (plan §7).
+
+**Version 2 — the API-key contract — is not shipped.** It drops `users.api_key` after the legacy cutoff
+(2027-01-15) and its soak, in its own change (ADR 0044).
 
 ## Moving task storage off the username
 

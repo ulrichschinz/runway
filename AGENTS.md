@@ -92,7 +92,7 @@ expand → migrate → switch → contract — not a changelog line.
 | REST API (43 routes) | Breaking changes go through the migration pattern. The served OpenAPI schema is snapshotted in `ops/surfaces/openapi.json`. |
 | **MCP tools (27)** | Allowlist: tags `tasks`, `gtd`, `projects`, `inbox`, plus `health` and `me` (ADR 0037); auth/admin are REST-only. Tool names are FastAPI **operation ids** — function, path, method (`create_task_tasks_post`). Observed at boot; snapshot in `ops/surfaces/mcp-tools.json`, enforced by `RULE-SURF-001`. Renaming an exposed route's function renames its tool: a breaking change. Stateless Streamable HTTP at `/api/mcp`, budgeted; a call runs only its own handler (ADR 0045). `backend/tests/unit/test_mcp_session.py` is a real client (ADR 0033). |
 | Auth: `Authorization: Bearer <jwt>`, `X-Api-Key`, and Bearer-as-API-key everywhere | The third form is `SHIM-SEC-006`, a dated compatibility shim in `rules/shims.yaml`, not a design. `RULE-SEC-002` fails the gate when it expires. |
-| SQLite schema | Forward-only, additive. Migrations run in `init_db()` on every start, and the migrated schema is snapshotted in `ops/surfaces/db-schema.sql`. |
+| SQLite schema | Forward-only: additive baseline, then numbered steps (ADR 0047), run by `init_db()` at boot. Snapshot `ops/surfaces/db-schema.sql`; `RULE-SURF-005`: fresh = upgraded. |
 | Taskwarrior data and `backend/taskrc_template.txt` | **Urgency coefficients are a behavioural contract** — changing one re-orders every user's list. Existing users' `.taskrc` files are *not* updated. |
 | Container images | `:latest` plus an immutable `:<commit-sha>` — the rollback target. |
 | Env vars, SPA routes, localStorage keys | Every variable the app reads is documented in `README.md` and `RULE-SURF-002` fails when the two disagree in either direction. SPA routes and storage keys are snapshotted in `ops/surfaces/spa.json`. |
@@ -163,9 +163,9 @@ Recorded so a green gate is not mistaken for a broader guarantee:
 - **Frontend rendering, routing and gestures are untested** (`RISK-TEST-004`). The tests
   cover the pure logic where every shipped frontend defect actually was.
 - **The container test tier cannot run on arm64** (`RISK-TEST-001`); CI runs it.
-- **Nothing compares the deploy host against this repository** (`RISK-OPS-002`). CI has no
-  host access; after a deploy it asks the running server which commit it serves. The host's
-  compose file is a copy, matched by hand on 2026-08-28.
+- **The deploy host is seen only through the server** (`RISK-OPS-002`). CI has no host
+  access; after a deploy it checks the server's commit, build, compose hashes and schema
+  version, and the registry's digest — not the host's.
 - **Transitive dependencies are not pinned as a whole.** One incident already came from
   that; `RULE-DEP-001` makes the gap survivable, not closed.
 - **What the gate does *not* hold** is written down section by section in

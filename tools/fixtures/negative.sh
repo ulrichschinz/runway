@@ -360,6 +360,58 @@ p.write_text(t)
 NEWROUTE
 expect_red "SEC-001-new" "tools/checks/route-guards.sh" "RULE-SEC-001"
 
+# --- RULE-SEC-001 — a route arrives outside the routers package ---------------
+# RISK-SEC-005, brief 0073: the checker used to glob backend/app/routers/*.py, so a route declared
+# on the app object beside GET /health was invisible and the gate stayed green. The inventory is
+# now the booted application; this arm is the one the old checker could not fail.
+python3 - "$SANDBOX/backend/app/main.py" <<'OUTSIDEROUTE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+t += '\n\n@app.get("/undeclared-beside-health")\ndef undeclared_beside_health():\n    return {}\n'
+p.write_text(t)
+OUTSIDEROUTE
+expect_red "SEC-001-outside" "tools/checks/route-guards.sh" "RULE-SEC-001"
+
+# --- RULE-SEC-001 — a WebSocket route arrives with no guard decision ----------
+# Second review of brief 0073: the inventory keyed routes by HTTP method, and a WebSocket route has
+# none and is not in the OpenAPI schema, so an unauthenticated `@app.websocket` was served and the
+# gate stayed green. It must be declared as `WS <path>` like any other route.
+python3 - "$SANDBOX/backend/app/main.py" <<'WSROUTE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+t += '\n\n@app.websocket("/undeclared-socket")\nasync def undeclared_socket(websocket):\n    await websocket.accept()\n'
+p.write_text(t)
+WSROUTE
+expect_red "SEC-001-ws" "tools/checks/route-guards.sh" "RULE-SEC-001"
+
+# --- RULE-SEC-001 — a router-level guard is dropped --------------------------
+# A guard can also be a dependency of the whole router, which no parameter default shows. Take the
+# admin guard off one handler and put a user guard on the router instead: the route still requires
+# a credential, just the wrong one, and only the resolved dependency tree says so.
+python3 - "$SANDBOX/backend/app/routers/admin.py" <<'ROUTERGUARD'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "username: str = Depends(get_current_admin), db: Connection = Depends(get_db)\n"
+assert old in t, "admin guard signature not found"
+t = t.replace(old, "db: Connection = Depends(get_db)\n", 1)
+old_router = 'APIRouter(prefix="/admin"'
+assert old_router in t, "admin router declaration not found"
+t = t.replace(old_router, 'APIRouter(dependencies=[Depends(get_current_user)], prefix="/admin"', 1)
+if "get_current_user" not in t.split("router =")[0]:
+    t = "from app.dependencies import get_current_user\n" + t
+p.write_text(t)
+ROUTERGUARD
+expect_red "SEC-001-router" "tools/checks/route-guards.sh" "RULE-SEC-001"
+
 # --- RULE-SEC-002 — a compatibility shim outlives its expiry -----------------
 # The contract step of a migration is the one that gets skipped: the old shape keeps
 # working, nothing fails, and "temporary" becomes permanent by default. Backdate the expiry
@@ -403,6 +455,23 @@ assert old in t, "urgency coefficient not found"
 p.write_text(t.replace(old, "urgency.user.tag.next.coefficient=99.0", 1))
 MOVESURFACE
 expect_red "SURF-001" "tools/checks/surfaces.sh" "RULE-SURF-001"
+
+# --- RULE-SURF-005 — a CREATE statement edited instead of migrated -----------
+# The drift RISK-SURF-001 was: a fresh database gets the new shape, a database that already has the
+# table never sees it. Add a column to a CREATE, accept the snapshot (so RULE-SURF-001 is satisfied,
+# as it was for seven months), and require the upgrade comparison to say so.
+python3 - "$SANDBOX/backend/app/database.py" <<'EDITCREATE'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+old = "    status TEXT NOT NULL CHECK (status IN ('active', 'on_hold', 'done')),\n"
+assert old in t, "project_status CREATE not found"
+p.write_text(t.replace(old, old + "    note TEXT DEFAULT '',\n", 1))
+EDITCREATE
+(cd "$SANDBOX" && backend/.venv/bin/python tools/surfaces.py --update >/dev/null 2>&1) || true
+expect_red "SURF-005" "tools/checks/surfaces.sh" "RULE-SURF-005"
 
 # --- RULE-SURF-002 — README documents a variable nothing reads --------------
 # Exactly the PORT drift this rule was written for: an operator sets it and gets silence.

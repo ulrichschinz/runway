@@ -1,17 +1,21 @@
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from app import audit, mcp_gate, rate_limit, startup_checks, task_storage
+from app import audit, database, mcp_gate, rate_limit, startup_checks, task_storage
 from app.auth import prepare_dummies
 from app.config import cors_origin_list, settings
 from app.database import init_db, legacy_cutoff, legacy_cutoff_problem
 from app.logging_setup import configure_logging, resolve_level
 from app.middleware import BodyLimitMiddleware, RequestIdMiddleware
 from app.routers import admin, auth, gtd, inbox, projects, skill, tasks
+from app.services import skill_service, task_service
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +38,8 @@ async def lifespan(app: FastAPI):
     # first thing there would otherwise be nowhere to write.
     audit.init_store()
     bootstrap_reason = await init_db()
+    # Reported by GET /skill for the post-deploy check (brief 0073, RISK-OPS-002).
+    skill_service.record_schema_version(database.applied_schema_version)
     # bootstrap_admin has always returned a string naming the branch it took, and the caller
     # has always thrown it away. It is recorded here because a role change that happens at
     # boot, with no request and no acting principal, is the one role change that leaves no
@@ -44,6 +50,10 @@ async def lifespan(app: FastAPI):
         outcome=audit.NOOP if bootstrap_reason.startswith("noop:") else audit.SUCCESS,
         detail=bootstrap_reason,
     )
+    # RISK-OPS-006 (brief 0073): the audit file's size, now and hourly; a WARNING above
+    # AUDIT_DB_WARN_BYTES. Measured, never pruned — retention is the operator's decision (ADR 0047).
+    audit.measure()
+    size_watch = asyncio.create_task(audit.watch_size(), name="audit.watch_size")
     # The login limiter's source tier trusts X-Forwarded-For only from these (brief 0069). A
     # skipped entry trusts fewer hops, never more — but the operator meant something by it.
     rejected = rate_limit.rejected_proxy_entries(settings.trusted_proxies)
@@ -77,9 +87,17 @@ async def lifespan(app: FastAPI):
             "legacy_key_cutoff": datetime.fromtimestamp(legacy_cutoff(), UTC).date().isoformat(),
             "mcp_max_inflight": settings.mcp_max_inflight,
             "mcp_source_max_inflight": settings.mcp_source_max_inflight,
+            "schema_version": database.applied_schema_version,
         },
     )
-    yield
+    try:
+        yield
+    finally:
+        size_watch.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await size_watch
+        # Refusals counted but not yet written (brief 0073, second review) are not lost at a stop.
+        audit.flush_refusals(everything=True)
 
 
 app = FastAPI(
@@ -129,6 +147,13 @@ app.include_router(projects.router)
 app.include_router(inbox.router)
 app.include_router(admin.router)
 app.include_router(skill.router)
+
+
+@app.exception_handler(task_service.ArgumentTooLong)
+async def argument_too_long(_request: Request, exc: task_service.ArgumentTooLong) -> JSONResponse:
+    """413, not 500: the kernel refused a value as too long for `task` (RISK-SEC-004, brief 0073).
+    The request models bound every field below the kernel's limit, so this is the backstop."""
+    return JSONResponse(status_code=413, content={"detail": str(exc)})
 
 
 @app.get("/health", summary="Health check", description="Returns ok if the service is running.")

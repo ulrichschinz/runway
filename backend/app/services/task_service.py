@@ -5,8 +5,13 @@ from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.models import (
+    DEPENDS_MAX_ITEMS,
+    DESCRIPTION_MAX,
+    TAG_MAX,
+    TAGS_MAX_ITEMS,
     GtdSummary,
     LastReview,
+    LimitExceeded,
     ProjectOverview,
     Task,
     TaskCreate,
@@ -15,6 +20,10 @@ from app.models import (
 )
 from app.services import task_runner
 from app.task_storage import TaskStore
+
+# Re-exported for `app.main`'s 413 handler: be/app may reach be/services, and this keeps the
+# adapter's name out of the assembly (brief 0073, RISK-SEC-004).
+ArgumentTooLong = task_runner.ArgumentTooLong
 
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
@@ -166,6 +175,13 @@ def _tag_diff(current: list[str], desired: set[str]) -> tuple[list[str], list[st
     removes = [_validate_existing_tag(t) for t in sorted(have - desired)]
     adds = [_validate_tag(t) for t in sorted(desired - have)]
     return removes, adds
+
+
+def _check_grown_set(field: str, current: list[str], desired: set[str], bound: int) -> None:
+    """A set over `bound` is refused only when it is also larger than the stored one: a task the
+    previous deploy gave more tags or dependencies stays editable and may shrink, never grow."""
+    if len(desired) > bound and len(desired) > len(set(current)):
+        raise LimitExceeded(field, f"List should have at most {bound} items, not {len(desired)}")
 
 
 def _depends_diff(current: list[str], desired: list[str]) -> list[str]:
@@ -441,20 +457,30 @@ def modify_task(store: TaskStore, uuid: str, task: TaskModify) -> Task:
         raise ValueError("Send either tags (full set) or tags_add/tags_remove, not both")
     tags_add = [_validate_tag(t) for t in task.tags_add or []]
     tags_remove = [_validate_existing_tag(t) for t in task.tags_remove or []]
+    description = task.description
+    long_description = description is not None and len(description) > DESCRIPTION_MAX
     # Read by uuid, which matches regardless of status, so a task hidden by a future `wait`
-    # is re-tagged like any other. Needed for every set-shaped field, and for a non-empty
-    # project, whose name is validated only when it differs from the current one (D4).
+    # is re-tagged like any other. Needed for every set-shaped field, for a non-empty
+    # project, whose name is validated only when it differs from the current one (D4), and for
+    # a description over the bound, which is kept only when it is the stored one (brief 0073).
     needs_current = (
         task.tags is not None
         or bool(tags_add)
         or bool(tags_remove)
         or task.depends is not None
         or bool(task.project)
+        or long_description
     )
     current = get_task(store, uuid) if needs_current else None
+    if long_description:
+        if current is None or description != current.description:
+            raise LimitExceeded(
+                "description", f"String should have at most {DESCRIPTION_MAX} characters"
+            )
+        description = None  # the stored description, resent unchanged: nothing to write
     project_is_new = bool(task.project) and (current is None or task.project != current.project)
     mods, text = _build_args(
-        task.description,
+        description,
         task.project,
         None,
         task.priority,
@@ -473,12 +499,18 @@ def modify_task(store: TaskStore, uuid: str, task: TaskModify) -> Task:
                 desired = set(task.tags)
             else:
                 desired = (set(current.tags) | set(tags_add)) - set(tags_remove)
+            _check_grown_set("tags", current.tags, desired, TAGS_MAX_ITEMS)
+            field = "tags" if task.tags is not None else "tags_add"
+            for tag in desired - set(current.tags):
+                if len(tag) > TAG_MAX:
+                    raise LimitExceeded(field, f"A tag should have at most {TAG_MAX} characters")
             removes, adds = _tag_diff(current.tags, desired)
             mods += [f"-{t}" for t in removes] + [f"+{t}" for t in adds]
         if task.depends is not None:
             if not task.depends:
                 mods.append("depends:")
             else:
+                _check_grown_set("depends", current.depends, set(task.depends), DEPENDS_MAX_ITEMS)
                 mods += _depends_diff(current.depends, task.depends)
 
     if not mods and not text:

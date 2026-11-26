@@ -25,11 +25,33 @@ class SkillRelease(BaseModel):
 
 
 class ServerBuild(BaseModel):
-    """Which build of the server is answering."""
+    """Which build of the server is answering, under which configuration (RISK-OPS-002, brief 0073).
+
+    Hashes and numbers only: never a file, a path on the host or a value from its `.env`.
+    """
 
     commit: str = Field(
         description="The commit this image was built from, or 'dev' when it was not built "
         "by the deploy workflow."
+    )
+    build: str = Field(
+        default="dev",
+        description="The id of the deploy-workflow run that built this image, or 'dev'. Only the "
+        "image that run pushed carries it.",
+    )
+    compose_sha256: str | None = Field(
+        default=None,
+        description="SHA-256 of the deploy compose file baked into this image, or null.",
+    )
+    applied_compose_sha256: str | None = Field(
+        default=None,
+        description="SHA-256 of the compose file the host applied, as mounted read-only into the "
+        "container, or null when it is not mounted.",
+    )
+    schema_version: int | None = Field(
+        default=None,
+        description="The schema version this process left its database at, or null before it "
+        "has initialised one.",
     )
 
 

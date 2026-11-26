@@ -41,6 +41,10 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # The digest the registry assigned to the backend image this run pushed, for verify-deploy to
+    # compare with what the tags the host pulls resolve to (brief 0073, RISK-OPS-002).
+    outputs:
+      backend_digest: ${{ steps.backend.outputs.digest }}
 
     steps:
       - name: Checkout
@@ -76,6 +80,7 @@ jobs:
       # .dockerignore at the root keeps the context to the backend tree, that one file, and
       # the Claude skill the image serves (ADR 0040).
       - name: Build and push backend
+        id: backend
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -85,8 +90,11 @@ jobs:
           # Baked into /app/BUILD_COMMIT and reported by GET /skill, so a reader of the
           # running server can tell which commit is answering — the one fact that lets the
           # skill version it serves be checked against this repository (ADR 0040).
+          # RUNWAY_BUILD is this run's id, baked into /app/BUILD_ID: only the image this run pushed
+          # carries it, which is how verify-deploy tells it from another build of the same commit.
           build-args: |
             RUNWAY_COMMIT=${{ github.sha }}
+            RUNWAY_BUILD=${{ github.run_id }}
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository }}-backend:latest
             ${{ env.REGISTRY }}/${{ github.repository }}-backend:${{ github.sha }}
@@ -164,7 +172,7 @@ jobs:
   # the one this repository recorded, and did the image lose the skill tree to a
   # .dockerignore edit — a change that passes every gate and then answers 503 in production.
   verify-deploy:
-    needs: deploy
+    needs: [build-and-push, deploy]
     runs-on: ubuntu-latest
     # The deploy job above records the host's forced command as taking seconds and caps it at
     # five minutes for a cold pull. Eight leaves the poll below its full six and still bounds
@@ -172,11 +180,14 @@ jobs:
     timeout-minutes: 8
     permissions:
       contents: read
+      # To read the registry's manifests for the digest check below; nothing is pushed.
+      packages: read
     env:
       # A repository variable, not a secret: the public origin of this service. The literal
       # is the fallback so that a fork or a fresh clone needs no configuration to be correct
       # about where production is.
       RUNWAY_URL: ${{ vars.RUNWAY_PUBLIC_URL || 'https://runway.agentic-reach.com' }}
+      BACKEND_DIGEST: ${{ needs.build-and-push.outputs.backend_digest }}
 
     steps:
       # For the two files the running server is compared against. Depth 1 is enough: this
@@ -254,5 +265,73 @@ jobs:
             exit 1
           fi
 
-          printf 'Verified in production: commit %s, skill %s (%s).\n' \
-            "$commit" "$got_version" "$got_sha" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          # Brief 0073 (RISK-OPS-002): which image, under which compose, at which schema version.
+          # The build id is this run's: an image built by another run of the same commit fails here.
+          # The baked compose is this commit's file; the APPLIED one is the host's own file, mounted
+          # read-only into the container — the write the host script used to be able to skip in
+          # silence. The schema version is the one this commit's snapshot records, so a versioned
+          # step production refused (docs/operations.md, Schema migrations) fails the deploy.
+          want_compose=$(sha256sum ops/deploy/docker-compose.yml | cut -d' ' -f1)
+          want_schema=$(sed -n 's/^-- schema_version //p' ops/surfaces/db-schema.sql)
+          got_build=$(printf '%s\n' "$skill" | jq -r '.server.build // ""')
+          got_compose=$(printf '%s\n' "$skill" | jq -r '.server.compose_sha256 // ""')
+          got_applied=$(printf '%s\n' "$skill" | jq -r '.server.applied_compose_sha256 // ""')
+          got_schema=$(printf '%s\n' "$skill" | jq -r 'if .server.schema_version == null then "" else (.server.schema_version | tostring) end')
+
+          if [ "$got_build" != "$GITHUB_RUN_ID" ]; then
+            printf 'verify-deploy: serves build "%s", this run is %s — not the image this run pushed\n' \
+              "$got_build" "$GITHUB_RUN_ID" >&2
+            exit 1
+          fi
+          if [ "$got_compose" != "$want_compose" ]; then
+            printf 'verify-deploy: the image carries baked compose %s, this commit has %s\n' \
+              "$got_compose" "$want_compose" >&2
+            exit 1
+          fi
+          if [ "$got_applied" != "$want_compose" ]; then
+            printf 'verify-deploy: the host applied compose "%s", this commit has %s — the host did not write it\n' \
+              "$got_applied" "$want_compose" >&2
+            printf 'Read docs/operations.md#what-says-the-deploy-actually-happened.\n' >&2
+            exit 1
+          fi
+          if [ -z "$want_schema" ] || [ "$got_schema" != "$want_schema" ]; then
+            printf 'verify-deploy: production is at schema_version "%s", this commit brings %s\n' \
+              "$got_schema" "$want_schema" >&2
+            printf 'Read docs/operations.md#schema-migrations.\n' >&2
+            exit 1
+          fi
+
+          printf 'Verified in production: commit %s, build %s, skill %s (%s), compose %s, schema %s.\n' \
+            "$commit" "$got_build" "$got_version" "$got_sha" "$got_applied" "$got_schema" \
+            >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The host pulls :latest (or :<sha> on a rollback). The running server has just proved it is
+      # the image this run built; this proves the two tags the host can pull name that same image
+      # at the registry — the digest build-and-push reported. CI cannot ask the host which digest
+      # its container runs (no host access), so this is the indirect half of the evidence (ADR 0047).
+      - name: The registry serves the digest this run pushed
+        shell: sh
+        run: |
+          set -eu
+          if [ -z "${BACKEND_DIGEST:-}" ]; then
+            printf 'verify-deploy: build-and-push reported no digest\n' >&2
+            exit 1
+          fi
+          image="$REGISTRY/$GITHUB_REPOSITORY-backend"
+          for tag in latest "$GITHUB_SHA"; do
+            got=$(docker buildx imagetools inspect "$image:$tag" --format '{{json .Manifest}}' | jq -r '.digest // ""')
+            if [ "$got" != "$BACKEND_DIGEST" ]; then
+              printf 'verify-deploy: %s:%s resolves to digest "%s"; this run pushed %s\n' \
+                "$image" "$tag" "$got" "$BACKEND_DIGEST" >&2
+              exit 1
+            fi
+          done
+          printf 'Registry: %s:latest and :%s are %s.\n' "$image" "$GITHUB_SHA" "$BACKEND_DIGEST" \
+            >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

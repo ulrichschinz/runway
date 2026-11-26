@@ -629,3 +629,85 @@ def test_a_store_that_cannot_be_initialised_does_not_stop_the_boot(
 
 def test_route_of_tolerates_a_request_that_was_never_routed(client: TestClient):
     assert audit.route_of(None) is None
+
+
+def test_an_identity_column_is_bounded_whatever_a_caller_passes(client: TestClient):
+    """Defence in depth behind the request models (review of brief 0073): an actor or subject is a
+    name, and a name a caller chose must not be able to grow a row to the size of its body."""
+    audit.record(
+        audit.LOGIN_FAILED, outcome=audit.FAILURE, actor="a" * 15_000, subject="s" * 15_000
+    )
+    row = last(audit.LOGIN_FAILED)
+    assert len(row["actor"]) <= audit.IDENTITY_MAX
+    assert len(row["subject"]) <= audit.IDENTITY_MAX
+    assert row["actor"].startswith("a" * 100)
+
+
+# --- refusals an unauthenticated caller can repeat (second review of brief 0073) -----------------
+
+
+class TestRefusedRegistrationsAreCoalesced:
+    """`POST /auth/register` is unauthenticated and has no limiter. Each refusal wrote one row, so a
+    client could grow `audit.db` linearly with its request rate (2 000 refused requests, 2 000 rows,
+    ~1 MB). Like the login limiter's reports (brief 0069), the first refusal of a kind in a window is
+    a row; the rest are counted and carried by the next row of that kind."""
+
+    def _closed(self, client: TestClient, admin: dict[str, str]) -> None:
+        client.put("/admin/settings", json={"allow_registration": False}, headers=admin)
+
+    def _refused(self, client: TestClient, n: int) -> None:
+        for i in range(n):
+            r = client.post(
+                "/auth/register", json={"username": f"x{i}", "password": "pw-long-enough"}
+            )
+            assert r.status_code == 403
+
+    def test_many_refused_registrations_write_a_bounded_number_of_rows(
+        self, client: TestClient, admin: dict[str, str]
+    ):
+        self._closed(client, admin)
+        self._refused(client, 300)
+        refused = [r for r in rows(audit.REGISTERED) if r["outcome"] == audit.REFUSED]
+        assert len(refused) == 1, len(refused)
+        assert refused[0]["actor"] == "x0"
+        assert refused[0]["detail"] == "registration is disabled on this instance"
+
+    def test_the_next_window_carries_the_count(
+        self, client: TestClient, admin: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    ):
+        clock = [1_000.0]
+        monkeypatch.setattr(audit, "_clock", lambda: clock[0])
+        self._closed(client, admin)
+        self._refused(client, 5)
+        clock[0] += settings.login_rate_window_seconds + 1
+        self._refused(client, 1)
+        refused = [r for r in rows(audit.REGISTERED) if r["outcome"] == audit.REFUSED]
+        assert len(refused) == 2
+        assert refused[1]["detail"] == "registration is disabled on this instance (refusals: 5)"
+
+    def test_a_count_no_later_refusal_carries_is_written_as_a_summary(
+        self, client: TestClient, admin: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    ):
+        clock = [1_000.0]
+        monkeypatch.setattr(audit, "_clock", lambda: clock[0])
+        self._closed(client, admin)
+        self._refused(client, 4)
+        audit.flush_refusals()  # within the window: nothing is due yet
+        clock[0] += settings.login_rate_window_seconds + 1
+        audit.flush_refusals()
+        audit.flush_refusals()  # nothing left to carry
+        refused = [r for r in rows(audit.REGISTERED) if r["outcome"] == audit.REFUSED]
+        assert [r["detail"] for r in refused] == [
+            "registration is disabled on this instance",
+            "registration is disabled on this instance: 3 further refusals in the last window",
+        ]
+        assert refused[1]["actor"] is None
+
+    def test_each_kind_of_refusal_has_its_own_row(
+        self, client: TestClient, registered: dict[str, str]
+    ):
+        for _ in range(20):
+            client.post("/auth/register", json={"username": "alice", "password": "x-long-enough"})
+            client.post("/auth/register", json={"username": "a/b", "password": "x-long-enough"})
+        details = [r["detail"] for r in rows(audit.REGISTERED) if r["outcome"] != audit.SUCCESS]
+        assert sorted(details) == ["username already taken", "username is not a plain name"]

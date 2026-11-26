@@ -31,6 +31,7 @@ required free text, and the override consumed it, so writes failed. That is a pr
 third-party argument grammar, not a control we own, and it could change in any release.
 """
 
+import errno
 import json
 import logging
 import os
@@ -94,6 +95,17 @@ class TaskwarriorRejected(ValueError):
     """
 
 
+class ArgumentTooLong(Exception):
+    """The kernel refused to start `task` because one argument, or the whole argv, is too long.
+
+    `execve` fails with E2BIG past `MAX_ARG_STRLEN` (131 072 bytes for one argument on Linux) or
+    past the total argument budget. The request models bound every field far below that
+    (RISK-SEC-004, brief 0073), so this is defence in depth: it is the caller's input, not a fault
+    of the system, and `app.main` answers it with 413 instead of the 500 an OSError used to be.
+    Neither a ValueError nor a RuntimeError on purpose, so no router's mapping catches it first.
+    """
+
+
 def reject_structural_tokens(args: list[str]) -> None:
     """Refuse anything that would reconfigure Taskwarrior rather than address a task.
 
@@ -134,16 +146,26 @@ def _run(store: TaskStore, args: list[str], text: list[str] | None = None) -> st
     if text:
         cmd += [SEPARATOR, *text]
 
-    result = subprocess.run(  # noqa: S603  # argv is validated above; shell=False by list form
-        cmd,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        # Never the server's terminal: a prompt must not wait for an answer (see above).
-        stdin=subprocess.DEVNULL,
-        # shell=False is the default when passing a list — shell injection is impossible
-    )
+    try:
+        result = subprocess.run(  # noqa: S603  # argv is validated above; shell=False by list form
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            # Never the server's terminal: a prompt must not wait for an answer (see above).
+            stdin=subprocess.DEVNULL,
+            # shell=False is the default when passing a list — shell injection is impossible
+        )
+    except OSError as failure:
+        if failure.errno == errno.E2BIG:
+            # Sizes only: the argument is user text and stays out of the log.
+            logger.warning(
+                "taskwarrior argument list refused by the kernel",
+                extra={"argv_items": len(cmd), "argv_bytes": sum(len(a.encode()) for a in cmd)},
+            )
+            raise ArgumentTooLong("A value is too long for the task store") from failure
+        raise
 
     if result.returncode == 2:
         stderr = result.stderr.strip()

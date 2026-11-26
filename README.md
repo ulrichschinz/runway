@@ -116,6 +116,12 @@ API_KEY_LEGACY_CUTOFF=2027-01-15
 MCP_MAX_INFLIGHT=32
 MCP_SOURCE_MAX_INFLIGHT=8
 
+# The size in bytes of DATA_ROOT/audit.db (with its -wal and -shm files) above which the backend's
+# hourly measurement of it logs a WARNING ("audit store size") instead of INFO. 100 MiB by default.
+# Nothing deletes audit rows: how long they are kept is the operator's decision (ADR 0047). The
+# deploy compose passes it through. See docs/operations.md, "The size of the audit log".
+AUDIT_DB_WARN_BYTES=104857600
+
 # Comma-separated addresses or CIDR networks of the proxies in front of the backend whose
 # X-Forwarded-For the login limiter believes (in the shipped setup: nginx and the TLS proxy in
 # front of it). Empty believes none: a public peer is then counted as itself, and a loopback
@@ -203,6 +209,16 @@ bcrypt, which read only their first 72 bytes; a login with such a password of 72
 answers `"password_change_required": true` beside the token — set a new password then, because
 after a transition window that login is refused. Every failed login is the same
 `401 Invalid credentials`, whether or not the account exists.
+
+**Field limits.** Every text field a request carries has a maximum length, stated as `maxLength` /
+`maxItems` in the OpenAPI schema (`/api/openapi.json`): a username 256 characters at login and
+registration (registration still refuses more than 64 with `400`), a task description 2 000 characters,
+an annotation and an inbox note 32 768 characters and at most 32 KiB of UTF-8 — the cut the SPA and the
+Android app already make to a capture — `due`/`scheduled`/`wait`/`until`/`recur` 64, a tag 100 and at most
+50 tags, at most 100 `depends`, a profile name 200 and an email 320, each project-plan text 20 000 and
+each plan list at most 500 items of 4 000 characters. A value over its limit is refused with `422`
+before anything is written; MCP tool calls carry the same limits in their input schemas. A value the
+task store still cannot take is `413`, never `500`.
 
 **API key** — per-user, created in the app settings, for agents and automations:
 ```
