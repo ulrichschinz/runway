@@ -21,7 +21,12 @@ argon2-cffi-bindings==25.1.0
 # bcrypt 5 also refuses >72-byte input, which app/auth.py never passes. Kept at 4.0.1 so this
 # change moves one thing at a time; removed entirely by the contract step of brief 0067.
 bcrypt==4.0.1
-python-multipart==0.0.12
+# Not imported by the application: FastAPI needs it only for a route that declares Form/File, and none
+# does (tests/unit/test_dependency_fixes.py holds that). It is in the image anyway — mcp depends on it —
+# so it is pinned here, past CVE-2024-53981 (first fix 0.0.18) and every later advisory OSV listed for
+# 0.0.12 on 2026-11-25 (the last fixed in 0.0.31). 0.0.33 (2026-10-31) rather than 0.0.34, which was
+# nine days old. Finding SEC-005, brief 0072.
+python-multipart==0.0.33
 pydantic-settings==2.15.0
 aiosqlite==0.22.1
 # 0.3.3 held here until 2026-09-18, and for most of that time the MCP server did not work.
