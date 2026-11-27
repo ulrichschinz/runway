@@ -160,6 +160,10 @@ shims:
       inline script, so they report violations now and break under the enforced policy. Either
       they are turned off (docs_url/redoc_url=None — a public-surface change, through the
       migration pattern) or their breakage is accepted in writing; it is not left to happen.
+      Decided by the maintainer on 2026-11-27: they are turned off, in the change that enforces
+      the policy. They are a convenience for the maintainer alone; the served schema stays
+      snapshotted in ops/surfaces/openapi.json, and the brief of that change carries the
+      migration steps.
     evidence: >
       No violation in the console over the soak on any SPA view, recorded with the date in the
       removing change's brief; violations on /api/docs and /api/redoc are expected and do not
